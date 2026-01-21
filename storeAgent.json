@@ -1,0 +1,58 @@
+{
+  "userJourney": {
+    "start": {
+      "event": "USER_LOOKING_FOR_PRODUCT",
+      "message": "Hi! What kind of product are you looking for today?"
+    },
+    "agents": [
+      {
+        "agentId": "store_agent",
+        "title": "Store Agent",
+        "status": "active",
+        "action": "Find products based on user transaction...",
+        "output": {
+          "products": [
+           {
+                    "id": "ut-21",
+                    "userId": "u1",
+                    "productId": "p2",
+                    "name":"Peter England Shirt",
+                    "reason":"Peter England Shirt was ordered for user Arjun",
+                    "qty": 1,
+                    "month": "Dec",
+                    "date": "2025-12-09",
+                    "mode": "Offline",
+                    "price":"3000",
+                    "orderStatus": "Pending"
+                    }  
+          ],
+          "message": "Here are some products curated for you."
+        }
+      },
+      
+      {
+        "agentId": "payment_agent",
+        "title": "Payment Agent",
+        "status": "pending",
+        "action": "Waiting for UPI Payment...",
+        "inputRequired": true,
+        "output": {
+          "message": "Enter your UPI ID to complete payment."
+        }
+      },
+    
+      {
+        "agentId": "loyalty_agent",
+        "title": "Loyalty & Offers Agent",
+        "status": "pending",
+        "action": "Applying points & coupons...",
+        "output": {
+          "coupon": "SAVE300",
+          "points": 120,
+          "message": "You saved \u20b9420 with Loyalty Points & Coupon!"
+        }
+      }
+      
+    ]
+  }
+}

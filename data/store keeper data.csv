@@ -1,0 +1,101 @@
+﻿ID,Date,User Name,Product,Qty,Mode,Store Name,Status,Amount,Address,Phone
+30001,12/1/2025,Amit Sen,Levis Jeans,2,Offline,Quest Mall Kolkata,Complete,2999,11 Lake Road Kolkata,9001001
+30002,12/1/2025,Riya Ghosh,Puma Sneakers,1,Offline,South City Mall Kolkata,Complete,4999,12 Lake Road Kolkata,9001002
+30003,12/2/2025,Sourav Paul,Nike Sports Tee,3,Offline,Axis Mall Sector V Kolkata,Complete,1599,13 Lake Road Kolkata,9001003
+30004,12/2/2025,Ananya Roy,Biba Kurti,2,Offline,City Centre Salt Lake Kolkata,Complete,3499,14 Lake Road Kolkata,9001004
+30005,12/3/2025,Arjun Banerjee,Raymond Shirt,1,Offline,Mani Square Mall Kolkata,Complete,2499,15 Lake Road Kolkata,9001005
+30006,12/3/2025,Priya Das,Max Dress,2,Offline,Acropolis Mall Kolkata,Complete,1999,16 Lake Road Kolkata,9001006
+30007,12/4/2025,Rahul Mitra,UCB Jacket,1,Offline,Quest Mall Kolkata,Complete,5999,17 Lake Road Kolkata,9001007
+30008,12/4/2025,Neha Chatterjee,Allen Solly Top,3,Offline,South City Mall Kolkata,Complete,2299,18 Lake Road Kolkata,9001008
+30009,12/5/2025,Debjit Mukherjee,Woodland Shoes,1,Offline,City Centre New Town Kolkata,Complete,6499,19 Lake Road Kolkata,9001009
+30010,12/5/2025,Ishita Mallick,FabIndia Saree,2,Offline,Diamond Plaza Mall Kolkata,Complete,7999,20 Lake Road Kolkata,9001010
+30011,12/6/2025,Ankit Saha,Adidas Shorts,1,Offline,Axis Mall Sector V Kolkata,Complete,1899,21 Lake Road Kolkata,9001011
+30012,12/6/2025,Shreya Bose,Only Denim Jacket,2,Offline,Quest Mall Kolkata,Complete,4299,22 Lake Road Kolkata,9001012
+30013,12/7/2025,Kunal Dey,HRX Track Pants,3,Offline,South City Mall Kolkata,Complete,2199,23 Lake Road Kolkata,9001013
+30014,12/7/2025,Payel Sarkar,Zara Skirt,1,Offline,Acropolis Mall Kolkata,Complete,2599,24 Lake Road Kolkata,9001014
+30015,12/8/2025,Ritwik Ghosh,US Polo T-Shirt,2,Offline,City Centre Salt Lake Kolkata,Complete,1799,25 Lake Road Kolkata,9001015
+30016,12/8/2025,Nilanjan Das,Reebok Track Suit,1,Offline,Mani Square Mall Kolkata,Complete,3999,26 Lake Road Kolkata,9001016
+30017,12/9/2025,Saheli Mukherjee,Forever 21 Top,2,Offline,Quest Mall Kolkata,Complete,1899,27 Lake Road Kolkata,9001017
+30018,12/9/2025,Abhishek Kar,Peter England Shirt,1,Offline,South City Mall Kolkata,Complete,2199,28 Lake Road Kolkata,9001018
+30019,12/10/2025,Moumita Roy,Bata Heels,2,Offline,Diamond Plaza Mall Kolkata,Complete,2499,29 Lake Road Kolkata,9001019
+30020,12/10/2025,Rohan Dutta,Campus Shoes,1,Offline,Axis Mall Sector V Kolkata,Complete,1999,30 Lake Road Kolkata,9001020
+30021,12/11/2025,Sweta Pal,Aurelia Kurti,2,Offline,City Centre New Town Kolkata,Complete,2699,31 Lake Road Kolkata,9001021
+30022,12/11/2025,Sayan Ghosh,Jack & Jones Jeans,1,Offline,Quest Mall Kolkata,Complete,3599,32 Lake Road Kolkata,9001022
+30023,12/12/2025,Indranil Bose,Spykar Shirt,3,Offline,South City Mall Kolkata,Complete,2299,33 Lake Road Kolkata,9001023
+30024,12/12/2025,Ankita Dey,Libas Kurti Set,1,Offline,Acropolis Mall Kolkata,Complete,3299,34 Lake Road Kolkata,9001024
+30025,12/13/2025,Pratik Sinha,Levis Jacket,2,Offline,Mani Square Mall Kolkata,Complete,5499,35 Lake Road Kolkata,9001025
+30026,12/13/2025,Ritika Ghosal,Clarks Sandals,1,Offline,Diamond Plaza Mall Kolkata,Complete,2899,36 Lake Road Kolkata,9001026
+30027,12/14/2025,Soham Banerjee,Nike Hoodie,2,Offline,Axis Mall Sector V Kolkata,Complete,4299,37 Lake Road Kolkata,9001027
+30028,12/14/2025,Debolina Sen,W B Dress,1,Offline,Quest Mall Kolkata,Complete,1999,38 Lake Road Kolkata,9001028
+30029,12/15/2025,Arnab Ghosh,Red Tape Shoes,2,Offline,City Centre Salt Lake Kolkata,Complete,3999,39 Lake Road Kolkata,9001029
+30030,12/15/2025,Sharmila Paul,Biba Dupatta,1,Offline,South City Mall Kolkata,Complete,1299,40 Lake Road Kolkata,9001030
+30031,12/16/2025,Rajat Dutta,Van Heusen Blazer,1,Offline,Quest Mall Kolkata,Complete,6999,41 Lake Road Kolkata,9001031
+30032,12/16/2025,Priyanka Kar,Only Skirt,2,Offline,Acropolis Mall Kolkata,Complete,2399,42 Lake Road Kolkata,9001032
+30033,12/17/2025,Debayan Roy,Allen Solly Trousers,1,Offline,Axis Mall Sector V Kolkata,Complete,3199,43 Lake Road Kolkata,9001033
+30034,12/17/2025,Anusha Das,Global Desi Kurti,2,Offline,City Centre New Town Kolkata,Complete,2799,44 Lake Road Kolkata,9001034
+30035,12/18/2025,Partha Sen,HRX Running Shoes,1,Offline,Mani Square Mall Kolkata,Complete,4999,45 Lake Road Kolkata,9001035
+30036,12/18/2025,Riya Mondal,Max Cardigan,2,Offline,Quest Mall Kolkata,Complete,1899,46 Lake Road Kolkata,9001036
+30037,12/19/2025,Kaushik Pal,Wrangler Jeans,1,Offline,South City Mall Kolkata,Complete,3399,47 Lake Road Kolkata,9001037
+30038,12/19/2025,Monalisa Ray,Biba Palazzo,2,Offline,Acropolis Mall Kolkata,Complete,2599,48 Lake Road Kolkata,9001038
+30039,12/20/2025,Saptarshi Das,Adidas Cap,1,Offline,Axis Mall Sector V Kolkata,Complete,999,49 Lake Road Kolkata,9001039
+30040,12/20/2025,Shreya Paul,Zudio Top,2,Offline,Quest Mall Kolkata,Complete,1299,50 Lake Road Kolkata,9001040
+30041,12/21/2025,Ayan Mukherjee,Puma Track Pants,1,Offline,South City Mall Kolkata,Complete,2199,51 Lake Road Kolkata,9001041
+30042,12/21/2025,Ritika Banerjee,Libas Kurti,2,Offline,Acropolis Mall Kolkata,Complete,2799,52 Lake Road Kolkata,9001042
+30043,12/22/2025,Soumyajit Paul,Nike Running Shoes,1,Offline,Quest Mall Kolkata,Complete,6499,53 Lake Road Kolkata,9001043
+30044,12/22/2025,Debarati Ghosh,Biba Saree,2,Offline,City Centre Salt Lake Kolkata,Complete,5999,54 Lake Road Kolkata,9001044
+30045,12/23/2025,Anirban Saha,US Polo Shirt,1,Offline,Axis Mall Sector V Kolkata,Complete,2499,55 Lake Road Kolkata,9001045
+30046,12/23/2025,Sohini Das,Only Top,2,Offline,Mani Square Mall Kolkata,Complete,1899,56 Lake Road Kolkata,9001046
+30047,12/24/2025,Rohit Chakraborty,Allen Solly Blazer,1,Offline,Quest Mall Kolkata,Complete,6999,57 Lake Road Kolkata,9001047
+30048,12/24/2025,Payel Mukherjee,Max Long Dress,2,Offline,South City Mall Kolkata,Complete,2999,58 Lake Road Kolkata,9001048
+30049,12/25/2025,Subhajit Dutta,Reebok Sports Shoes,1,Offline,City Centre New Town Kolkata,Complete,4899,59 Lake Road Kolkata,9001049
+30050,12/25/2025,Ananya Choudhury,Global Desi Kurta,2,Offline,Acropolis Mall Kolkata,Complete,2699,60 Lake Road Kolkata,9001050
+30051,12/26/2025,Kaustav Ghosh,Spykar Denim Jeans,1,Offline,Mani Square Mall Kolkata,Complete,3499,61 Lake Road Kolkata,9001051
+30052,12/26/2025,Rimple Kaur,Libas Palazzo Set,2,Offline,Quest Mall Kolkata,Complete,3299,62 Lake Road Kolkata,9001052
+30053,12/27/2025,Sagnik Chatterjee,HRX Gym Vest,1,Offline,Axis Mall Sector V Kolkata,Complete,1499,63 Lake Road Kolkata,9001053
+30054,12/27/2025,Madhurima Sen,Bata Flat Sandals,2,Offline,Diamond Plaza Mall Kolkata,Complete,1999,64 Lake Road Kolkata,9001054
+30055,12/28/2025,Prasenjit Paul,Woodland Casual Shoes,1,Offline,South City Mall Kolkata,Complete,5599,65 Lake Road Kolkata,9001055
+30056,12/28/2025,Riya Sengupta,Zara Winter Sweater,2,Offline,Quest Mall Kolkata,Complete,3799,66 Lake Road Kolkata,9001056
+30057,12/29/2025,Anupam Ghosal,Van Heusen Formal Shirt,1,Offline,City Centre Salt Lake Kolkata,Complete,2699,67 Lake Road Kolkata,9001057
+30058,12/29/2025,Taniya Roy,Only Denim Skirt,2,Offline,Acropolis Mall Kolkata,Complete,2399,68 Lake Road Kolkata,9001058
+30059,12/30/2025,Debanjan Pal,Nike Sports Cap,1,Offline,Axis Mall Sector V Kolkata,Complete,999,69 Lake Road Kolkata,9001059
+30060,12/30/2025,Pallavi Ghosh,Biba Anarkali Suit,2,Offline,Mani Square Mall Kolkata,Complete,7999,70 Lake Road Kolkata,9001060
+30061,12/31/2025,Abir Sengupta,US Polo Casual Belt,1,Offline,Quest Mall Kolkata,Complete,1599,71 Lake Road Kolkata,9001061
+30062,12/31/2025,Deblina Basu,Max Woolen Cardigan,2,Offline,South City Mall Kolkata,Complete,2499,72 Lake Road Kolkata,9001062
+30063,1/1/2026,Arindam Mondal,Adidas Training Shoes,1,Offline,City Centre New Town Kolkata,Complete,5899,73 Lake Road Kolkata,9001063
+30064,1/1/2026,Shreya Mukhopadhyay,Global Desi Dupatta,2,Offline,Acropolis Mall Kolkata,Complete,1299,74 Lake Road Kolkata,9001064
+30065,1/2/2026,Suman Halder,Allen Solly Polo T-Shirt,1,Offline,Axis Mall Sector V Kolkata,Complete,1999,75 Lake Road Kolkata,9001065
+30066,1/2/2026,Roshni Ghosh,Libas Cotton Kurti,2,Offline,Quest Mall Kolkata,Complete,2199,76 Lake Road Kolkata,9001066
+30067,1/3/2026,Tanmoy Chakraborty,Campus Running Shoes,1,Offline,South City Mall Kolkata,Complete,2799,77 Lake Road Kolkata,9001067
+30068,1/3/2026,Ankita Mukherjee,Zudio Casual Top,2,Offline,Diamond Plaza Mall Kolkata,Complete,999,78 Lake Road Kolkata,9001068
+30069,1/4/2026,Rahul Naskar,HRX Track Jacket,1,Offline,Axis Mall Sector V Kolkata,Complete,3999,79 Lake Road Kolkata,9001069
+30070,1/4/2026,Snigdha Banik,Bata Office Heels,2,Offline,City Centre Salt Lake Kolkata,Complete,2699,80 Lake Road Kolkata,9001070
+30071,1/5/2026,Aritra Banerjee,Levis Slim Fit Jeans,1,Offline,Quest Mall Kolkata,Complete,3299,81 Lake Road Kolkata,9001071
+30072,1/5/2026,Debolina Chakrabarti,Only Winter Coat,2,Offline,South City Mall Kolkata,Complete,5999,82 Lake Road Kolkata,9001072
+30073,1/6/2026,Sourish Mallick,Puma Training Shorts,1,Offline,Axis Mall Sector V Kolkata,Complete,1799,83 Lake Road Kolkata,9001073
+30074,1/6/2026,Madhubanti Roy,Biba Cotton Saree,2,Offline,City Centre Salt Lake Kolkata,Complete,4599,84 Lake Road Kolkata,9001074
+30075,1/7/2026,Niloy Ghosh,Nike Full Sleeve Tee,1,Offline,Mani Square Mall Kolkata,Complete,2199,85 Lake Road Kolkata,9001075
+30076,1/7/2026,Rupsa Dutta,Libas Straight Kurti,2,Offline,Acropolis Mall Kolkata,Complete,2499,86 Lake Road Kolkata,9001076
+30077,1/8/2026,Animesh Saha,Woodland Leather Shoes,1,Offline,Diamond Plaza Mall Kolkata,Complete,6799,87 Lake Road Kolkata,9001077
+30078,1/8/2026,Srijita Paul,Zudio Casual Hoodie,2,Offline,Quest Mall Kolkata,Complete,1599,88 Lake Road Kolkata,9001078
+30079,1/9/2026,Paromita Sen,Max Palazzo Pants,2,Offline,South City Mall Kolkata,Complete,1999,89 Lake Road Kolkata,9001079
+30080,1/9/2026,Debraj Mitra,Van Heusen Office Shirt,1,Offline,Axis Mall Sector V Kolkata,Complete,2799,90 Lake Road Kolkata,9001080
+30081,1/10/2026,Anindita Ghosal,Aurelia Printed Kurti,2,Offline,City Centre New Town Kolkata,Complete,2399,91 Lake Road Kolkata,9001081
+30082,1/10/2026,Rajdeep Pal,HRX Training Joggers,1,Offline,Quest Mall Kolkata,Complete,3199,92 Lake Road Kolkata,9001082
+30083,1/11/2026,Soham Malakar,US Polo Casual Shirt,1,Offline,South City Mall Kolkata,Complete,2599,93 Lake Road Kolkata,9001083
+30084,1/11/2026,Indrani Bose,Bata Comfort Flats,2,Offline,Diamond Plaza Mall Kolkata,Complete,1899,94 Lake Road Kolkata,9001084
+30085,1/12/2026,Abhishek Mondal,Allen Solly Chinos,1,Offline,Axis Mall Sector V Kolkata,Complete,3499,95 Lake Road Kolkata,9001085
+30086,1/12/2026,Tista Mukhopadhyay,Only Knitted Sweater,2,Offline,Quest Mall Kolkata,Complete,2899,96 Lake Road Kolkata,9001086
+30087,1/13/2026,Arpan Dey,Campus Casual Sneakers,1,Offline,South City Mall Kolkata,Complete,2499,97 Lake Road Kolkata,9001087
+30088,1/13/2026,Meghna Sarkar,Global Desi Long Kurta,2,Offline,Acropolis Mall Kolkata,Complete,3199,98 Lake Road Kolkata,9001088
+30089,1/14/2026,Subham Ghoshal,Puma Sports Backpack,1,Offline,Mani Square Mall Kolkata,Complete,1999,99 Lake Road Kolkata,9001089
+30090,1/14/2026,Priyanka Nandi,Zara Office Skirt,2,Offline,Quest Mall Kolkata,Complete,2699,100 Lake Road Kolkata,9001090
+30091,1/15/2026,Saikat Lahiri,Reebok Running Shoes,1,Offline,City Centre Salt Lake Kolkata,Complete,5299,101 Lake Road Kolkata,9001091
+30092,1/15/2026,Sharmistha Dutta,Biba Silk Dupatta,2,Offline,South City Mall Kolkata,Complete,1799,102 Lake Road Kolkata,9001092
+30093,1/16/2026,Anup Roy,Levis Denim Jacket,1,Offline,Axis Mall Sector V Kolkata,Complete,5999,103 Lake Road Kolkata,9001093
+30094,1/16/2026,Poulomi Ghosh,Max Long Shrug,2,Offline,Quest Mall Kolkata,Complete,2299,104 Lake Road Kolkata,9001094
+30095,1/17/2026,Debasish Paul,Spykar Slim Jeans,1,Offline,Mani Square Mall Kolkata,Complete,3399,105 Lake Road Kolkata,9001095
+30096,1/17/2026,Ananya Banik,Libas Festive Kurti,2,Offline,Acropolis Mall Kolkata,Complete,2999,106 Lake Road Kolkata,9001096
+30097,1/18/2026,Rahul Sanyal,Nike Sports Jacket,1,Offline,South City Mall Kolkata,Complete,6499,107 Lake Road Kolkata,9001097
+30098,1/18/2026,Moumi Chatterjee,Zudio Cotton Top,2,Offline,Diamond Plaza Mall Kolkata,Complete,1099,108 Lake Road Kolkata,9001098
+30099,1/19/2026,Sayan Bhattacharya,HRX Fitness Gloves,1,Offline,Axis Mall Sector V Kolkata,Complete,999,109 Lake Road Kolkata,9001099
+30100,1/19/2026,Trisha Banerjee,Bata Winter Boots,2,Offline,City Centre New Town Kolkata,Complete,4899,110 Lake Road Kolkata,9001100

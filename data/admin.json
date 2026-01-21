@@ -1,0 +1,59 @@
+{
+  "users": [
+    {"id": "u1", "name": "Arjun", "phone": "555-0101", "address": "123 , Kolkata , Sector V", "purchases": ["p1","p3", "p3","p2"]},
+    {"id": "u2", "name": "Akash", "phone": "555-0202", "address": "456 Oak Ave, Ballygange", "purchases": ["p2"]},
+    {"id": "u3", "name": "Rosy", "phone": "555-0303", "address": "789 Pine Ln, Park Street", "purchases": ["p1", "p2", "p3"]}
+  ],
+  "storeStats": {
+    "productsSold": [
+      {
+        "productId": "p1",
+        "count": 12
+      },
+      {
+        "productId": "p2",
+        "count": 8
+      },
+      {
+        "productId": "p3",
+        "count": 5
+      }
+    ],
+    "paymentsFailed": 6,
+    "paymentsSuccess": 40
+  },
+  "products": [
+    {"id": "p1", "name": "Raymond Shirt","image": "/images/mobile.png","price": 1789},
+    {"id": "p2", "name": "Peter England Shirt","image": "/images/mobile.png","price": 3000},
+    {"id": "p3", "name": "Raymond Pant","image": "/images/mobile.png","price": 13000},
+    {"id": "p4", "name": "Peter England Pant","image": "/images/mobile.png","price": 4500}
+  ],
+  "storeKeepers": [
+    {"id": "sk1", "name": "Manager Dave","store_name":"Axis Mall,Sector V, Ground Floor"},
+    {"id": "sk2", "name": "Manager Eve","store_name":"Zudio , Ground Floor"},
+    {"id": "sk3", "name": "Manager Harry","store_name":"Zudio Park Street, Ground Floor"}
+  ],
+  "transactions": [ 
+    {"id": 1, "userId": "u1", "productId": "p1", "qty": 1, "month": "Jan", "date": "2025-01-15", "mode": "Online", "amount": 1789, "orderStatus": "Complete"},
+    {"id": 2, "userId": "u2", "productId": "p2", "qty": 2, "month": "Jan", "date": "2025-01-20", "mode": "Offline", "amount": 3000, "storeId":"sk1", "orderStatus": "In Progress"},
+    {"id": 3, "userId": "u3", "productId": "p3", "qty": 1, "month": "Feb", "date": "2025-02-05", "mode": "Online", "amount": 3000, "orderStatus": "New"},
+    {"id": 4, "userId": "u1", "productId": "p3", "qty": 1, "month": "Feb", "date": "2025-02-14", "mode": "Offline", "amount": 3000,  "storeId":"sk2","orderStatus": "Complete"},
+    {"id": 5, "userId": "u2", "productId": "p1", "qty": 1, "month": "Mar", "date": "2025-03-01", "mode": "Offline", "amount": 1789, "storeId":"sk1", "orderStatus": "In Progress"},
+    {"id": 6, "userId": "u3", "productId": "p2", "qty": 3, "month": "Mar", "date": "2025-03-10", "mode": "Online", "amount": 2345, "orderStatus": "New"},
+    {"id": 7, "userId": "u1", "productId": "p2", "qty": 1, "month": "Apr", "date": "2025-04-03", "mode": "Online", "amount": 1000, "orderStatus": "Complete"},
+    {"id": 8, "userId": "u2", "productId": "p3", "qty": 2, "month": "Apr", "date": "2025-04-22", "mode": "Offline", "amount": 13000,  "storeId":"sk2","orderStatus": "In Progress"},
+    {"id": 9, "userId": "u3", "productId": "p1", "qty": 1, "month": "Apr", "date": "2025-04-30", "mode": "Offline", "amount": 1789, "storeId":"sk3", "orderStatus": "New"},
+    {"id": 10, "userId": "u1", "productId": "p1", "qty": 1, "month": "May", "date": "2025-05-12", "mode": "Online", "amount": 1789, "orderStatus": "Complete"},
+    {"id": 11, "userId": "u2", "productId": "p2", "qty": 1, "month": "May", "date": "2025-05-20", "mode": "Offline", "amount": 1000, "storeId":"sk1", "orderStatus": "In Progress"},
+    {"id": 12, "userId": "u3", "productId": "p3", "qty": 2, "month": "Jun", "date": "2025-06-01", "mode": "Online", "amount": 13000, "orderStatus": "New"},
+    {"id": 13, "userId": "u1", "productId": "p1", "qty": 1, "month": "Jun", "date": "2025-06-15", "mode": "Offline", "amount": 1789, "storeId":"sk3", "orderStatus": "Complete"},
+    {"id": 14, "userId": "u2", "productId": "p3", "qty": 1, "month": "Jul", "date": "2025-07-07", "mode": "Online", "amount": 13000, "orderStatus": "In Progress"},
+    {"id": 15, "userId": "u3", "productId": "p2", "qty": 4, "month": "Jul", "date": "2025-07-10", "mode": "Offline", "amount": 3000, "storeId":"sk2", "orderStatus": "New"},
+    {"id": 16, "userId": "u1", "productId": "p2", "qty": 2, "month": "Aug", "date": "2025-08-10", "mode": "Online", "amount": 3000, "orderStatus": "Complete"},
+    {"id": 17, "userId": "u2", "productId": "p1", "qty": 1, "month": "Aug", "date": "2025-08-18", "mode": "Offline", "amount": 1789, "storeId":"sk1", "orderStatus": "In Progress"},
+    {"id": 18, "userId": "u3", "productId": "p3", "qty": 1, "month": "Sep", "date": "2025-09-01", "mode": "Online", "amount": 13000, "orderStatus": "New"},
+    {"id": 19, "userId": "u1", "productId": "p3", "qty": 2, "month": "Sep", "date": "2025-12-05", "mode": "Offline", "amount": 13000, "storeId":"sk1", "orderStatus": "In Progress"},
+    {"id": 20, "userId": "u2", "productId": "p2", "qty": 1, "month": "Dec", "date": "2025-12-05", "mode": "Online", "amount": 3000, "orderStatus": "In Progress"}
+ 
+  ]
+}

@@ -1,0 +1,19 @@
+/* Custom animations & small tweaks */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 360ms ease both; }
+.animate-slide-up { animation: slide-up 420ms cubic-bezier(.2,.9,.3,1) both; }
+
+/* small scrollbar styling for WebKit */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Ensure body height doesn't overflow on some browsers */
+html, body, #root { height: 100%; }

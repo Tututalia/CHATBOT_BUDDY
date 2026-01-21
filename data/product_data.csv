@@ -1,0 +1,23 @@
+product_id,product_name,category,price,online_available,offline_available,offline_stores
+PRD001,Being Human Hoodie,Hoodie,1999,Yes,Yes,Zudio Ground Floor; Zudio Park Street Ground Floor; ABFRL Store South City
+PRD002,Flying Machine Shorts,Shorts,899,Yes,Yes,Eden Pavilion Mall Third Floor; Mani Square Mall First Floor; ABFRL Store South City
+PRD003,John Players Kurta,Kurta,1299,Yes,Yes,Acropolis Mall Ground Floor; South City Mall Second Floor; ABFRL Store South City
+PRD004,Louis Philippe Shirt,Shirt,2199,Yes,Yes,ABFRL Store South City; Quest Mall First Floor
+PRD005,Arrow Jeans,Jeans,1599,Yes,Yes,Acropolis Mall Ground Floor; Forum Mall Second Floor; ABFRL Store South City
+PRD006,Tommy Hilfiger Sweater,Sweater,2999,Yes,Yes,ABFRL Store South City; City Centre Mall Ground Floor
+PRD007,Woodland Boots,Footwear,3799,Yes,Yes,City Centre Mall Ground Floor; ABFRL Store South City
+PRD008,Levis Leather Jacket,Jacket,5999,Yes,Yes,Zudio Park Street Ground Floor; ABFRL Store South City
+PRD009,Fastrack Watch,Accessories,1499,Yes,Yes,ABFRL Store South City
+PRD010,Spykar Denim,Jeans,1699,Yes,Yes,Mani Square Mall First Floor; Quest Mall First Floor; ABFRL Store South City
+PRD011,Adidas Track Pants,Track Pants,2499,Yes,Yes,City Centre Mall Ground Floor; Axis Mall Ground Floor; ABFRL Store South City
+PRD012,Zara Casual Top,Top,1999,Yes,Yes,Zara Store Park Street; South City Mall Second Floor; ABFRL Store South City
+PRD013,Nike Running Shoes,Footwear,5499,Yes,Yes,ABFRL Store South City; Forum Mall Second Floor
+PRD014,Biba Kurti Set,Kurti Set,3299,Yes,Yes,South City Mall Second Floor; Acropolis Mall First Floor; ABFRL Store South City
+PRD015,US Polo Shirt,Shirt,2799,Yes,Yes,Quest Mall First Floor; Forum Mall Second Floor; ABFRL Store South City
+PRD016,Allen Solly Dress,Dress,3499,Yes,Yes,ABFRL Store South City
+PRD017,Puma Sports Shoes,Footwear,4999,Yes,Yes,Axis Mall Ground Floor; City Centre Mall Ground Floor; ABFRL Store South City
+PRD018,Global Desi Kurti,Kurti,2599,Yes,Yes,Acropolis Mall First Floor; South City Mall Second Floor; ABFRL Store South City
+PRD019,HRX Gym Jacket,Jacket,3999,Yes,Yes,ABFRL Store South City; Quest Mall First Floor
+PRD020,Max Long Dress,Dress,2199,Yes,Yes,Max Store City Centre; Forum Mall Second Floor; ABFRL Store South City
+PRD021,Peter England Trousers,Trousers,2999,Yes,Yes,Forum Mall Second Floor; Quest Mall First Floor; ABFRL Store South City
+PRD022,Only Denim Jacket,Jacket,4299,Yes,Yes,ABFRL Store South City

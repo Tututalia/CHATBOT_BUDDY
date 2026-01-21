@@ -1,0 +1,111 @@
+{
+  "userJourney": {
+    "start": {
+      "event": "USER_LOOKING_FOR_PRODUCT",
+      "message": "Hi! What kind of product are you looking for today?"
+    },
+    "agents": [
+      {
+        "agentId": "recommendation_agent",
+        "title": "Recommendation Agent",
+        "status": "active",
+        "action": "Recommending products based on user request...",
+        "output": {
+          "products": [
+
+             {"id": "p1", "name": "Raymond Shirt","image": "/images/mobile.png","price": 1789,"reason": "Best Cotton Shirts"},
+    {"id": "p2", "name": "Peter England Shirt","image": "/images/mobile.png","price": 3000,"reason": "Best Cotton Shirts , with history"},
+    {"id": "p3", "name": "Raymond Pant","image": "/images/mobile.png","price": 13000,"reason": "Best Cotton Pant"},
+        {"id": "p4", "name": "Peter England Pant","image": "/images/mobile.png","price": 4500,"reason": "Best Cotton Pant"}
+         
+          ],
+          "message": "Here are some products curated for you."
+        }
+      },
+      {
+        "agentId": "inventory_agent",
+        "title": "Inventory Agent",
+        "status": "pending",
+        "action": "Checking nearest store and online inventory...",
+        "output": {
+          "availability": {
+            "online": true,
+            "stores": [
+              
+              {"id": "sk1",
+                "location": "Axis Mall,Sector V, Ground Floor",
+                "stock": "Available"
+              },
+              {"id": "sk2",
+                "location": "Zudio , Ground Floor",
+                "stock": "Limited"
+              },
+              {"id": "sk3",
+                "location": "Zudio Park Street, Ground Floor",
+                "stock": "Limited"
+              }
+            ]
+          },
+          "message": "Inventory checked! Choose Buy Online or nearest store."
+        }
+      },
+      {
+        "agentId": "payment_agent",
+        "title": "Payment Agent",
+        "status": "pending",
+        "action": "Waiting for UPI Payment...",
+        "inputRequired": true,
+        "output": {
+          "message": "Enter your UPI ID to complete payment."
+        }
+      },
+      {
+        "agentId": "fulfillment_agent",
+        "title": "Fulfillment Agent",
+        "status": "pending",
+        "action": "Scheduling delivery...",
+        "output": {
+          "delivery": {
+            "scheduled": true,
+            "date": "Tomorrow, 11 AM - 2 PM"
+          },
+          "message": "Your delivery has been scheduled!"
+        }
+      },
+      {
+        "agentId": "loyalty_agent",
+        "title": "Loyalty & Offers Agent",
+        "status": "pending",
+        "action": "Applying points & coupons...",
+        "output": {
+          "coupon": "SAVE300",
+          "points": 120,
+          "message": "You saved \u20b9420 with Loyalty Points & Coupon!"
+        }
+      },
+      {
+        "agentId": "post_purchase_agent",
+        "title": "Post Purchase Agent",
+        "status": "pending",
+        "action": "Asking for feedback...",
+        "output": {
+          "message": "Would you like to give feedback or request a return?",
+          "options": [
+            "Give Feedback",
+            "Request Return"
+          ]
+        }
+      },
+      {
+        "agentId": "offline_agent",
+        "title": "Offline Purchase Agent",
+        "status": "pending",
+        "action": "Thanks For Purchasing Product , Please visit our Store to Collect it.",
+         "output": {
+         
+          
+        }
+      }
+    ]
+  }
+}
