@@ -227,7 +227,10 @@ export default function Pages() {
 
       <main>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route
+            path="/"
+            element={<Home onLoginClick={() => setShowLoginModal(true)} />}
+          />
           <Route path="/user" element={<UserJourney />} />
           <Route path="/store" element={<StoreKeeper />} />
           <Route path="/admin" element={<Admin />} />
