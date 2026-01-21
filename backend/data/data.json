@@ -1,0 +1,69 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Amit",
+      "purchases": [
+        1,
+        2,
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Rohit",
+      "purchases": [
+        2,
+        3
+      ]
+    }
+  ],
+  "products": [
+    {
+      "id": 1,
+      "name": "Mobile Phone",
+      "price": 12999,
+      "image": "/images/mobile.png"
+    },
+    {
+      "id": 2,
+      "name": "Headphones",
+      "price": 1999,
+      "image": "/images/headphones.png"
+    },
+    {
+      "id": 3,
+      "name": "Laptop",
+      "price": 55999,
+      "image": "/images/laptop.png"
+    }
+  ],
+  "storeKeepers": [
+    {
+      "id": 1,
+      "name": "Suresh"
+    },
+    {
+      "id": 2,
+      "name": "Vaibhav"
+    }
+  ],
+  "storeStats": {
+    "productsSold": [
+      {
+        "productId": 1,
+        "count": 12
+      },
+      {
+        "productId": 2,
+        "count": 8
+      },
+      {
+        "productId": 3,
+        "count": 5
+      }
+    ],
+    "paymentsFailed": 6,
+    "paymentsSuccess": 40
+  }
+}

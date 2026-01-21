@@ -1,0 +1,98 @@
+﻿ID,Date,User Name,Product,Qty,Mode,Store Name,Status,Amount,Address,Phone
+10270,12/28/2025,Sonal Das,Being Human Hoodie,1,Offline,Zudio Ground Floor,Complete,1999,128 Main Street City 8,5551128
+10071,12/27/2025,Priya Khan,Flying Machine Shorts,2,Offline,Eden Pavilion Mall Third Floor,Complete,899,36 Main Street City 16,5551036
+10149,12/27/2025,Vidya Saxena,John Players Kurta,3,Offline,Acropolis Mall Ground Floor,Complete,1299,78 Main Street City 18,5551078
+10176,12/24/2025,Rohit Bhandari,Louis Philippe Shirt,2,Online,NA,Complete,1899,89 Main Street City 9,5551089
+10223,12/24/2025,Vidya Saxena,Arrow Jeans,2,Offline,Acropolis Mall Ground Floor,Complete,1599,108 Main Street City 8,5551108
+10126,12/21/2025,Priya Khan,Tommy Hilfiger Sweater,3,Online,NA,Complete,2999,66 Main Street City 6,5551066
+10277,12/21/2025,Rahul Mehta,Woodland Boots,2,Online,NA,Complete,3799,131 Main Street City 11,5551131
+10203,12/20/2025,Anita Gupta,Levis Leather Jacket,2,Offline,Zudio Park Street Ground Floor,Complete,5999,100 Main Street City 20,5551100
+10260,12/20/2025,Ravi Iyer,Fastrack Watch,2,Online,NA,Complete,1499,125 Main Street City 5,5551125
+10240,12/18/2025,Meera Shetty,Spykar Denim,2,Offline,Mani Square Mall First Floor,Complete,1699,116 Main Street City 16,5551116
+10241,12/17/2025,Amit Verma,Adidas Track Pants,1,Offline,City Centre Mall Ground Floor,Complete,2499,140 Main Street City 14,5551140
+10242,12/17/2025,Riya Malhotra,Zara Casual Top,2,Offline,Zara Store Park Street,Complete,1999,141 Main Street City 12,5551141
+10243,12/16/2025,Suresh Nair,Nike Running Shoes,1,Online,NA,Complete,5499,142 Main Street City 10,5551142
+10244,12/16/2025,Kavita Joshi,Biba Kurti Set,2,Offline,South City Mall Second Floor,Complete,3299,143 Main Street City 7,5551143
+10245,12/15/2025,Arjun Patel,US Polo Shirt,1,Offline,Quest Mall First Floor,Complete,2799,144 Main Street City 3,5551144
+10246,12/15/2025,Neha Agarwal,Allen Solly Dress,2,Online,NA,Complete,3499,145 Main Street City 4,5551145
+10247,12/14/2025,Vikram Singh,Puma Sports Shoes,1,Offline,Axis Mall Ground Floor,Complete,4999,146 Main Street City 6,5551146
+10248,12/14/2025,Shweta Roy,Global Desi Kurti,2,Offline,Acropolis Mall First Floor,Complete,2599,147 Main Street City 8,5551147
+10249,12/13/2025,Rahul Naskar,HRX Gym Jacket,1,Online,NA,Complete,3999,148 Main Street City 9,5551148
+10250,12/13/2025,Pooja Sharma,Max Long Dress,2,Offline,Max Store City Centre,Complete,2199,149 Main Street City 11,5551149
+10251,12/12/2025,Ashish Kulkarni,Peter England Trousers,1,Offline,Forum Mall Second Floor,Complete,2999,150 Main Street City 13,5551150
+10252,12/12/2025,Anjali Deshmukh,Only Denim Jacket,2,Online,NA,Complete,4299,151 Main Street City 15,5551151
+10253,12/11/2025,Rakesh Mishra,Reebok Training Shoes,1,Offline,Mani Square Mall Ground Floor,Complete,3899,152 Main Street City 17,5551152
+10254,12/11/2025,Simran Kaur,Libas Cotton Kurti,2,Offline,City Centre Mall First Floor,Complete,1899,153 Main Street City 18,5551153
+10255,12/10/2025,Nikhil Jain,Van Heusen Blazer,1,Online,NA,Complete,6999,154 Main Street City 19,5551154
+10256,12/10/2025,Pallavi Rao,Bata Heels,2,Offline,Bata Store Park Street,Complete,2299,155 Main Street City 20,5551155
+10257,12/9/2025,Deepak Yadav,Wrangler Jeans,1,Offline,Wrangler Store South City,Complete,3199,156 Main Street City 21,5551156
+10258,12/9/2025,Isha Mehta,Aurelia Kurti,2,Online,NA,Complete,2399,157 Main Street City 22,5551157
+10259,12/8/2025,Manoj Tiwari,Campus Casual Shoes,1,Offline,Campus Store City Centre,Complete,1999,158 Main Street City 23,5551158
+10261,12/8/2025,Tanya Kapoor,Zudio Winter Sweater,2,Offline,Zudio Ground Floor,Complete,1799,159 Main Street City 24,5551159
+10262,12/7/2025,Rohan Mallick,Jack & Jones Jeans,1,Online,NA,Complete,3599,160 Main Street City 25,5551160
+10263,12/7/2025,Sneha Iyer,Biba Dupatta,2,Offline,South City Mall Ground Floor,Complete,1299,161 Main Street City 26,5551161
+10264,12/6/2025,Pranav Kulkarni,Skechers Walking Shoes,1,Offline,Skechers Store Quest Mall,Complete,4899,162 Main Street City 27,5551162
+10265,12/6/2025,Ankita Sengupta,Forever 21 Top,2,Online,NA,Complete,1999,163 Main Street City 28,5551163
+10266,12/5/2025,Siddharth Bose,Arrow Formal Shirt,1,Offline,Arrow Store Park Street,Complete,2499,164 Main Street City 29,5551164
+10267,12/5/2025,Priyanka Sen,Max Palazzo Pants,2,Offline,Max Store Mani Square,Complete,1899,165 Main Street City 30,5551165
+10268,12/4/2025,Ayush Chatterjee,Nike Sports Cap,1,Online,NA,Complete,999,166 Main Street City 31,5551166
+10269,12/4/2025,Monika Arora,Libas Festive Kurti,2,Offline,Forum Mall Ground Floor,Complete,2999,167 Main Street City 32,5551167
+10271,12/3/2025,Rajiv Malhotra,Allen Solly Shirt,1,Offline,Quest Mall First Floor,Complete,2499,168 Main Street City 33,5551168
+10272,12/3/2025,Pooja Nair,Global Desi Dress,2,Offline,South City Mall Second Floor,Complete,3299,169 Main Street City 34,5551169
+10273,12/2/2025,Manish Gupta,HRX Training Shoes,1,Online,NA,Complete,4999,170 Main Street City 35,5551170
+10274,12/2/2025,Ritika Malhotra,Biba Palazzo Set,2,Offline,Acropolis Mall First Floor,Complete,2899,171 Main Street City 36,5551171
+10275,12/1/2025,Sachin Arora,Puma Track Jacket,1,Offline,Axis Mall Ground Floor,Complete,3999,172 Main Street City 37,5551172
+10276,12/1/2025,Anusha Iyer,Libas Printed Kurti,2,Offline,Forum Mall Ground Floor,Complete,2199,173 Main Street City 38,5551173
+10278,11/30/2025,Kunal Verma,Campus Sports Shoes,1,Offline,City Centre Mall First Floor,Complete,2799,174 Main Street City 39,5551174
+10279,11/30/2025,Rashmi Kulkarni,Only Casual Top,2,Online,NA,Complete,1799,175 Main Street City 40,5551175
+10280,11/29/2025,Abhishek Rana,Wrangler Denim Jacket,1,Offline,Wrangler Store South City,Complete,5299,176 Main Street City 41,5551176
+10281,11/29/2025,Sonal Khanna,Max Winter Cardigan,2,Offline,Max Store City Centre,Complete,1999,177 Main Street City 42,5551177
+10282,11/28/2025,Rohan Kulkarni,Nike Running Shorts,1,Online,NA,Complete,1599,178 Main Street City 43,5551178
+10283,11/28/2025,Ishita Ghosh,Zudio Casual Hoodie,2,Offline,Zudio Ground Floor,Complete,1899,179 Main Street City 44,5551179
+10284,11/27/2025,Deependra Singh,Peter England Blazer,1,Offline,Eden Pavilion Mall Second Floor,Complete,6499,180 Main Street City 45,5551180
+10285,11/27/2025,Smita Banerjee,Aurelia Straight Kurti,2,Offline,Quest Mall Second Floor,Complete,2399,181 Main Street City 46,5551181
+10286,11/26/2025,Ashok Menon,Reebok Gym Backpack,1,Online,NA,Complete,1999,182 Main Street City 47,5551182
+10287,11/26/2025,Nandita Roy,Libas Festive Saree,2,Offline,South City Mall Ground Floor,Complete,4999,183 Main Street City 48,5551183
+10288,11/25/2025,Prashant Mishra,US Polo Casual Shoes,1,Offline,Forum Mall First Floor,Complete,3599,184 Main Street City 49,5551184
+10289,11/25/2025,Tanvi Kulkarni,Only Pleated Skirt,2,Online,NA,Complete,2199,185 Main Street City 50,5551185
+10290,11/24/2025,Rahul Kapoor,Woodland Leather Belt,1,Offline,Woodland Store Park Street,Complete,1599,186 Main Street City 51,5551186
+10291,11/24/2025,Sneha Malhotra,Biba Anarkali Kurta,2,Offline,Acropolis Mall Ground Floor,Complete,6999,187 Main Street City 52,5551187
+10292,11/23/2025,Arvind Shetty,Adidas Sports T-Shirt,1,Online,NA,Complete,1899,188 Main Street City 53,5551188
+10293,11/23/2025,Ritu Agarwal,Max Denim Jacket,2,Offline,Max Store Mani Square,Complete,4299,189 Main Street City 54,5551189
+10294,11/22/2025,Nikhil Bansal,Jack & Jones Slim Jeans,1,Offline,Jack & Jones Store Quest Mall,Complete,3899,190 Main Street City 55,5551190
+10295,11/22/2025,Anjali Mathur,Libas Cotton Dupatta,2,Online,NA,Complete,1299,191 Main Street City 56,5551191
+10296,11/21/2025,Harsh Vardhan,Puma Training Cap,1,Online,NA,Complete,999,192 Main Street City 57,5551192
+10297,11/21/2025,Pallavi Kulkarni,Zara Office Trousers,2,Offline,Zara Store Park Street,Complete,2999,193 Main Street City 58,5551193
+10298,11/20/2025,Saurabh Tripathi,Campus Walking Shoes,1,Offline,Campus Store City Centre,Complete,2499,194 Main Street City 59,5551194
+10299,11/20/2025,Madhuri Deshpande,Bata Comfort Sandals,2,Offline,Bata Store Park Street,Complete,1999,195 Main Street City 60,5551195
+10300,11/19/2025,Akhil Sharma,HRX Zip Hoodie,1,Online,NA,Complete,3499,196 Main Street City 61,5551196
+10301,11/19/2025,Rakesh Choudhary,Allen Solly Formal Shirt,1,Offline,Quest Mall Ground Floor,Complete,2699,197 Main Street City 62,5551197
+10302,11/18/2025,Priyanka Mallick,Global Desi Kurti Set,2,Offline,South City Mall First Floor,Complete,3499,198 Main Street City 63,5551198
+10303,11/18/2025,Anil Verma,Reebok Running Shoes,1,Online,NA,Complete,4899,199 Main Street City 64,5551199
+10304,11/17/2025,Sharmila Ghosh,Max Long Shrug,2,Offline,Max Store City Centre,Complete,2199,200 Main Street City 65,5551200
+10305,11/17/2025,Deepak Kulkarni,Campus Casual Sneakers,1,Offline,Campus Store City Centre,Complete,2599,201 Main Street City 66,5551201
+10306,11/16/2025,Ananya Mukherjee,Libas Straight Kurti,2,Offline,Acropolis Mall Second Floor,Complete,2399,202 Main Street City 67,5551202
+10307,11/16/2025,Varun Khanna,Nike Training Shorts,1,Online,NA,Complete,1699,203 Main Street City 68,5551203
+10308,11/15/2025,Sohini Chakraborty,Biba Festive Saree,2,Offline,Forum Mall Ground Floor,Complete,5999,204 Main Street City 69,5551204
+10309,11/15/2025,Manoj Patil,Woodland Trekking Shoes,1,Offline,Woodland Store Park Street,Complete,6999,205 Main Street City 70,5551205
+10310,11/14/2025,Rituparna Sen,Zudio Cotton Hoodie,2,Offline,Zudio Ground Floor,Complete,1799,206 Main Street City 71,5551206
+10311,11/14/2025,Akash Mehra,HRX Gym Track Pants,1,Online,NA,Complete,2299,207 Main Street City 72,5551207
+10312,11/13/2025,Pallavi Nair,Aurelia Printed Kurti,2,Offline,City Centre Mall First Floor,Complete,2499,208 Main Street City 73,5551208
+10313,11/13/2025,Siddhant Arora,US Polo Denim Shirt,1,Offline,US Polo Store Quest Mall,Complete,3199,209 Main Street City 74,5551209
+10314,11/12/2025,Neelam Joshi,Only Knitted Sweater,2,Online,NA,Complete,2899,210 Main Street City 75,5551210
+10315,11/12/2025,Rahul Saxena,Peter England Formal Trousers,1,Offline,Eden Pavilion Mall First Floor,Complete,2999,211 Main Street City 76,5551211
+10316,11/11/2025,Sunita Kulkarni,Libas Churidar Set,2,Offline,South City Mall Second Floor,Complete,3299,212 Main Street City 77,5551212
+10317,11/11/2025,Amitabh Roy,Puma Sports Backpack,1,Online,NA,Complete,1999,213 Main Street City 78,5551213
+10318,11/10/2025,Ankush Jain,Zara Slim Fit Jeans,1,Offline,Zara Store Park Street,Complete,3899,214 Main Street City 79,5551214
+10319,11/10/2025,Shilpa Mehta,Bata Office Heels,2,Offline,Bata Store Park Street,Complete,2699,215 Main Street City 80,5551215
+10320,11/9/2025,Karan Malhotra,Jack & Jones Hoodie,1,Online,NA,Complete,3499,216 Main Street City 81,5551216
+10321,11/9/2025,Rachna Pandey,Max Palazzo Pants,2,Offline,Max Store Mani Square,Complete,1899,217 Main Street City 82,5551217
+10322,11/8/2025,Arjun Iyer,Skechers Walking Shoes,1,Offline,Skechers Store Quest Mall,Complete,5299,218 Main Street City 83,5551218
+10323,11/8/2025,Pooja Sengupta,Forever 21 Crop Top,2,Online,NA,Complete,1999,219 Main Street City 84,5551219
+10324,11/7/2025,Rohit Malhotra,Van Heusen Office Blazer,1,Offline,Van Heusen Store City Centre,Complete,6999,220 Main Street City 85,5551220
+10325,11/7/2025,Meenakshi Rao,Libas Festive Dupatta,2,Online,NA,Complete,1499,221 Main Street City 86,5551221
+10326,11/6/2025,Saurav Chatterjee,Adidas Training Shoes,1,Offline,Adidas Store South City,Complete,5899,222 Main Street City 87,5551222
+10327,11/6/2025,Monika Bansal,Zudio Oversized T-Shirt,2,Offline,Zudio Ground Floor,Complete,1299,223 Main Street City 88,5551223
+10328,11/5/2025,Rajesh Pillai,HRX Sports Jacket,1,Online,NA,Complete,3999,224 Main Street City 89,5551224
+10329,11/5/2025,Tanushree Dutta,Biba Cotton Anarkali,2,Offline,Acropolis Mall Ground Floor,Complete,7999,225 Main Street City 90,5551225
+10330,11/4/2025,Abhinav Joshi,Nike Dri-Fit T-Shirt,1,Online,NA,Complete,1899,226 Main Street City 91,5551226
