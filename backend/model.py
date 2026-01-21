@@ -1,6 +1,6 @@
 
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 
 class Product(BaseModel):
@@ -22,3 +22,11 @@ class CSVProduct(BaseModel):
     festival: str
     season: str
     image_reference: str
+
+
+class Customer(BaseModel):
+    customer_id: str
+    customer_name: str
+    loyalty_points: int
+    order_history: List[str]
+    pending_orders: List[str]
