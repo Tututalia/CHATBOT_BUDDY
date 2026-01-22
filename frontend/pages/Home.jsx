@@ -8,14 +8,14 @@ export default function Home({ onLoginClick }) {
       {/* Logo and Welcome Section */}
       <div className="text-center mb-12">
         <div className="mb-6">
-          <div className="inline-block bg-gradient-to-br from-red-600 to-orange-500 px-8 py-3 rounded-lg">
-            <div className="text-white text-lg font-bold tracking-wide">
-              FASHION & RETAIL
-            </div>
-          </div>
+          <img
+            src="/images/abfrl-icon.png"
+            alt="ABFRL Logo"
+            className="w-20 h-20 object-contain mx-auto"
+          />
         </div>
 
-        <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-orange-600 mb-3">
+        <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-orange-600 mb-5 pb-2 leading-tight">
           Welcome to ABFRL Agentic Dashboard
         </h1>
 
@@ -29,7 +29,7 @@ export default function Home({ onLoginClick }) {
       <div className="max-w-7xl mx-auto px-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Customer Journey Card */}
-          <div className="rounded-2xl overflow-hidden shadow-lg">
+          <div className="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-2xl flex flex-col">
             <div className="bg-gradient-to-br from-orange-600 to-orange-700 p-6 text-white">
               <div className="bg-white/20 w-14 h-14 rounded-xl flex items-center justify-center mb-3">
                 <svg
@@ -48,17 +48,17 @@ export default function Home({ onLoginClick }) {
               <div className="w-12 h-0.5 bg-white/50"></div>
             </div>
 
-            <div className="bg-white p-6">
-              <p className="text-gray-600 text-sm mb-6 min-h-[90px]">
+            <div className="bg-white p-6 flex flex-col flex-grow">
+              <p className="text-gray-600 text-sm mb-6">
                 Different AI agents to interact with customers in real time to
                 fulfill purchase orders from product selection through
                 post-purchase support
               </p>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 mt-auto">
                 <button
                   onClick={onLoginClick}
-                  className="flex-1 px-4 py-2.5 border-2 border-red-600 text-red-600 rounded-lg font-semibold hover:bg-red-50 transition-colors flex items-center justify-center gap-1 text-sm"
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-700 to-orange-600 text-white rounded-lg font-semibold hover:from-red-800 hover:to-orange-700 transition-all duration-200 flex items-center justify-center gap-1 text-sm whitespace-nowrap shadow-md"
                 >
                   Online
                   <svg
@@ -77,7 +77,7 @@ export default function Home({ onLoginClick }) {
                 </button>
                 <button
                   onClick={onLoginClick}
-                  className="flex-1 px-4 py-2.5 border-2 border-red-600 text-red-600 rounded-lg font-semibold hover:bg-red-50 transition-colors flex items-center justify-center gap-1 text-sm"
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg font-semibold hover:from-orange-600 hover:to-yellow-600 transition-all duration-200 flex items-center justify-center gap-1 text-sm whitespace-nowrap shadow-md"
                 >
                   In-Store Kiosk
                   <span>🏪</span>
@@ -87,7 +87,7 @@ export default function Home({ onLoginClick }) {
           </div>
 
           {/* Store Keeper Card */}
-          <div className="rounded-2xl overflow-hidden shadow-lg">
+          <div className="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-2xl flex flex-col">
             <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 p-6 text-white">
               <div className="bg-white/20 w-14 h-14 rounded-xl flex items-center justify-center mb-3">
                 <svg
@@ -106,19 +106,19 @@ export default function Home({ onLoginClick }) {
               <div className="w-12 h-0.5 bg-white/50"></div>
             </div>
 
-            <div className="bg-white p-6">
-              <p className="text-gray-600 text-sm mb-6 min-h-[90px]">
+            <div className="bg-white p-6 flex flex-col flex-grow">
+              <p className="text-gray-600 text-sm mb-6">
                 Manage inventory levels, track orders, monitor store operations,
                 and analyze performance metrics efficiently
               </p>
 
               <button
                 onClick={() => nav("/store")}
-                className="w-full px-4 py-2.5 border-2 border-red-600 text-red-600 rounded-lg font-semibold hover:bg-red-50 transition-colors flex items-center justify-center gap-1 text-sm"
+                className="w-full px-0 py-2 text-orange-600 rounded-lg font-semibold hover:text-orange-700 transition-colors flex items-center gap-1 text-base mt-auto"
               >
                 Manage Store
                 <svg
-                  className="w-3 h-3"
+                  className="w-4 h-4"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -135,7 +135,7 @@ export default function Home({ onLoginClick }) {
           </div>
 
           {/* Operations-Revenue Command Center Card */}
-          <div className="rounded-2xl overflow-hidden shadow-lg">
+          <div className="rounded-2xl overflow-hidden shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-2xl flex flex-col">
             <div className="bg-gradient-to-br from-red-800 to-red-900 p-6 text-white">
               <div className="bg-white/20 w-14 h-14 rounded-xl flex items-center justify-center mb-3">
                 <svg
@@ -156,19 +156,19 @@ export default function Home({ onLoginClick }) {
               <div className="w-12 h-0.5 bg-white/50"></div>
             </div>
 
-            <div className="bg-white p-6">
-              <p className="text-gray-600 text-sm mb-6 min-h-[90px]">
+            <div className="bg-white p-6 flex flex-col flex-grow">
+              <p className="text-gray-600 text-sm mb-6">
                 To be used by regional or zonal leaders to monitor performance
                 and revenue across retail stores through agentic insights
               </p>
 
               <button
                 onClick={() => nav("/admin")}
-                className="w-full px-4 py-2.5 border-2 border-red-600 text-red-600 rounded-lg font-semibold hover:bg-red-50 transition-colors flex items-center justify-center gap-1 text-sm"
+                className="w-full px-0 py-2 text-red-700 rounded-lg font-semibold hover:text-red-800 transition-colors flex items-center gap-1 text-base mt-auto"
               >
-                Open Command Center
+                Open Admin
                 <svg
-                  className="w-3 h-3"
+                  className="w-4 h-4"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"

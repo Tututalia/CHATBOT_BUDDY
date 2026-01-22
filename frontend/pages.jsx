@@ -49,14 +49,28 @@ export default function Pages() {
     navigate("/");
   };
 
+  const handleCustomerJourneyClick = (e) => {
+    e.preventDefault();
+    const loggedIn = localStorage.getItem("loggedInCustomerId");
+    if (loggedIn) {
+      navigate("/user");
+    } else {
+      setShowLoginModal(true);
+    }
+  };
+
   return (
     <div className="bg-[#f5f5f5] min-h-screen">
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-orange-500 rounded-lg"></div>
-              <h1 className="text-xl font-bold text-slate-800">
+              <img
+                src="/images/abfrl-icon.png"
+                alt="ABFRL Logo"
+                className="w-12 h-12 object-contain"
+              />
+              <h1 className="text-3xl font-bold text-slate-800">
                 Agentic Dashboard
               </h1>
             </div>
@@ -68,12 +82,13 @@ export default function Pages() {
                 >
                   Home
                 </Link>
-                <Link
-                  to="/user"
-                  className="text-slate-700 hover:text-red-600 font-medium"
+                <a
+                  href="#"
+                  onClick={handleCustomerJourneyClick}
+                  className="text-slate-700 hover:text-red-600 font-medium cursor-pointer"
                 >
                   Customer Journey
-                </Link>
+                </a>
                 <Link
                   to="/store"
                   className="text-slate-700 hover:text-red-600 font-medium"
