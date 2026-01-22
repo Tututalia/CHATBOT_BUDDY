@@ -149,51 +149,92 @@ export default function UserJourney() {
 
           {/* Profile Card */}
           <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-2xl p-8 shadow-lg">
-            <div className="grid grid-cols-3 gap-8 items-center">
-              {/* Username */}
+            <div className="grid grid-cols-2 gap-8">
+              {/* Left Column - Customer Info */}
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-3 font-semibold">
-                  CUSTOMER NAME
+                  CUSTOMER INFORMATION
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="bg-gradient-to-br from-orange-600 to-orange-700 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="bg-gradient-to-br from-orange-600 to-orange-700 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
                     {getInitials(user.customer_name || user.name)}
                   </div>
-                  <span className="text-2xl font-bold text-gray-800">
-                    {user.customer_name || user.name || "Loading..."}
-                  </span>
+                  <div className="flex-1">
+                    <span className="text-2xl font-bold text-gray-800 block mb-2">
+                      {user.customer_name || user.name || "Loading..."}
+                    </span>
+                    {/* Phone Number */}
+                    {user.phone && (
+                      <div className="flex items-center gap-2 text-gray-600 mb-2">
+                        <svg
+                          className="w-4 h-4 text-orange-600"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                        </svg>
+                        <span className="text-sm font-medium">
+                          {user.phone}
+                        </span>
+                      </div>
+                    )}
+                    {/* Address */}
+                    {user.address && (
+                      <div className="flex items-start gap-2 text-gray-600">
+                        <svg
+                          className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <span className="text-sm font-medium">
+                          {user.address}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Loyalty Points */}
-              <div className="text-center">
-                <p className="text-xs uppercase tracking-wide text-gray-500 mb-3 font-semibold">
-                  LOYALTY POINTS
-                </p>
-                <div className="inline-flex items-center gap-2 bg-white border-3 border-green-500 rounded-2xl px-6 py-3">
-                  <svg
-                    className="w-6 h-6 text-green-600"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  <span className="text-3xl font-bold text-green-600">
-                    {user.loyalty_points || user.loyaltyPoints || 0}
-                  </span>
+              {/* Right Column - Loyalty Points and Customer ID */}
+              <div className="grid grid-cols-2 gap-6">
+                {/* Loyalty Points */}
+                <div className="text-center">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-3 font-semibold">
+                    LOYALTY POINTS
+                  </p>
+                  <div className="inline-flex items-center gap-2 bg-white border-3 border-green-500 rounded-2xl px-6 py-3">
+                    <svg
+                      className="w-6 h-6 text-green-600"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                    <span className="text-3xl font-bold text-green-600">
+                      {user.loyalty_points || user.loyaltyPoints || 0}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              {/* User ID */}
-              <div className="text-right">
-                <p className="text-xs uppercase tracking-wide text-gray-500 mb-3 font-semibold">
-                  CUSTOMER ID
-                </p>
-                <div className="inline-flex items-center gap-2 bg-white border-3 border-orange-500 rounded-2xl px-6 py-3">
-                  <span className="text-2xl text-orange-600 font-bold">#</span>
-                  <span className="text-2xl font-bold text-orange-600">
-                    {user.customer_id || user.id || "00001"}
-                  </span>
+                {/* User ID */}
+                <div className="text-center">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-3 font-semibold">
+                    CUSTOMER ID
+                  </p>
+                  <div className="inline-flex items-center gap-2 bg-white border-3 border-orange-500 rounded-2xl px-6 py-3">
+                    <span className="text-2xl text-orange-600 font-bold">
+                      #
+                    </span>
+                    <span className="text-2xl font-bold text-orange-600">
+                      {user.customer_id || user.id || "00001"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -288,9 +329,28 @@ export default function UserJourney() {
                       <p className="text-sm text-gray-600 mb-2">
                         Category: {prod.category}
                       </p>
-                      <p className="text-xl font-bold text-green-600">
+                      <p className="text-xl font-bold text-green-600 mb-3">
                         ₹{prod.price}
                       </p>
+                      {/* Purchase Date */}
+                      {prod.purchase_date && (
+                        <div className="mb-3 flex items-center gap-2 text-sm text-gray-600">
+                          <svg
+                            className="w-4 h-4 text-orange-600"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <span className="font-medium">
+                            Purchased: {prod.purchase_date}
+                          </span>
+                        </div>
+                      )}
                       <div className="mt-3">
                         <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
                           {prod.season}

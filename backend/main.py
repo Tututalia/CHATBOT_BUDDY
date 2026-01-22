@@ -37,8 +37,8 @@ def load_customer_data():
     try:
         csv_file_path = os.path.join(os.path.dirname(
             __file__), "data", "customer_data.csv")
-        # Using tab separator as shown in the CSV
-        df = pd.read_csv(csv_file_path, sep='\t')
+        # Using comma separator
+        df = pd.read_csv(csv_file_path)
         return df
     except FileNotFoundError:
         return None
@@ -87,51 +87,51 @@ def get_product_by_id_from_database(product_id: str):
     return product
 
 
-@app.get("/productdatabase/category/{category}")
-def get_products_by_category(category: str):
-    """Get products by category using pandas"""
-    df = load_csv_data()
+# @app.get("/productdatabase/category/{category}")
+# def get_products_by_category(category: str):
+#     """Get products by category using pandas"""
+#     df = load_csv_data()
 
-    if df is None:
-        return {"error": "Failed to load CSV data"}
+#     if df is None:
+#         return {"error": "Failed to load CSV data"}
 
-    # Filter DataFrame by category (case insensitive)
-    category_products = df[df['category'].str.lower() == category.lower()]
+#     # Filter DataFrame by category (case insensitive)
+#     category_products = df[df['category'].str.lower() == category.lower()]
 
-    if category_products.empty:
-        return {"error": f"No products found in category: {category}"}
+#     if category_products.empty:
+#         return {"error": f"No products found in category: {category}"}
 
-    products = category_products.to_dict('records')
+#     products = category_products.to_dict('records')
 
-    return {
-        "category": category,
-        "total_products": len(products),
-        "products": products
-    }
+#     return {
+#         "category": category,
+#         "total_products": len(products),
+#         "products": products
+#     }
 
 
-@app.get("/productdatabase/price-range/")
-def get_products_by_price_range(min_price: float = 0, max_price: float = 10000):
-    """Get products within a price range using pandas"""
-    df = load_csv_data()
+# @app.get("/productdatabase/price-range/")
+# def get_products_by_price_range(min_price: float = 0, max_price: float = 10000):
+#     """Get products within a price range using pandas"""
+#     df = load_csv_data()
 
-    if df is None:
-        return {"error": "Failed to load CSV data"}
+#     if df is None:
+#         return {"error": "Failed to load CSV data"}
 
-    # Filter DataFrame by price range
-    price_filtered = df[(df['price'] >= min_price) &
-                        (df['price'] <= max_price)]
+#     # Filter DataFrame by price range
+#     price_filtered = df[(df['price'] >= min_price) &
+#                         (df['price'] <= max_price)]
 
-    if price_filtered.empty:
-        return {"error": f"No products found in price range {min_price} - {max_price}"}
+#     if price_filtered.empty:
+#         return {"error": f"No products found in price range {min_price} - {max_price}"}
 
-    products = price_filtered.to_dict('records')
+#     products = price_filtered.to_dict('records')
 
-    return {
-        "price_range": f"{min_price} - {max_price}",
-        "total_products": len(products),
-        "products": products
-    }
+#     return {
+#         "price_range": f"{min_price} - {max_price}",
+#         "total_products": len(products),
+#         "products": products
+#     }
 
 
 @app.get("/api/customer/{customer_id}")
@@ -154,18 +154,20 @@ def get_customer_profile(customer_id: str):
     # Parse order history (comma-separated product IDs)
     order_history = []
     if pd.notna(customer.get('order_history')):
-        product_ids = customer['order_history'].split(',')
+        product_ids = customer['order_history'].split('|')
         order_history = [pid.strip() for pid in product_ids]
 
     # Parse pending orders
     pending_orders = []
     if pd.notna(customer.get('pending_orders')):
-        product_ids = customer['pending_orders'].split(',')
+        product_ids = customer['pending_orders'].split('|')
         pending_orders = [pid.strip() for pid in product_ids]
 
     return {
         "customer_id": customer['customer_id'],
         "customer_name": customer['customer_name'],
+        "phone": customer.get('phone', ''),
+        "address": customer.get('address', ''),
         "loyalty_points": customer['loyalty_points'],
         "order_history": order_history,
         "pending_orders": pending_orders
@@ -190,17 +192,28 @@ def get_customer_orders(customer_id: str):
 
     customer = customer_row.iloc[0].to_dict()
 
-    # Get order history product IDs
+    # Get order history product IDs and dates
     order_products = []
     if pd.notna(customer.get('order_history')):
-        product_ids = customer['order_history'].split(',')
+        product_ids = customer['order_history'].split('|')
         product_ids = [pid.strip() for pid in product_ids]
 
-        # Get product details for each product ID
-        for pid in product_ids:
+        # Get order dates
+        order_dates = []
+        if pd.notna(customer.get('order_dates')):
+            order_dates = customer['order_dates'].split('|')
+            order_dates = [date.strip() for date in order_dates]
+
+        # Get product details for each product ID with corresponding date
+        for idx, pid in enumerate(product_ids):
             product_row = product_df[product_df['product_id'] == pid]
             if not product_row.empty:
                 product = product_row.iloc[0].to_dict()
+                # Add purchase date if available
+                if idx < len(order_dates):
+                    product['purchase_date'] = order_dates[idx]
+                else:
+                    product['purchase_date'] = None
                 order_products.append(product)
 
     return {
@@ -211,14 +224,14 @@ def get_customer_orders(customer_id: str):
 
 @app.get("/api/products/multiple/{product_ids}")
 def get_multiple_products(product_ids: str):
-    """Get multiple products by comma-separated product IDs"""
+    """Get multiple products by pipe-separated product IDs"""
     df = load_csv_data()
 
     if df is None:
         return {"error": "Failed to load product data"}
 
     # Split product IDs and clean them
-    ids_list = [pid.strip() for pid in product_ids.split(',')]
+    ids_list = [pid.strip() for pid in product_ids.split('|')]
 
     # Filter products by the list of IDs
     products = df[df['product_id'].isin(ids_list)].to_dict('records')
