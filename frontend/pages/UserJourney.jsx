@@ -9,6 +9,30 @@ export default function UserJourney() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    // Add fade-in animation CSS
+    const style = document.createElement("style");
+    style.textContent = `
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .animate-fadeIn {
+        animation: fadeIn 0.6s ease-out forwards;
+        opacity: 0;
+      }
+    `;
+    document.head.appendChild(style);
+
+    return () => document.head.removeChild(style);
+  }, []);
+
+  useEffect(() => {
     // Get the logged-in customer ID from localStorage
     const loggedInCustomerId = localStorage.getItem("loggedInCustomerId");
 
@@ -261,18 +285,19 @@ export default function UserJourney() {
           {/* Product Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {orderHistory && orderHistory.length > 0 ? (
-              Object.keys(productMap).map((pid) => {
+              Object.keys(productMap).map((pid, index) => {
                 const prod = orderHistory.find((p) => p.product_id === pid);
                 if (!prod) return null;
 
                 return (
                   <div
                     key={pid}
-                    className="bg-white border-3 border-yellow-400 rounded-2xl overflow-hidden shadow-lg relative"
+                    className="bg-white border-3 border-yellow-400 rounded-2xl overflow-hidden shadow-lg relative transform transition-all duration-500 hover:scale-105 hover:shadow-2xl hover:-translate-y-2 animate-fadeIn"
+                    style={{ animationDelay: `${index * 100}ms` }}
                   >
                     {/* Quantity Badge */}
                     <div className="absolute top-4 right-4 z-10">
-                      <div className="bg-gradient-to-br from-orange-600 to-orange-700 text-white px-4 py-2 rounded-full flex items-center gap-1 font-bold shadow-lg">
+                      <div className="bg-gradient-to-br from-orange-600 to-orange-700 text-white px-4 py-2 rounded-full flex items-center gap-1 font-bold shadow-lg transform transition-transform duration-300 hover:scale-110 hover:rotate-3">
                         <svg
                           className="w-4 h-4"
                           fill="none"
@@ -292,14 +317,14 @@ export default function UserJourney() {
 
                     {/* Product Image */}
                     <div
-                      className="bg-gray-100 p-8 flex items-center justify-center"
+                      className="bg-gray-100 p-8 flex items-center justify-center overflow-hidden"
                       style={{ minHeight: "280px" }}
                     >
                       {prod.image_reference ? (
                         <img
                           src={prod.image_reference}
                           alt={prod.product_name}
-                          className="max-h-64 object-contain"
+                          className="max-h-64 object-contain transform transition-transform duration-500 hover:scale-110"
                         />
                       ) : (
                         <div className="w-full h-64 bg-gray-200 flex items-center justify-center text-gray-400 rounded-lg">
