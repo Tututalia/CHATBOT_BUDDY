@@ -1,4 +1,3 @@
-
 product_id,product_name,category,gender,price,online_available,offline_available,offline_stores,festival,season,image_reference
 PRD001,Being Human Hoodie,Hoodie,Unisex,1999,Yes,Yes,Zudio Ground Floor; Zudio Park Street Ground Floor; ABFRL Store South City,"Christmas,Holi",Winter,/images/PRD001.jpg
 PRD002,Flying Machine Shorts,Shorts,Male,899,Yes,Yes,Eden Pavilion Mall Third Floor; Mani Square Mall First Floor; ABFRL Store South City,Holi,Summer,/images/PRD002.jpg

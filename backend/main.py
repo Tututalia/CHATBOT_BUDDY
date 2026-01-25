@@ -1,8 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import os
 from typing import Dict, Any, List
+from pydantic import BaseModel
+import json
+import asyncio
+
+# Import LangGraph orchestrator
+from langgraph_orchestrator import RetailAgentOrchestrator
 
 app = FastAPI()
 
@@ -240,3 +246,199 @@ def get_multiple_products(product_ids: str):
         "products": products,
         "total_count": len(products)
     }
+
+
+# ============ LangGraph Agent Orchestration Endpoints ============
+
+# Request/Response Models
+class ChatRequest(BaseModel):
+    customer_id: str
+    query: str
+    customer_name: str = None
+
+
+class ChatResponse(BaseModel):
+    success: bool
+    customer_id: str
+    query: str
+    timeline: List[Dict[str, Any]]
+    recommended_products: List[Dict[str, Any]] = []
+    selected_product: Dict[str, Any] = None
+    inventory_info: Dict[str, Any] = None
+    channel: str = None
+    payment_status: str = None
+    order_id: str = None
+    loyalty_points_earned: int = 0
+    messages: List[str] = []
+    error: str = None
+
+
+# Initialize orchestrator (lazy loading)
+_orchestrator = None
+
+
+def get_orchestrator() -> RetailAgentOrchestrator:
+    """Get or create orchestrator instance"""
+    global _orchestrator
+    if _orchestrator is None:
+        # Get API key from environment
+        google_api_key = os.getenv("GOOGLE_API_KEY")
+        if not google_api_key:
+            raise ValueError("GOOGLE_API_KEY environment variable not set")
+        _orchestrator = RetailAgentOrchestrator(google_api_key=google_api_key)
+    return _orchestrator
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def process_chat(request: ChatRequest):
+    """
+    Process chat request through LangGraph agent orchestration
+    
+    This endpoint runs the complete multi-agent workflow:
+    1. Recommendation Agent
+    2. Inventory Agent
+    3. Sales Agent
+    4. Payment Agent (if online)
+    5. Fulfillment Agent
+    6. Loyalty Agent
+    7. Post Purchase Agent
+    """
+    try:
+        orchestrator = get_orchestrator()
+        
+        # Run the workflow
+        result = await orchestrator.arun(
+            customer_id=request.customer_id,
+            query=request.query,
+            customer_name=request.customer_name
+        )
+        
+        # Extract messages from state
+        messages = [
+            msg.content for msg in result.get("messages", [])
+            if hasattr(msg, 'content')
+        ]
+        
+        # Get selected product details
+        selected_product = None
+        if result.get("selected_product_id") and result.get("recommended_products"):
+            for p in result["recommended_products"]:
+                if p["product_id"] == result["selected_product_id"]:
+                    selected_product = p
+                    break
+        
+        return ChatResponse(
+            success=True,
+            customer_id=request.customer_id,
+            query=request.query,
+            timeline=result.get("timeline", []),
+            recommended_products=result.get("recommended_products", []),
+            selected_product=selected_product,
+            inventory_info=result.get("inventory_info"),
+            channel=result.get("channel"),
+            payment_status=result.get("payment_status"),
+            order_id=result.get("order_id"),
+            loyalty_points_earned=result.get("loyalty_points_earned", 0),
+            messages=messages
+        )
+        
+    except Exception as e:
+        return ChatResponse(
+            success=False,
+            customer_id=request.customer_id,
+            query=request.query,
+            timeline=[],
+            error=str(e)
+        )
+
+
+@app.websocket("/ws/chat/{customer_id}")
+async def websocket_chat(websocket: WebSocket, customer_id: str):
+    """
+    WebSocket endpoint for real-time chat with agent timeline updates
+    """
+    await websocket.accept()
+    
+    try:
+        orchestrator = get_orchestrator()
+        
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+            query = message_data.get("query", "")
+            
+            # Send acknowledgment
+            await websocket.send_json({
+                "type": "ack",
+                "message": "Processing your request..."
+            })
+            
+            # Run workflow
+            result = await orchestrator.arun(
+                customer_id=customer_id,
+                query=query,
+                customer_name=message_data.get("customer_name")
+            )
+            
+            # Stream timeline events
+            for event in result.get("timeline", []):
+                await websocket.send_json({
+                    "type": "timeline",
+                    "data": event
+                })
+                await asyncio.sleep(0.5)  # Small delay for better UX
+            
+            # Extract messages
+            messages = [
+                msg.content for msg in result.get("messages", [])
+                if hasattr(msg, 'content')
+            ]
+            
+            # Send final response
+            await websocket.send_json({
+                "type": "response",
+                "data": {
+                    "recommended_products": result.get("recommended_products", []),
+                    "selected_product_id": result.get("selected_product_id"),
+                    "inventory_info": result.get("inventory_info"),
+                    "channel": result.get("channel"),
+                    "order_id": result.get("order_id"),
+                    "loyalty_points_earned": result.get("loyalty_points_earned", 0),
+                    "messages": messages
+                }
+            })
+            
+    except WebSocketDisconnect:
+        print(f"Client {customer_id} disconnected")
+    except Exception as e:
+        await websocket.send_json({
+            "type": "error",
+            "message": str(e)
+        })
+
+
+@app.get("/api/agent-flow/status")
+def get_agent_flow_status():
+    """Get status of the agent orchestration system"""
+    try:
+        orchestrator = get_orchestrator()
+        return {
+            "status": "active",
+            "llm_model": "gemini-2.0-flash-exp",
+            "agents": [
+                "recommendation_agent",
+                "inventory_agent",
+                "sales_agent",
+                "payment_agent",
+                "fulfillment_agent",
+                "loyalty_agent",
+                "post_purchase_agent"
+            ],
+            "workflow_type": "langgraph"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
