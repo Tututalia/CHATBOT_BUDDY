@@ -10,6 +10,7 @@ import Home from "./pages/Home";
 import UserJourney from "./pages/UserJourney";
 import StoreKeeper from "./pages/StoreKeeper";
 import Admin from "./pages/Admin";
+import ChatBot from "./src/components/ChatBot";
 
 export default function Pages() {
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -251,6 +252,9 @@ export default function Pages() {
           <Route path="/admin" element={<Admin />} />
         </Routes>
       </main>
+
+      {/* Chatbot - Available on all pages */}
+      <ChatBot customerId={isLoggedIn || "GUEST"} />
     </div>
   );
 }
