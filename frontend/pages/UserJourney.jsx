@@ -403,7 +403,7 @@ export default function UserJourney() {
       </div>
 
       {/* Chat Button */}
-      <div className="fixed bottom-8 right-8">
+      {/* <div className="fixed bottom-8 right-8">
         <button className="bg-gradient-to-br from-orange-600 to-orange-700 text-white w-16 h-16 rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-transform">
           <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
             <path
@@ -413,7 +413,7 @@ export default function UserJourney() {
             />
           </svg>
         </button>
-      </div>
+      </div> */}
     </div>
   );
 }

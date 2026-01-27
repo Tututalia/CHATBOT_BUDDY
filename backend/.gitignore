@@ -138,3 +138,6 @@ temp/
 # Local config files
 config.local.py
 settings.local.py
+
+echo "__pycache__/" >> .gitignore
+echo "*.pyc" >> .gitignore
