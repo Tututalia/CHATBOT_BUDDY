@@ -2,7 +2,7 @@ from sqlmodel import Session, select, or_, and_, func, SQLModel
 from typing import Optional, List, Dict, Any, Type, Union
 from models import (
     Customer, Product, Store, OrderHistory,
-    StoreKeeperTransaction, AdminDashboardData
+    StoreKeeperTransaction, AdminDashboardData, Cart
 )
 
 
@@ -275,6 +275,7 @@ order_history_crud = UniversalCRUD(OrderHistory, primary_key="transaction_id")
 store_keeper_transaction_crud = UniversalCRUD(
     StoreKeeperTransaction, primary_key="id")
 admin_dashboard_data_crud = UniversalCRUD(AdminDashboardData, primary_key="id")
+cart_crud = UniversalCRUD(Cart, primary_key="id")
 
 
 # ==================== LEGACY CLASSES (for backward compatibility) ====================
@@ -608,6 +609,48 @@ class AdminDashboardDataCRUD:
     @staticmethod
     def delete(session: Session, data_id: int) -> bool:
         return admin_dashboard_data_crud.delete(session, data_id)
+
+
+class CartCRUD:
+    """Legacy wrapper for Cart operations"""
+    _crud = cart_crud
+
+    @staticmethod
+    def create(session: Session, cart: Cart) -> Cart:
+        return cart_crud.create(session, cart)
+
+    @staticmethod
+    def get_by_id(session: Session, cart_id: int) -> Optional[Cart]:
+        return cart_crud.get_by_id(session, cart_id)
+
+    @staticmethod
+    def get_all(session: Session, skip: int = 0, limit: int = 100) -> List[Cart]:
+        return cart_crud.get_all(session, skip, limit)
+
+    @staticmethod
+    def filter(
+        session: Session,
+        customer_id: Optional[str] = None,
+        product_id: Optional[str] = None
+    ) -> List[Cart]:
+        filters = {}
+        if customer_id:
+            filters["customer_id"] = customer_id
+        if product_id:
+            filters["product_id"] = product_id
+        return cart_crud.filter(session, filters=filters)
+
+    @staticmethod
+    def get_by_customer(session: Session, customer_id: str) -> List[Cart]:
+        return cart_crud.filter(session, filters={"customer_id": customer_id})
+
+    @staticmethod
+    def update(session: Session, cart_id: int, data: Dict[str, Any]) -> Optional[Cart]:
+        return cart_crud.update(session, cart_id, data)
+
+    @staticmethod
+    def delete(session: Session, cart_id: int) -> bool:
+        return cart_crud.delete(session, cart_id)
 
 
 # ==================== ANALYTICS & AGGREGATIONS ====================

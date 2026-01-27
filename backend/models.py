@@ -122,3 +122,16 @@ class AdminDashboardData(SQLModel, table=True):
     amount: float
     address: str
     phone: str
+
+
+# Cart Model
+class Cart(SQLModel, table=True):
+    __tablename__ = "cart"
+
+    id: int = Field(default=None, primary_key=True)
+    customer_id: str = Field(foreign_key="customers.customer_id", index=True)
+    product_id: str = Field(foreign_key="products.product_id", index=True)
+
+    # Relationships
+    customer: Optional[Customer] = Relationship()
+    product: Optional[Product] = Relationship()
