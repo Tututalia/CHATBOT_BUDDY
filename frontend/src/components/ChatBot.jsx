@@ -3,19 +3,42 @@ import "./ChatBot.css";
 
 export default function ChatBot({ customerId = "CUST001" }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState([
-    {
-      type: "ai",
-      text: "Hello! 👋 I'm your AI shopping assistant. How can I help you today?",
-      timestamp: new Date(),
-    },
-  ]);
+  const [customerName, setCustomerName] = useState("");
+  const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [agentTimeline, setAgentTimeline] = useState([]);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
+
+  // Fetch customer data on mount
+  useEffect(() => {
+    const fetchCustomerData = async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/api/customer/${customerId}`,
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setCustomerName(data.customer_name);
+
+          // Update initial greeting with customer's name
+          setMessages([
+            {
+              type: "ai",
+              text: `Hello ${data.customer_name}! 👋 I'm your AI shopping assistant. How can I help you today?`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error("Error fetching customer data:", error);
+      }
+    };
+
+    fetchCustomerData();
+  }, [customerId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -133,11 +156,15 @@ export default function ChatBot({ customerId = "CUST001" }) {
   };
 
   const clearChat = async () => {
-    // Clear local state
+    // Clear local state with personalized greeting
+    const greetingText = customerName
+      ? `Hello ${customerName}! 👋 I'm your AI shopping assistant. How can I help you today?`
+      : "Hello! 👋 I'm your AI shopping assistant. How can I help you today?";
+
     setMessages([
       {
         type: "ai",
-        text: "Hello! 👋 I'm your AI shopping assistant. How can I help you today?",
+        text: greetingText,
         timestamp: new Date(),
       },
     ]);

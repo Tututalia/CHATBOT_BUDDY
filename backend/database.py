@@ -19,3 +19,8 @@ def get_session():
     """Get a database session"""
     with Session(engine) as session:
         yield session
+
+
+def get_db_session():
+    """Get a database session for direct use"""
+    return Session(engine)

@@ -3,6 +3,12 @@ Intelligent Sales Agent System using LangGraph
 LLM decides which agent tools to call based on user query
 """
 
+from crud import (
+    product_crud, store_crud, customer_crud, order_history_crud,
+    ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD
+)
+from models import Product, Store, Customer, OrderHistory
+from database import engine, get_db_session
 from typing import TypedDict, Annotated, List, Dict, Any, Literal
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -15,20 +21,12 @@ import random
 from datetime import datetime
 import os
 import time
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Import database and CRUD modules
-from database import engine
-from models import Product, Store, Customer, OrderHistory
-from crud import (
-    product_crud, store_crud, customer_crud, order_history_crud,
-    ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD
-)
-
-
-# ============ Database Session Helper ============
-def get_db_session():
-    """Get a database session"""
-    return Session(engine)
 
 
 # ============ State Definition ============
@@ -55,14 +53,14 @@ def load_products_from_db(
 ) -> List[Product]:
     """
     Load product data from database with optional filters
-    
+
     Args:
         category: Filter by category
         gender: Filter by gender
         season: Filter by season
         max_price: Filter by maximum price
         search_query: Search in product name, category, etc.
-    
+
     Returns:
         List of Product objects from database
     """
@@ -71,7 +69,7 @@ def load_products_from_db(
             # Build filters
             filters = {}
             operators = {}
-            
+
             if category:
                 filters['category'] = category.lower()
                 operators['category'] = 'contains'
@@ -80,17 +78,18 @@ def load_products_from_db(
             if season:
                 filters['season'] = season
                 operators['season'] = 'contains'
-            
+
             # Get products with filters
             if filters:
-                products = product_crud.filter(session, filters, operators, limit=100)
+                products = product_crud.filter(
+                    session, filters, operators, limit=100)
             else:
                 products = product_crud.get_all(session, limit=100)
-            
+
             # Apply max_price filter if specified
             if max_price is not None:
                 products = [p for p in products if p.price <= max_price]
-            
+
             # Apply search query if specified (search across multiple fields)
             if search_query:
                 query_lower = search_query.lower()
@@ -103,13 +102,13 @@ def load_products_from_db(
                             keyword in p.category.lower() or
                             keyword in p.season.lower() or
                             keyword in p.gender.lower() or
-                            (p.festival and keyword in p.festival.lower())):
+                                (p.festival and keyword in p.festival.lower())):
                             match = True
                             break
                     if match:
                         filtered.append(p)
                 products = filtered if filtered else products
-            
+
             return products
     except Exception as e:
         print(f"Error loading products from database: {e}")
@@ -164,6 +163,65 @@ def get_customer_orders(customer_id: str) -> List[OrderHistory]:
     except Exception as e:
         print(f"Error getting orders for customer {customer_id}: {e}")
         return []
+
+
+@tool
+def customer_info_agent(customer_id: str, info_type: str = "profile") -> str:
+    """
+    Fetches customer information from the database.
+    Use this when user asks about their profile, orders, address, contact info, or loyalty points.
+
+    Args:
+        customer_id: The customer ID
+        info_type: Type of info to fetch - "profile" (name, address, phone, loyalty points) 
+                   or "orders" (order history)
+
+    Returns:
+        Customer information formatted as text
+    """
+    try:
+        customer = get_customer_by_id(customer_id)
+
+        if not customer:
+            return f"❌ Customer with ID {customer_id} not found in database."
+
+        if info_type == "orders":
+            # Get order history
+            orders = get_customer_orders(customer_id)
+
+            if not orders:
+                return f"📦 **Order History for {customer.customer_name}:**\n\nYou haven't placed any orders yet. Would you like to browse our products?"
+
+            result = f"📦 **Order History for {customer.customer_name}:**\n\n"
+            for order in orders[:5]:  # Show last 5 orders
+                result += f"- **{order.product_name}** (ID: {order.product_id})\n"
+                result += f"  Transaction ID: {order.transaction_id}\n"
+                result += f"  Quantity: {order.quantity} | Date: {order.order_dates}\n"
+                result += f"  Loyalty Points Earned: {order.loyalty_points}\n\n"
+
+            if len(orders) > 5:
+                result += f"...and {len(orders) - 5} more orders.\n\n"
+
+            result += "Would you like to reorder any item or browse new products?"
+            return result
+
+        else:  # profile info
+            result = f"👤 **Customer Profile:**\n\n"
+            result += f"**Name:** {customer.customer_name}\n"
+            result += f"**Customer ID:** {customer.customer_id}\n"
+            result += f"**Phone:** {customer.phone}\n"
+            result += f"**Address:** {customer.address}\n"
+            result += f"**Loyalty Points:** {customer.loyalty_points} points 🎁\n\n"
+
+            # Count orders
+            orders = get_customer_orders(customer_id)
+            result += f"**Total Orders:** {len(orders)}\n\n"
+
+            result += "How can I assist you today?"
+            return result
+
+    except Exception as e:
+        return f"❌ Error fetching customer information: {str(e)}"
 
 
 @tool
@@ -250,7 +308,8 @@ def inventory_agent(product_id: str) -> str:
                     result += f"   • **Store {store_id}** - {random.uniform(2.0, 8.0):.1f} km away\n\n"
         elif product.offline_stores:
             # Fallback to offline_stores string if store_ids not available
-            stores = [store.strip() for store in product.offline_stores.split(';')]
+            stores = [store.strip()
+                      for store in product.offline_stores.split(';')]
             for i, store_name in enumerate(stores[:4], 1):
                 result += f"   • **{store_name}** (ID: S{i:03d})\n"
                 result += f"     {random.choice(['123 Main St', '456 West Ave', '789 Airport Rd', '321 Center Blvd'])} - {random.uniform(2.0, 8.0):.1f} km away\n\n"
@@ -279,8 +338,9 @@ def payment_agent(product_id: str, payment_method: str = "") -> str:
     # Get product from database to get actual price
     product = get_product_by_id(product_id)
     product_name = product.product_name if product else f"Product {product_id}"
-    amount = int(product.price) if product else random.choice([1299, 1999, 2499, 4999])
-    
+    amount = int(product.price) if product else random.choice(
+        [1299, 1999, 2499, 4999])
+
     # If no payment method specified, show options
     if not payment_method:
         result = f"💳 **Payment Methods for {product_name}:**\n\n"
@@ -327,7 +387,7 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
         Fulfillment details and order tracking info
     """
     order_id = f"ORD{random.randint(100000, 999999)}"
-    
+
     # Get product details from database
     product = get_product_by_id(product_id)
     product_name = product.product_name if product else f"Product {product_id}"
@@ -347,7 +407,7 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
         result += f"Expected Delivery: {delivery_date}\n\n"
         result += "You can track your order with the Order ID.\n\n"
         # Instruction for LLM to automatically call loyalty_agent
-        result += f"[SYSTEM: Now call loyalty_agent with order_id='{order_id}' to award loyalty rewards automatically]"
+        result += f"[SYSTEM: Now call loyalty_agent with order_id='{order_id}' and product_id='{product_id}' to award loyalty rewards automatically]"
     else:
         # Offline purchase
         if not store_name or store_name == "Store":
@@ -361,7 +421,7 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
             if store_name.lower() in store.store_name.lower() or store_name == store.store_id:
                 store_details = store
                 break
-        
+
         store_display_name = store_details.store_name if store_details else store_name
         store_address = store_details.address if store_details else "Please check store location"
 
@@ -382,7 +442,7 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
 
 
 @tool
-def loyalty_agent(order_id: str) -> str:
+def loyalty_agent(order_id: str, product_id: str) -> str:
     """
     Awards loyalty points and provides coupon codes after successful order.
     Use this after fulfillment is complete (online purchases only).
@@ -390,6 +450,7 @@ def loyalty_agent(order_id: str) -> str:
 
     Args:
         order_id: The order ID to award points for
+        product_id: The product ID to fetch loyalty points from
 
     Returns:
         Loyalty points earned and coupon codes
@@ -398,7 +459,13 @@ def loyalty_agent(order_id: str) -> str:
     print("⏳ Calculating your rewards...")
     time.sleep(2.5)
 
-    points = random.randint(50, 200)
+    # Fetch product from database to get actual loyalty points
+    product = get_product_by_id(product_id)
+
+    # Use actual loyalty points from product database
+    points = product.loyalty_points if product and product.loyalty_points else random.randint(
+        50, 200)
+
     coupon_codes = [
         {"code": f"SAVE{random.randint(10, 50)}", "discount": "10% off"},
         {"code": f"WELCOME{random.randint(100, 999)}", "discount": "₹100 off"},
@@ -447,6 +514,7 @@ def post_purchase_agent(order_id: str) -> str:
 
 # ============ Agent Tools List ============
 tools = [
+    customer_info_agent,
     recommendation_agent,
     inventory_agent,
     payment_agent,
@@ -475,8 +543,33 @@ def agent_node(state: AgentState):
     llm = create_llm()
     llm_with_tools = llm.bind_tools(tools)
 
+    # Always add system message with customer context at the beginning
+    from langchain_core.messages import SystemMessage
+    customer_id = state.get("customer_id", "UNKNOWN")
+    system_message = SystemMessage(
+        content=f"""You are a helpful AI shopping assistant for an e-commerce platform.
+
+CRITICAL CUSTOMER CONTEXT:
+- The customer you are talking to has customer_id: {customer_id}
+- This customer is already logged in and authenticated
+- You MUST use this customer_id when calling customer_info_agent
+- NEVER ask the customer for their ID - you already have it!
+
+When the customer asks about:
+- "my phone number" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
+- "my address" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
+- "my orders" or "order history" → call customer_info_agent with customer_id="{customer_id}" and info_type="orders"
+- "my profile" or "my details" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
+- "who am i" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
+
+Be helpful, friendly, and proactive in assisting the customer."""
+    )
+
+    # Prepend system message to all messages
+    messages = [system_message] + state["messages"]
+
     # Call LLM with tools
-    response = llm_with_tools.invoke(state["messages"])
+    response = llm_with_tools.invoke(messages)
 
     return {
         "messages": [response]
@@ -589,28 +682,32 @@ def visualize_graph():
     print("\n" + "="*60)
     print("AVAILABLE AGENT TOOLS (LLM calls as needed)")
     print("="*60)
-    print("\n1. recommendation_agent")
+    print("\n1. customer_info_agent")
+    print("   → Fetches customer profile and order history")
+    print("   → Used when: User asks about their info, orders, or loyalty points")
+
+    print("\n2. recommendation_agent")
     print("   → Shows product recommendations")
     print("   → Used when: User wants to browse/see products")
 
-    print("\n2. inventory_agent")
+    print("\n3. inventory_agent")
     print("   → Checks product availability")
     print("   → Shows online/offline purchase options")
     print("   → Used when: User selects a product")
 
-    print("\n3. payment_agent")
+    print("\n4. payment_agent")
     print("   → Processes online payment")
     print("   → Used when: User chooses online purchase")
 
-    print("\n4. fulfillment_agent")
+    print("\n5. fulfillment_agent")
     print("   → Handles order delivery (online) or store pickup (offline)")
     print("   → Used when: After payment OR offline selection")
 
-    print("\n5. loyalty_agent")
+    print("\n6. loyalty_agent")
     print("   → Awards loyalty points and coupons")
     print("   → Used when: After order fulfillment")
 
-    print("\n6. post_purchase_agent")
+    print("\n7. post_purchase_agent")
     print("   → Sends feedback link and support info")
     print("   → Used when: Final step after loyalty rewards")
 
