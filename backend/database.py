@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, create_engine, Session, select
 from typing import Optional, List
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Cart
 
 # Database configuration
 DATABASE_URL = "sqlite:///./retail_agent.db"
