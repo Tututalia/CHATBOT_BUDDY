@@ -9,12 +9,26 @@ from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
+from sqlmodel import Session
 import json
 import random
 from datetime import datetime
-import pandas as pd
 import os
 import time
+
+# Import database and CRUD modules
+from database import engine
+from models import Product, Store, Customer, OrderHistory
+from crud import (
+    product_crud, store_crud, customer_crud, order_history_crud,
+    ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD
+)
+
+
+# ============ Database Session Helper ============
+def get_db_session():
+    """Get a database session"""
+    return Session(engine)
 
 
 # ============ State Definition ============
@@ -32,16 +46,124 @@ class AgentState(TypedDict):
 
 # ============ Agent Tools ============
 
-def load_product_data():
-    """Load product data from CSV"""
+def load_products_from_db(
+    category: str = None,
+    gender: str = None,
+    season: str = None,
+    max_price: float = None,
+    search_query: str = None
+) -> List[Product]:
+    """
+    Load product data from database with optional filters
+    
+    Args:
+        category: Filter by category
+        gender: Filter by gender
+        season: Filter by season
+        max_price: Filter by maximum price
+        search_query: Search in product name, category, etc.
+    
+    Returns:
+        List of Product objects from database
+    """
     try:
-        csv_path = os.path.join(os.path.dirname(
-            __file__), "data", "product_data.csv")
-        df = pd.read_csv(csv_path)
-        return df
+        with get_db_session() as session:
+            # Build filters
+            filters = {}
+            operators = {}
+            
+            if category:
+                filters['category'] = category.lower()
+                operators['category'] = 'contains'
+            if gender:
+                filters['gender'] = gender
+            if season:
+                filters['season'] = season
+                operators['season'] = 'contains'
+            
+            # Get products with filters
+            if filters:
+                products = product_crud.filter(session, filters, operators, limit=100)
+            else:
+                products = product_crud.get_all(session, limit=100)
+            
+            # Apply max_price filter if specified
+            if max_price is not None:
+                products = [p for p in products if p.price <= max_price]
+            
+            # Apply search query if specified (search across multiple fields)
+            if search_query:
+                query_lower = search_query.lower()
+                keywords = query_lower.split()
+                filtered = []
+                for p in products:
+                    match = False
+                    for keyword in keywords:
+                        if (keyword in p.product_name.lower() or
+                            keyword in p.category.lower() or
+                            keyword in p.season.lower() or
+                            keyword in p.gender.lower() or
+                            (p.festival and keyword in p.festival.lower())):
+                            match = True
+                            break
+                    if match:
+                        filtered.append(p)
+                products = filtered if filtered else products
+            
+            return products
     except Exception as e:
-        print(f"Error loading product data: {e}")
+        print(f"Error loading products from database: {e}")
+        return []
+
+
+def get_product_by_id(product_id: str) -> Product:
+    """Get a single product by ID from database"""
+    try:
+        with get_db_session() as session:
+            return product_crud.get_by_id(session, product_id)
+    except Exception as e:
+        print(f"Error getting product {product_id}: {e}")
         return None
+
+
+def get_store_by_id(store_id: str) -> Store:
+    """Get a single store by ID from database"""
+    try:
+        with get_db_session() as session:
+            return store_crud.get_by_id(session, store_id)
+    except Exception as e:
+        print(f"Error getting store {store_id}: {e}")
+        return None
+
+
+def get_all_stores() -> List[Store]:
+    """Get all stores from database"""
+    try:
+        with get_db_session() as session:
+            return store_crud.get_all(session, limit=100)
+    except Exception as e:
+        print(f"Error getting stores: {e}")
+        return []
+
+
+def get_customer_by_id(customer_id: str) -> Customer:
+    """Get a customer by ID from database"""
+    try:
+        with get_db_session() as session:
+            return customer_crud.get_by_id(session, customer_id)
+    except Exception as e:
+        print(f"Error getting customer {customer_id}: {e}")
+        return None
+
+
+def get_customer_orders(customer_id: str) -> List[OrderHistory]:
+    """Get order history for a customer from database"""
+    try:
+        with get_db_session() as session:
+            return order_history_crud.filter(session, {'customer_id': customer_id})
+    except Exception as e:
+        print(f"Error getting orders for customer {customer_id}: {e}")
+        return []
 
 
 @tool
@@ -56,38 +178,23 @@ def recommendation_agent(query: str) -> str:
     Returns:
         List of recommended products
     """
-    # Load product data
-    df = load_product_data()
+    # Load products from database with search
+    products = load_products_from_db(search_query=query)
 
-    if df is None:
-        return "❌ Failed to load product database. Please try again."
-
-    # Normalize query for searching
-    query_lower = query.lower()
-    keywords = query_lower.split()
-
-    # Search in multiple columns
-    mask = pd.Series([False] * len(df))
-    for keyword in keywords:
-        mask |= df['product_name'].str.lower().str.contains(keyword, na=False)
-        mask |= df['category'].str.lower().str.contains(keyword, na=False)
-        mask |= df['season'].str.lower().str.contains(keyword, na=False)
-        mask |= df['gender'].str.lower().str.contains(keyword, na=False)
-        mask |= df['festival'].str.lower().str.contains(keyword, na=False)
-
-    filtered_products = df[mask]
-
-    # If no matches, show popular products
-    if filtered_products.empty:
-        filtered_products = df.sample(min(4, len(df)))
+    if not products:
+        # If no matches, get all products and show random sample
+        all_products = load_products_from_db()
+        if not all_products:
+            return "❌ Failed to load product database. Please try again."
+        products = random.sample(all_products, min(4, len(all_products)))
     else:
-        filtered_products = filtered_products.head(4)
+        products = products[:4]  # Limit to 4 products
 
     # Format results
     result = "🛍️ **Product Recommendations:**\n\n"
-    for _, row in filtered_products.iterrows():
-        result += f"- **{row['product_name']}** (ID: {row['product_id']})\n"
-        result += f"  Price: ₹{int(row['price']):,} | Category: {row['category']}\n\n"
+    for product in products:
+        result += f"- **{product.product_name}** (ID: {product.product_id})\n"
+        result += f"  Price: ₹{int(product.price):,} | Category: {product.category}\n\n"
 
     result += "Would you like to select any product? Or see more options?"
     return result
@@ -105,23 +212,15 @@ def inventory_agent(product_id: str) -> str:
     Returns:
         Availability status and purchase options (online/offline) with store locations
     """
-    # Load product data
-    df = load_product_data()
+    # Load product from database
+    product = get_product_by_id(product_id)
 
-    if df is None:
-        return "❌ Failed to load product database. Please try again."
-
-    # Find the product
-    product_row = df[df['product_id'] == product_id]
-
-    if product_row.empty:
+    if product is None:
         return f"❌ Product {product_id} not found. Please check the product ID and try again."
 
-    product = product_row.iloc[0]
-
     # Check availability
-    online_available = str(product['online_available']).lower() == 'yes'
-    offline_available = str(product['offline_available']).lower() == 'yes'
+    online_available = str(product.online_available).lower() == 'yes'
+    offline_available = str(product.offline_available).lower() == 'yes'
 
     if not online_available and not offline_available:
         result = f"❌ **Sorry, Product {product_id} is OUT OF STOCK**\n"
@@ -129,7 +228,7 @@ def inventory_agent(product_id: str) -> str:
         return result
 
     result = f"✅ **Product {product_id} is IN STOCK!**\n\n"
-    result += f"**{product['product_name']}** - ₹{int(product['price']):,}\n\n"
+    result += f"**{product.product_name}** - ₹{int(product.price):,}\n\n"
     result += "📦 **Purchase Options:**\n\n"
 
     if online_available:
@@ -139,12 +238,21 @@ def inventory_agent(product_id: str) -> str:
         result += "2. 🏪 **Offline** - Pick up from nearest store\n\n"
         result += "📍 **Available Stores for Pickup:**\n\n"
 
-        # Parse and display stores
-        if pd.notna(product['offline_stores']):
-            stores = [store.strip()
-                      for store in product['offline_stores'].split(';')]
-            for i, store in enumerate(stores[:4], 1):
-                result += f"   • **{store}** (ID: S{i:03d})\n"
+        # Get stores from database based on product's store_ids
+        if product.store_ids:
+            store_ids = [s.strip() for s in product.store_ids.split(';')]
+            for i, store_id in enumerate(store_ids[:4], 1):
+                store = get_store_by_id(store_id)
+                if store:
+                    result += f"   • **{store.store_name}** (ID: {store.store_id})\n"
+                    result += f"     {store.address} - {random.uniform(2.0, 8.0):.1f} km away\n\n"
+                else:
+                    result += f"   • **Store {store_id}** - {random.uniform(2.0, 8.0):.1f} km away\n\n"
+        elif product.offline_stores:
+            # Fallback to offline_stores string if store_ids not available
+            stores = [store.strip() for store in product.offline_stores.split(';')]
+            for i, store_name in enumerate(stores[:4], 1):
+                result += f"   • **{store_name}** (ID: S{i:03d})\n"
                 result += f"     {random.choice(['123 Main St', '456 West Ave', '789 Airport Rd', '321 Center Blvd'])} - {random.uniform(2.0, 8.0):.1f} km away\n\n"
 
     result += "\n**How would you like to proceed?**\n"
@@ -168,9 +276,15 @@ def payment_agent(product_id: str, payment_method: str = "") -> str:
     Returns:
         Payment options (if method not provided) or payment confirmation details
     """
+    # Get product from database to get actual price
+    product = get_product_by_id(product_id)
+    product_name = product.product_name if product else f"Product {product_id}"
+    amount = int(product.price) if product else random.choice([1299, 1999, 2499, 4999])
+    
     # If no payment method specified, show options
     if not payment_method:
-        result = f"💳 **Payment Methods for Product {product_id}:**\n\n"
+        result = f"💳 **Payment Methods for {product_name}:**\n\n"
+        result += f"Amount: ₹{amount:,}\n\n"
         result += "Please choose your preferred payment method:\n\n"
         result += "1. 📱 **UPI** - Pay using any UPI app (Google Pay, PhonePe, Paytm, etc.)\n"
         result += "2. 💳 **Credit Card** - Visa, Mastercard, American Express, etc.\n"
@@ -181,11 +295,11 @@ def payment_agent(product_id: str, payment_method: str = "") -> str:
 
     # Process payment with selected method
     payment_id = f"PAY{random.randint(10000, 99999)}"
-    amount = random.choice([1299, 1999, 2499, 4999])
 
     result = f"💳 **Processing Payment...**\n\n"
+    result += f"Product: {product_name}\n"
     result += f"Product ID: {product_id}\n"
-    result += f"Amount: ₹{amount}\n"
+    result += f"Amount: ₹{amount:,}\n"
     result += f"Method: {payment_method.upper()}\n"
     result += f"Payment ID: {payment_id}\n\n"
     result += "✅ **Payment Successful!**\n"
@@ -213,6 +327,11 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
         Fulfillment details and order tracking info
     """
     order_id = f"ORD{random.randint(100000, 999999)}"
+    
+    # Get product details from database
+    product = get_product_by_id(product_id)
+    product_name = product.product_name if product else f"Product {product_id}"
+    product_price = int(product.price) if product else 0
 
     if purchase_type.lower() == "online":
         # Add delay for online purchases before showing fulfillment
@@ -222,7 +341,8 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
         delivery_date = "3-5 business days"
         result = f"📦 **Order Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
-        result += f"Product: {product_id}\n"
+        result += f"Product: {product_name} ({product_id})\n"
+        result += f"Amount: ₹{product_price:,}\n"
         result += f"Delivery Type: Home Delivery\n"
         result += f"Expected Delivery: {delivery_date}\n\n"
         result += "You can track your order with the Order ID.\n\n"
@@ -234,10 +354,23 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
             # If no store selected yet, prompt user to select
             return "⚠️ Please select a specific store from the available options above for pickup. Which store would you like to visit?"
 
+        # Try to get store details from database
+        store_details = None
+        all_stores = get_all_stores()
+        for store in all_stores:
+            if store_name.lower() in store.store_name.lower() or store_name == store.store_id:
+                store_details = store
+                break
+        
+        store_display_name = store_details.store_name if store_details else store_name
+        store_address = store_details.address if store_details else "Please check store location"
+
         result = f"🏪 **In-Store Pickup Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
-        result += f"Product: {product_id}\n"
-        result += f"Pickup Store: {store_name}\n"
+        result += f"Product: {product_name} ({product_id})\n"
+        result += f"Amount: ₹{product_price:,}\n"
+        result += f"Pickup Store: {store_display_name}\n"
+        result += f"Store Address: {store_address}\n"
         result += f"Status: Ready for pickup in 2 hours\n\n"
         result += "Please visit the store to complete your purchase.\n"
         result += "💡 Show this Order ID at the store kiosk.\n\n"
@@ -328,7 +461,7 @@ def create_llm():
     """Create OpenAI GPT-4 mini LLM"""
     return ChatOpenAI(
         model="gpt-4o-mini",
-        temperature=0.7,
+        temperature=0.1,
         streaming=True
     )
 

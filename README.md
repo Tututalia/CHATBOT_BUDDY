@@ -28,7 +28,16 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-3. Install dependencies:
+3. Install dependencies (recommended):
+
+Use the pinned requirements file in the `backend` folder:
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+If you prefer a minimal install (quick dev), install the main packages:
 
 ```bash
 pip install fastapi uvicorn pandas
