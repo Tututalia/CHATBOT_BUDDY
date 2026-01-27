@@ -1,11 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 import json
 import asyncio
+from sqlmodel import Session
 
 # Import LangGraph orchestrator
 from langgraph_orchestrator import RetailAgentOrchestrator
@@ -17,46 +17,71 @@ from langchain_core.messages import HumanMessage, AIMessage
 # Import chat database
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 
+# Import database and CRUD modules
+from database import engine
+from models import Customer, Product, Store, OrderHistory
+from crud import (
+    product_crud, customer_crud, store_crud, order_history_crud,
+    ProductCRUD, CustomerCRUD
+)
+
 app = FastAPI()
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000",
-                   "http://127.0.0.1:5173"],  # Vite and React dev servers
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000",
+                   "http://127.0.0.1:5173", "http://127.0.0.1:5174"],  # Vite and React dev servers
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load CSV data using pandas
+
+# Database session helper
+def get_db_session():
+    """Get a database session"""
+    return Session(engine)
 
 
-def load_csv_data():
-    """Load product data from CSV using pandas"""
+def load_products_from_db(skip: int = 0, limit: int = 100) -> List[Product]:
+    """Load product data from database"""
     try:
-        csv_file_path = os.path.join(os.path.dirname(
-            __file__), "data", "product_data.csv")
-        df = pd.read_csv(csv_file_path)
-        return df
-    except FileNotFoundError:
-        return None
+        with get_db_session() as session:
+            return product_crud.get_all(session, skip=skip, limit=limit)
     except Exception as e:
-        return None
+        print(f"Error loading products from database: {e}")
+        return []
 
 
-def load_customer_data():
-    """Load customer data from CSV using pandas"""
+def load_customer_from_db(customer_id: str) -> Optional[Customer]:
+    """Load customer data from database by ID"""
     try:
-        csv_file_path = os.path.join(os.path.dirname(
-            __file__), "data", "customer_data.csv")
-        # Using comma separator
-        df = pd.read_csv(csv_file_path)
-        return df
-    except FileNotFoundError:
-        return None
+        with get_db_session() as session:
+            return customer_crud.get_by_id(session, customer_id)
     except Exception as e:
+        print(f"Error loading customer from database: {e}")
         return None
+
+
+def get_product_from_db(product_id: str) -> Optional[Product]:
+    """Get a product by ID from database"""
+    try:
+        with get_db_session() as session:
+            return product_crud.get_by_id(session, product_id)
+    except Exception as e:
+        print(f"Error getting product from database: {e}")
+        return None
+
+
+def get_customer_orders_from_db(customer_id: str) -> List[OrderHistory]:
+    """Get order history for a customer from database"""
+    try:
+        with get_db_session() as session:
+            return order_history_crud.filter(session, {'customer_id': customer_id})
+    except Exception as e:
+        print(f"Error getting orders from database: {e}")
+        return []
 
 
 @app.get("/")
@@ -66,38 +91,61 @@ def greet():
 
 @app.get("/productdatabase/")
 def get_products_from_database():
-    """Get all products from CSV database using pandas"""
-    df = load_csv_data()
+    """Get all products from database"""
+    products = load_products_from_db()
 
-    if df is None:
-        return {"error": "Failed to load CSV data"}
+    if not products:
+        return {"error": "Failed to load product data or no products found"}
 
-    # Convert DataFrame to list of dictionaries
-    products = df.to_dict('records')
+    # Convert Product objects to dictionaries
+    products_list = [
+        {
+            "product_id": p.product_id,
+            "product_name": p.product_name,
+            "category": p.category,
+            "gender": p.gender,
+            "price": p.price,
+            "online_available": p.online_available,
+            "offline_available": p.offline_available,
+            "offline_stores": p.offline_stores,
+            "store_ids": p.store_ids,
+            "festival": p.festival,
+            "season": p.season,
+            "image_reference": p.image_reference,
+            "loyalty_points": p.loyalty_points
+        }
+        for p in products
+    ]
 
     return {
-        "total_products": len(products),
-        "products": products
+        "total_products": len(products_list),
+        "products": products_list
     }
 
 
 @app.get("/productdatabase/{product_id}")
 def get_product_by_id_from_database(product_id: str):
-    """Get a specific product by ID from CSV database using pandas"""
-    df = load_csv_data()
+    """Get a specific product by ID from database"""
+    product = get_product_from_db(product_id)
 
-    if df is None:
-        return {"error": "Failed to load CSV data"}
-
-    # Filter DataFrame by product_id
-    product_row = df[df['product_id'] == product_id]
-
-    if product_row.empty:
+    if product is None:
         return {"error": f"Product with ID {product_id} not found"}
 
-    # Convert to dictionary
-    product = product_row.iloc[0].to_dict()
-    return product
+    return {
+        "product_id": product.product_id,
+        "product_name": product.product_name,
+        "category": product.category,
+        "gender": product.gender,
+        "price": product.price,
+        "online_available": product.online_available,
+        "offline_available": product.offline_available,
+        "offline_stores": product.offline_stores,
+        "store_ids": product.store_ids,
+        "festival": product.festival,
+        "season": product.season,
+        "image_reference": product.image_reference,
+        "loyalty_points": product.loyalty_points
+    }
 
 
 # @app.get("/productdatabase/category/{category}")
@@ -150,84 +198,62 @@ def get_product_by_id_from_database(product_id: str):
 @app.get("/api/customer/{customer_id}")
 def get_customer_profile(customer_id: str):
     """Get customer profile by customer ID"""
-    df = load_customer_data()
+    customer = load_customer_from_db(customer_id)
 
-    if df is None:
-        return {"error": "Failed to load customer data"}
-
-    # Filter DataFrame by customer_id
-    customer_row = df[df['customer_id'] == customer_id]
-
-    if customer_row.empty:
+    if customer is None:
         return {"error": f"Customer with ID {customer_id} not found"}
-
-    # Convert to dictionary
-    customer = customer_row.iloc[0].to_dict()
 
     # Parse order history (comma-separated product IDs)
     order_history = []
-    if pd.notna(customer.get('order_history')):
-        product_ids = customer['order_history'].split('|')
+    if customer.order_history:
+        product_ids = customer.order_history.split('|')
         order_history = [pid.strip() for pid in product_ids]
 
     # Parse pending orders
     pending_orders = []
-    if pd.notna(customer.get('pending_orders')):
-        product_ids = customer['pending_orders'].split('|')
+    if customer.pending_orders:
+        product_ids = customer.pending_orders.split('|')
         pending_orders = [pid.strip() for pid in product_ids]
 
     return {
-        "customer_id": customer['customer_id'],
-        "customer_name": customer['customer_name'],
-        "phone": customer.get('phone', ''),
-        "address": customer.get('address', ''),
-        "loyalty_points": customer['loyalty_points'],
+        "customer_id": customer.customer_id,
+        "customer_name": customer.customer_name,
+        "phone": customer.phone or '',
+        "address": customer.address or '',
+        "loyalty_points": customer.loyalty_points,
         "order_history": order_history,
         "pending_orders": pending_orders
     }
 
 
 @app.get("/api/customer/{customer_id}/orders")
-def get_customer_orders(customer_id: str):
+def get_customer_orders_endpoint(customer_id: str):
     """Get customer's order history with product details"""
     # First get customer data
-    customer_df = load_customer_data()
-    product_df = load_csv_data()
+    customer = load_customer_from_db(customer_id)
 
-    if customer_df is None or product_df is None:
-        return {"error": "Failed to load data"}
-
-    # Find customer
-    customer_row = customer_df[customer_df['customer_id'] == customer_id]
-
-    if customer_row.empty:
+    if customer is None:
         return {"error": f"Customer with ID {customer_id} not found"}
 
-    customer = customer_row.iloc[0].to_dict()
-
-    # Get order history product IDs and dates
+    # Get order history from database
+    orders = get_customer_orders_from_db(customer_id)
+    
     order_products = []
-    if pd.notna(customer.get('order_history')):
-        product_ids = customer['order_history'].split('|')
-        product_ids = [pid.strip() for pid in product_ids]
-
-        # Get order dates
-        order_dates = []
-        if pd.notna(customer.get('order_dates')):
-            order_dates = customer['order_dates'].split('|')
-            order_dates = [date.strip() for date in order_dates]
-
-        # Get product details for each product ID with corresponding date
-        for idx, pid in enumerate(product_ids):
-            product_row = product_df[product_df['product_id'] == pid]
-            if not product_row.empty:
-                product = product_row.iloc[0].to_dict()
-                # Add purchase date if available
-                if idx < len(order_dates):
-                    product['purchase_date'] = order_dates[idx]
-                else:
-                    product['purchase_date'] = None
-                order_products.append(product)
+    for order in orders:
+        # Get full product details
+        product = get_product_from_db(order.product_id)
+        if product:
+            order_products.append({
+                "transaction_id": order.transaction_id,
+                "product_id": product.product_id,
+                "product_name": product.product_name,
+                "category": product.category,
+                "price": product.price,
+                "quantity": order.quantity,
+                "purchase_date": order.order_dates,
+                "loyalty_points": order.loyalty_points,
+                "image_reference": product.image_reference
+            })
 
     return {
         "customer_id": customer_id,
@@ -238,16 +264,24 @@ def get_customer_orders(customer_id: str):
 @app.get("/api/products/multiple/{product_ids}")
 def get_multiple_products(product_ids: str):
     """Get multiple products by pipe-separated product IDs"""
-    df = load_csv_data()
-
-    if df is None:
-        return {"error": "Failed to load product data"}
-
     # Split product IDs and clean them
     ids_list = [pid.strip() for pid in product_ids.split('|')]
 
-    # Filter products by the list of IDs
-    products = df[df['product_id'].isin(ids_list)].to_dict('records')
+    products = []
+    for pid in ids_list:
+        product = get_product_from_db(pid)
+        if product:
+            products.append({
+                "product_id": product.product_id,
+                "product_name": product.product_name,
+                "category": product.category,
+                "gender": product.gender,
+                "price": product.price,
+                "online_available": product.online_available,
+                "offline_available": product.offline_available,
+                "image_reference": product.image_reference,
+                "loyalty_points": product.loyalty_points
+            })
 
     return {
         "products": products,
