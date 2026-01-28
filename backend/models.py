@@ -32,6 +32,7 @@ class Product(SQLModel, table=True):
     category: str = Field(index=True)
     gender: str
     price: float
+    quantity: int = Field(default=0)  # Available quantity for each product
     online_available: str  # Yes/No
     offline_available: str  # Yes/No
     offline_stores: Optional[str] = None  # Semicolon-separated store names

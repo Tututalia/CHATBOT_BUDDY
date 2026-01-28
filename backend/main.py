@@ -1,8 +1,9 @@
 from crud import (
     product_crud, customer_crud, store_crud, order_history_crud,
+    store_keeper_transaction_crud,
     ProductCRUD, CustomerCRUD
 )
-from models import Customer, Product, Store, OrderHistory
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
@@ -107,7 +108,8 @@ def get_products_from_database():
             "festival": p.festival,
             "season": p.season,
             "image_reference": p.image_reference,
-            "loyalty_points": p.loyalty_points
+            "loyalty_points": p.loyalty_points,
+            "quantity": p.quantity
         }
         for p in products
     ]
@@ -139,7 +141,8 @@ def get_product_by_id_from_database(product_id: str):
         "festival": product.festival,
         "season": product.season,
         "image_reference": product.image_reference,
-        "loyalty_points": product.loyalty_points
+        "loyalty_points": product.loyalty_points,
+        "quantity": product.quantity
     }
 
 
@@ -275,7 +278,8 @@ def get_multiple_products(product_ids: str):
                 "online_available": product.online_available,
                 "offline_available": product.offline_available,
                 "image_reference": product.image_reference,
-                "loyalty_points": product.loyalty_points
+                "loyalty_points": product.loyalty_points,
+                "quantity": product.quantity
             })
 
     return {
@@ -305,6 +309,94 @@ async def test_chat_endpoint(data: dict):
     """Test endpoint to see what data is being received"""
     print("Test endpoint received:", data)
     return {"received": data}
+
+
+# ----- New API models & endpoints for creating products and transactions -----
+class ProductCreateModel(BaseModel):
+    product_id: str
+    product_name: str
+    category: str
+    gender: str
+    price: float
+    quantity: Optional[int] = 0
+    online_available: str
+    offline_available: str
+    offline_stores: Optional[str] = None
+    store_ids: Optional[str] = None
+    festival: Optional[str] = None
+    season: str
+    image_reference: str
+    loyalty_points: Optional[int] = 0
+
+
+@app.post("/api/products")
+def create_product_endpoint(product: ProductCreateModel):
+    try:
+        with get_db_session() as session:
+            if product_crud.exists(session, product.product_id):
+                return {"success": False, "error": "Product with this ID already exists"}
+
+            p = Product(**product.dict())
+            created = product_crud.create(session, p)
+            return {"success": True, "product_id": created.product_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class OrderCreateModel(BaseModel):
+    transaction_id: str
+    customer_id: str
+    customer_name: str
+    product_id: str
+    product_name: str
+    quantity: int
+    order_dates: str
+    loyalty_points: int
+
+
+@app.post("/api/orders")
+def create_order_endpoint(order: OrderCreateModel):
+    try:
+        with get_db_session() as session:
+            if order_history_crud.exists(session, order.transaction_id):
+                return {"success": False, "error": "Transaction already exists"}
+
+            o = OrderHistory(**order.dict())
+            created = order_history_crud.create(session, o)
+            return {"success": True, "transaction_id": created.transaction_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class StoreTransactionCreateModel(BaseModel):
+    id: int
+    customer_id: str
+    product_id: str
+    date: str
+    user_name: str
+    product: str
+    qty: int
+    mode: str
+    store_name: str
+    store_id: Optional[str] = None
+    status: str
+    amount: float
+    address: str
+    phone: str
+
+
+@app.post("/api/store-transactions")
+def create_store_transaction_endpoint(tx: StoreTransactionCreateModel):
+    try:
+        with get_db_session() as session:
+            if store_keeper_transaction_crud.exists(session, tx.id):
+                return {"success": False, "error": "Transaction with this id already exists"}
+
+            t = StoreKeeperTransaction(**tx.dict())
+            created = store_keeper_transaction_crud.create(session, t)
+            return {"success": True, "id": created.id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/chat", response_model=ChatResponse)
