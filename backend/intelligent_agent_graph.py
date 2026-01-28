@@ -125,6 +125,31 @@ def get_product_by_id(product_id: str) -> Product:
         return None
 
 
+def deduct_product_quantity(product_id: str, quantity: int = 1) -> bool:
+    """
+    Deduct quantity from a product after successful purchase.
+    
+    Args:
+        product_id: The product ID to update
+        quantity: Number of units to deduct (default: 1)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with get_db_session() as session:
+            product = product_crud.get_by_id(session, product_id)
+            if product:
+                new_quantity = max(0, product.quantity - quantity)
+                product_crud.update(session, product_id, {"quantity": new_quantity})
+                print(f"✅ Deducted {quantity} unit(s) from {product.product_name}. New quantity: {new_quantity}")
+                return True
+            return False
+    except Exception as e:
+        print(f"Error deducting quantity for product {product_id}: {e}")
+        return False
+
+
 def get_store_by_id(store_id: str) -> Store:
     """Get a single store by ID from database"""
     try:
@@ -263,6 +288,7 @@ def inventory_agent(product_id: str) -> str:
     """
     Checks if a product is available in inventory and shows buying options.
     Use this when user selects a product or asks about availability.
+    If quantity is 0, suggests similar products using the recommendation agent.
 
     Args:
         product_id: The product ID to check (e.g., P001)
@@ -276,17 +302,47 @@ def inventory_agent(product_id: str) -> str:
     if product is None:
         return f"❌ Product {product_id} not found. Please check the product ID and try again."
 
-    # Check availability
+    # Check quantity first - if 0, product is out of stock
+    if product.quantity <= 0:
+        result = f"❌ **Sorry, {product.product_name} (ID: {product_id}) is OUT OF STOCK**\n\n"
+        result += f"Current stock: 0 units\n\n"
+        
+        # Find similar products in the same category
+        similar_products = load_products_from_db(
+            category=product.category,
+            gender=product.gender if product.gender else None
+        )
+        
+        # Filter out the current product and products with 0 quantity
+        similar_products = [p for p in similar_products 
+                          if p.product_id != product_id and p.quantity > 0]
+        
+        if similar_products:
+            # Limit to top 4 similar products
+            similar_products = similar_products[:4]
+            result += "🔄 **Similar Products You Might Like:**\n\n"
+            for p in similar_products:
+                result += f"- **{p.product_name}** (ID: {p.product_id})\n"
+                result += f"  Price: ₹{int(p.price):,} | In Stock: {p.quantity} units\n\n"
+            result += "\nWould you like to select any of these alternatives?"
+        else:
+            result += "Unfortunately, no similar products are currently available.\n"
+            result += "Would you like to browse other categories?"
+        
+        return result
+
+    # Check availability channels
     online_available = str(product.online_available).lower() == 'yes'
     offline_available = str(product.offline_available).lower() == 'yes'
 
     if not online_available and not offline_available:
-        result = f"❌ **Sorry, Product {product_id} is OUT OF STOCK**\n"
+        result = f"❌ **Sorry, Product {product_id} is currently unavailable for purchase**\n"
         result += "Would you like to see alternative products?"
         return result
 
     result = f"✅ **Product {product_id} is IN STOCK!**\n\n"
-    result += f"**{product.product_name}** - ₹{int(product.price):,}\n\n"
+    result += f"**{product.product_name}** - ₹{int(product.price):,}\n"
+    result += f"**Available Quantity:** {product.quantity} units\n\n"
     result += "📦 **Purchase Options:**\n\n"
 
     if online_available:
@@ -392,6 +448,9 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
     product = get_product_by_id(product_id)
     product_name = product.product_name if product else f"Product {product_id}"
     product_price = int(product.price) if product else 0
+
+    # Deduct quantity from inventory after successful order
+    deduct_product_quantity(product_id, quantity=1)
 
     if purchase_type.lower() == "online":
         # Add delay for online purchases before showing fulfillment
