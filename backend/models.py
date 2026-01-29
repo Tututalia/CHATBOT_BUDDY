@@ -93,8 +93,10 @@ class StoreKeeperTransaction(SQLModel, table=True):
     product: str  # Product name
     qty: int
     mode: str  # Online/Offline
-    store_name: str = Field(foreign_key="stores.store_id", index=True)
-    store_id: Optional[str] = Field(default=None, index=True)
+    # store_name is a human-readable name; use `store_id` as the FK to `stores.store_id`
+    store_name: str = Field(index=True)
+    store_id: Optional[str] = Field(
+        default=None, foreign_key="stores.store_id", index=True)
     status: str  # Complete/Pending
     amount: float
     address: str
@@ -129,10 +131,18 @@ class AdminDashboardData(SQLModel, table=True):
 class Cart(SQLModel, table=True):
     __tablename__ = "cart"
 
-    id: int = Field(default=None, primary_key=True)
-    customer_id: str = Field(foreign_key="customers.customer_id", index=True)
-    product_id: str = Field(foreign_key="products.product_id", index=True)
+    order_id: str = Field(primary_key=True, index=True)
+    customer_id: Optional[str] = Field(
+        default=None, foreign_key="customers.customer_id", index=True)
+    product_id: Optional[str] = Field(
+        default=None, foreign_key="products.product_id", index=True)
+    store_id: Optional[str] = Field(
+        default=None, foreign_key="stores.store_id", index=True)
+    channel: Optional[str] = Field(default="online")
+    status: Optional[str] = Field(default="pending")
+    created_at: Optional[str] = Field(default=None)
 
     # Relationships
     customer: Optional[Customer] = Relationship()
     product: Optional[Product] = Relationship()
+    store: Optional[Store] = Relationship()

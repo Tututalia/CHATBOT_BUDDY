@@ -5,9 +5,10 @@ LLM decides which agent tools to call based on user query
 
 from crud import (
     product_crud, store_crud, customer_crud, order_history_crud,
-    ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD
+    ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD, cart_crud,
+    store_keeper_transaction_crud, admin_dashboard_data_crud
 )
-from models import Product, Store, Customer, OrderHistory
+from models import Product, Store, Customer, OrderHistory, Cart
 from database import engine, get_db_session
 from typing import TypedDict, Annotated, List, Dict, Any, Literal
 from langgraph.graph import StateGraph, START, END
@@ -16,6 +17,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
 from sqlmodel import Session
+from sqlalchemy.exc import IntegrityError
 import json
 import random
 from datetime import datetime
@@ -128,11 +130,11 @@ def get_product_by_id(product_id: str) -> Product:
 def deduct_product_quantity(product_id: str, quantity: int = 1) -> bool:
     """
     Deduct quantity from a product after successful purchase.
-    
+
     Args:
         product_id: The product ID to update
         quantity: Number of units to deduct (default: 1)
-    
+
     Returns:
         True if successful, False otherwise
     """
@@ -141,8 +143,10 @@ def deduct_product_quantity(product_id: str, quantity: int = 1) -> bool:
             product = product_crud.get_by_id(session, product_id)
             if product:
                 new_quantity = max(0, product.quantity - quantity)
-                product_crud.update(session, product_id, {"quantity": new_quantity})
-                print(f"✅ Deducted {quantity} unit(s) from {product.product_name}. New quantity: {new_quantity}")
+                product_crud.update(session, product_id, {
+                                    "quantity": new_quantity})
+                print(
+                    f"✅ Deducted {quantity} unit(s) from {product.product_name}. New quantity: {new_quantity}")
                 return True
             return False
     except Exception as e:
@@ -306,17 +310,17 @@ def inventory_agent(product_id: str) -> str:
     if product.quantity <= 0:
         result = f"❌ **Sorry, {product.product_name} (ID: {product_id}) is OUT OF STOCK**\n\n"
         result += f"Current stock: 0 units\n\n"
-        
+
         # Find similar products in the same category
         similar_products = load_products_from_db(
             category=product.category,
             gender=product.gender if product.gender else None
         )
-        
+
         # Filter out the current product and products with 0 quantity
-        similar_products = [p for p in similar_products 
-                          if p.product_id != product_id and p.quantity > 0]
-        
+        similar_products = [p for p in similar_products
+                            if p.product_id != product_id and p.quantity > 0]
+
         if similar_products:
             # Limit to top 4 similar products
             similar_products = similar_products[:4]
@@ -328,7 +332,7 @@ def inventory_agent(product_id: str) -> str:
         else:
             result += "Unfortunately, no similar products are currently available.\n"
             result += "Would you like to browse other categories?"
-        
+
         return result
 
     # Check availability channels
@@ -373,12 +377,12 @@ def inventory_agent(product_id: str) -> str:
     result += "\n**How would you like to proceed?**\n"
     result += "- Type 'online' to buy online with home delivery\n"
     if offline_available:
-        result += "- Type 'offline' or select a store name/ID for store pickup\n"
+        result += "- To pick up from a store, reply with the store ID (e.g., STR016) or type 'offline'\n"
     return result
 
 
 @tool
-def payment_agent(product_id: str, payment_method: str = "") -> str:
+def payment_agent(product_id: str, payment_method: str = "", customer_id: str = None) -> str:
     """
     Shows available payment methods and processes online payment for the selected product.
     Use this when user chooses online purchase option.
@@ -397,8 +401,48 @@ def payment_agent(product_id: str, payment_method: str = "") -> str:
     amount = int(product.price) if product else random.choice(
         [1299, 1999, 2499, 4999])
 
-    # If no payment method specified, show options
+    # If no payment method specified, just show available methods.
+    # For online purchase, create a pending cart entry automatically (not as a tool call).
     if not payment_method:
+        try:
+            with get_db_session() as session:
+                # Avoid duplicate pending entries for same customer/product
+                existing = None
+                if customer_id:
+                    existing_list = cart_crud.filter(session, filters={"customer_id": customer_id, "product_id": product_id, "channel": "online", "status": "pending"}, operators={
+                                                     "customer_id": "==", "product_id": "==", "channel": "==", "status": "=="}, limit=1, order_by="created_at", order_desc=True)
+                    existing = existing_list[0] if existing_list else None
+
+                if not existing:
+                    # Determine a valid store_id to satisfy FK constraints.
+                    store_id_val = None
+                    try:
+                        prod = product_crud.get_by_id(session, product_id)
+                        if prod and getattr(prod, "store_ids", None):
+                            ids = [s.strip()
+                                   for s in prod.store_ids.split(";") if s.strip()]
+                            if ids:
+                                store_id_val = ids[0]
+                        if not store_id_val:
+                            stores = store_crud.get_all(session, limit=1)
+                            if stores:
+                                store_id_val = stores[0].store_id
+                    except Exception:
+                        store_id_val = None
+
+                    cart_data = {
+                        "order_id": f"ORD{random.randint(100000, 999999)}",
+                        "customer_id": customer_id,
+                        "product_id": product_id,
+                        "store_id": store_id_val,
+                        "channel": "online",
+                        "status": "pending",
+                        "created_at": datetime.utcnow().isoformat()
+                    }
+                    cart_crud.create(session, cart_data)
+        except Exception as e:
+            print(f"Error creating pending cart (online): {e}")
+
         result = f"💳 **Payment Methods for {product_name}:**\n\n"
         result += f"Amount: ₹{amount:,}\n\n"
         result += "Please choose your preferred payment method:\n\n"
@@ -419,13 +463,114 @@ def payment_agent(product_id: str, payment_method: str = "") -> str:
     result += f"Method: {payment_method.upper()}\n"
     result += f"Payment ID: {payment_id}\n\n"
     result += "✅ **Payment Successful!**\n"
+
+    # On successful payment, remove the pending online cart entry and add to order_history and store_keeper_transaction
+    try:
+        with get_db_session() as session:
+            pending = None
+            if customer_id:
+                pending_list = cart_crud.filter(session, filters={"customer_id": customer_id, "product_id": product_id, "channel": "online", "status": "pending"}, operators={
+                                                "customer_id": "==", "product_id": "==", "channel": "==", "status": "=="}, limit=1, order_by="created_at", order_desc=True)
+                pending = pending_list[0] if pending_list else None
+
+            if pending:
+                try:
+                    cart_crud.delete(session, pending.order_id)
+                except Exception as e:
+                    print(f"Warning: failed to delete pending cart: {e}")
+                transaction_id = pending.order_id
+            else:
+                transaction_id = f"TRX{random.randint(100000, 999999)}"
+
+            # Add to order_history
+            try:
+                customer = customer_crud.get_by_id(
+                    session, customer_id) if customer_id else None
+                customer_name = customer.customer_name if customer else ''
+                prod = product
+                loyalty_pts = prod.loyalty_points if prod and getattr(
+                    prod, 'loyalty_points', None) else 0
+
+                order_record = {
+                    "transaction_id": transaction_id,
+                    "customer_id": customer_id,
+                    "customer_name": customer_name,
+                    "product_id": product_id,
+                    "product_name": product_name,
+                    "quantity": 1,
+                    "order_dates": datetime.utcnow().isoformat(),
+                    "loyalty_points": loyalty_pts
+                }
+                order_history_crud.create(session, order_record)
+            except Exception as e:
+                print(f"Warning: failed to create order_history record: {e}")
+
+            # Add to store_keeper_transaction
+            try:
+                tx_id = int(time.time() * 1000) % 100000000
+                store_tx = {
+                    "id": tx_id,
+                    "customer_id": customer_id,
+                    "product_id": product_id,
+                    "date": datetime.utcnow().isoformat(),
+                    "user_name": customer.customer_name if customer else '',
+                    "product": product_name,
+                    "qty": 1,
+                    "mode": "Online",
+                    "store_name": "Online",
+                    "store_id": None,
+                    "status": "Complete",
+                    "amount": float(amount),
+                    "address": customer.address if customer else '',
+                    "phone": customer.phone if customer else ''
+                }
+                # Prefer store_id from pending cart if available
+                try:
+                    if pending and getattr(pending, 'store_id', None):
+                        store_tx['store_id'] = pending.store_id
+                    else:
+                        stores = store_crud.get_all(session, limit=1)
+                        if stores:
+                            store_tx['store_id'] = stores[0].store_id
+                except Exception:
+                    pass
+                try:
+                    store_keeper_transaction_crud.create(session, store_tx)
+                except IntegrityError as ie:
+                    print(
+                        f"IntegrityError inserting store_keeper_transaction: {ie}")
+                    try:
+                        session.rollback()
+                    except Exception:
+                        pass
+                    try:
+                        stores = store_crud.get_all(session, limit=1)
+                        fallback_store_id = stores[0].store_id if stores else None
+                        if fallback_store_id:
+                            store_tx["store_id"] = fallback_store_id
+                        with get_db_session() as retry_sess:
+                            store_keeper_transaction_crud.create(
+                                retry_sess, store_tx)
+                    except Exception as e:
+                        print(
+                            f"Warning: failed to create store_keeper_transaction after fallback: {e}")
+                except Exception as e:
+                    print(
+                        f"Warning: failed to create store_keeper_transaction: {e}")
+            except Exception as e:
+                print(
+                    f"Warning: failed to prepare store_keeper_transaction: {e}")
+
+    except Exception as e:
+        print(f"Warning during payment post-processing: {e}")
+
     result += "Your order is being processed..."
 
     return result
 
 
 @tool
-def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name: str = "") -> str:
+def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name: str = "", customer_id: str = None, order_id: str = None) -> str:
     """
     Handles order fulfillment - delivery for online, store pickup for offline.
     For ONLINE: Call this after payment is complete.
@@ -442,7 +587,8 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
     Returns:
         Fulfillment details and order tracking info
     """
-    order_id = f"ORD{random.randint(100000, 999999)}"
+    if not order_id:
+        order_id = f"ORD{random.randint(100000, 999999)}"
 
     # Get product details from database
     product = get_product_by_id(product_id)
@@ -459,13 +605,17 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
 
         delivery_date = "3-5 business days"
         result = f"📦 **Order Confirmed!**\n\n"
+        # Use provided order_id (from pending cart created at selection time)
         result += f"Order ID: {order_id}\n"
         result += f"Product: {product_name} ({product_id})\n"
         result += f"Amount: ₹{product_price:,}\n"
         result += f"Delivery Type: Home Delivery\n"
         result += f"Expected Delivery: {delivery_date}\n\n"
         result += "You can track your order with the Order ID.\n\n"
-        # Instruction for LLM to automatically call loyalty_agent
+        # NOTE: Do NOT create a cart record here for online flows.
+        # The pending cart entry should already have been created when the user selected the ONLINE option
+        # (payment phase). After payment completes, this tool is called to finalize fulfillment.
+        # Instruction for LLM to automatically call loyalty_agent using the current `order_id`
         result += f"[SYSTEM: Now call loyalty_agent with order_id='{order_id}' and product_id='{product_id}' to award loyalty rewards automatically]"
     else:
         # Offline purchase
@@ -483,6 +633,23 @@ def fulfillment_agent(product_id: str, purchase_type: str = "online", store_name
 
         store_display_name = store_details.store_name if store_details else store_name
         store_address = store_details.address if store_details else "Please check store location"
+
+        # Create cart record for offline pickup (channel=offline, status=pending)
+        try:
+            with get_db_session() as session:
+                cart_data = {
+                    "order_id": order_id,
+                    "customer_id": customer_id,
+                    "product_id": product_id,
+                    "store_id": store_details.store_id if store_details else None,
+                    "channel": "offline",
+                    "status": "pending",
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                cart_crud.create(session, cart_data)
+        except Exception as e:
+            print(
+                f"Warning: failed to create cart record for offline order {order_id}: {e}")
 
         result = f"🏪 **In-Store Pickup Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
@@ -606,26 +773,54 @@ def agent_node(state: AgentState):
     from langchain_core.messages import SystemMessage
     customer_id = state.get("customer_id", "UNKNOWN")
     system_message = SystemMessage(
-        content=f"""You are a helpful AI shopping assistant for an e-commerce platform.
+        content=f"""
+You are a helpful, proactive AI shopping assistant for an e-commerce platform.
 
-CRITICAL CUSTOMER CONTEXT:
-- The customer you are talking to has customer_id: {customer_id}
-- This customer is already logged in and authenticated
-- You MUST use this customer_id when calling customer_info_agent
-- NEVER ask the customer for their ID - you already have it!
+CRITICAL INSTRUCTIONS (STRICT):
 
-When the customer asks about:
-- "my phone number" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
-- "my address" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
-- "my orders" or "order history" → call customer_info_agent with customer_id="{customer_id}" and info_type="orders"
-- "my profile" or "my details" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
-- "who am i" → call customer_info_agent with customer_id="{customer_id}" and info_type="profile"
+1. TOOL USAGE IS MANDATORY:
+    - You MUST ALWAYS use the available agent tools for every user request related to product recommendations, inventory/availability, payment, fulfillment, loyalty, and post-purchase information.
+    - NEVER generate product lists, availability, payment, order, or fulfillment responses yourself. ALWAYS call the appropriate tool for each action.
 
-Be helpful, friendly, and proactive in assisting the customer."""
+2. INVENTORY CHECKS:
+    - For ANY purchase intent (e.g., "I want to buy", "buy online", "add to cart", "purchase", "order now", etc.) or when a product is selected, you MUST call `inventory_agent` FIRST to check stock, availability, and purchase options—even if the product seems obvious from context.
+    - If the product is NOT explicitly mentioned in the user's message, you MUST clarify or confirm the product with the user before calling `inventory_agent`.
+
+3. PRODUCT RECOMMENDATIONS:
+    - Use `recommendation_agent` for any product suggestions, browsing, or when the user asks for options.
+
+4. PAYMENT FLOWS:
+    - Use `payment_agent` for ALL payment-related actions. Do NOT describe payment steps yourself.
+
+5. ORDER FULFILLMENT:
+    - Use `fulfillment_agent` for delivery (online) or store pickup (offline). For offline, ensure the user has selected a specific store before calling the tool.
+    - When calling `fulfillment_agent`, you MUST pass `customer_id` as the current customer id ({customer_id}).
+
+6. LOYALTY & POST-PURCHASE:
+    - Use `loyalty_agent` after fulfillment to award points and coupons.
+    - Use `post_purchase_agent` after loyalty rewards for feedback, support, and tracking.
+
+7. CLARIFY & CONFIRM:
+    - If any required information (product, payment method, store, etc.) is missing or ambiguous, ASK the user to clarify before proceeding with tool calls.
+
+8. RESPONSE QUALITY:
+    - Be friendly, concise, and proactive. Guide the user through each step, always using the tools for information and actions.
+    - Do NOT make assumptions—always confirm details if not explicit.
+
+9. EXAMPLES:
+    - If user says "I want to buy online" but does not specify the product, ask "Which product would you like to buy?" before calling `inventory_agent`.
+    - If user says "Show me hoodies", call `recommendation_agent`.
+    - If user says "Is this in stock?", call `inventory_agent` for the referenced product.
+    - If user says "Proceed to payment", call `payment_agent`.
+
+You must strictly follow these instructions for every user query. Do NOT skip tool calls or generate information yourself.
+"""
     )
 
     # Prepend system message to all messages
     messages = [system_message] + state["messages"]
+
+    # Removed heuristic that injected inventory info as a SystemMessage.
 
     # Call LLM with tools
     response = llm_with_tools.invoke(messages)

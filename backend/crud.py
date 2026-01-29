@@ -275,7 +275,7 @@ order_history_crud = UniversalCRUD(OrderHistory, primary_key="transaction_id")
 store_keeper_transaction_crud = UniversalCRUD(
     StoreKeeperTransaction, primary_key="id")
 admin_dashboard_data_crud = UniversalCRUD(AdminDashboardData, primary_key="id")
-cart_crud = UniversalCRUD(Cart, primary_key="id")
+cart_crud = UniversalCRUD(Cart, primary_key="order_id")
 
 
 # ==================== LEGACY CLASSES (for backward compatibility) ====================

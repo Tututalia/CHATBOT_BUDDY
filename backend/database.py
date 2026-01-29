@@ -1,4 +1,5 @@
 from sqlmodel import SQLModel, create_engine, Session, select
+from sqlalchemy import event
 from typing import Optional, List
 from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Cart
 
@@ -6,6 +7,18 @@ from models import Customer, Product, Store, OrderHistory, StoreKeeperTransactio
 DATABASE_URL = "sqlite:///./retail_agent.db"
 engine = create_engine(DATABASE_URL, echo=True, connect_args={
                        "check_same_thread": False})
+
+
+# Ensure SQLite enforces foreign key constraints on every new connection
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    try:
+        dbapi_connection.execute('PRAGMA foreign_keys=ON')
+    except Exception:
+        # Some DBAPIs may require cursor execution
+        cur = dbapi_connection.cursor()
+        cur.execute('PRAGMA foreign_keys=ON')
+        cur.close()
 
 
 # Initialize database
