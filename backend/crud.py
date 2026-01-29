@@ -620,7 +620,7 @@ class CartCRUD:
         return cart_crud.create(session, cart)
 
     @staticmethod
-    def get_by_id(session: Session, cart_id: int) -> Optional[Cart]:
+    def get_by_id(session: Session, cart_id: str) -> Optional[Cart]:
         return cart_crud.get_by_id(session, cart_id)
 
     @staticmethod
@@ -645,11 +645,11 @@ class CartCRUD:
         return cart_crud.filter(session, filters={"customer_id": customer_id})
 
     @staticmethod
-    def update(session: Session, cart_id: int, data: Dict[str, Any]) -> Optional[Cart]:
+    def update(session: Session, cart_id: str, data: Dict[str, Any]) -> Optional[Cart]:
         return cart_crud.update(session, cart_id, data)
 
     @staticmethod
-    def delete(session: Session, cart_id: int) -> bool:
+    def delete(session: Session, cart_id: str) -> bool:
         return cart_crud.delete(session, cart_id)
 
 
