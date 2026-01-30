@@ -1,8 +1,11 @@
 from sqlmodel import SQLModel, create_engine
 import os
 
+# Ensure all models are imported so SQLModel.metadata includes all tables
+import models
+
 # Path to your SQLite database file
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "data.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "retail_agent.db")
 engine = create_engine(f"sqlite:///{DB_PATH}")
 
 

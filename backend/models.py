@@ -1,6 +1,16 @@
+
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime, date
+
+# Role Model
+
+
+class Role(SQLModel, table=True):
+    __tablename__ = "role"
+
+    id: int = Field(primary_key=True)
+    role_type: str
 
 
 # Customer Model
@@ -16,6 +26,7 @@ class Customer(SQLModel, table=True):
     order_history: Optional[str] = None  # Comma-separated transaction IDs
     order_dates: Optional[str] = None    # Comma-separated dates
     pending_orders: Optional[str] = None
+    role_id: Optional[int] = Field(default=None, foreign_key="role.id")
 
     # Relationships
     orders: List["OrderHistory"] = Relationship(back_populates="customer")
