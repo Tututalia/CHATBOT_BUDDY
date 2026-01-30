@@ -1,0 +1,102 @@
+ID,customer_id,product_id,Date,User Name,Product,Qty,Mode,Store Name,Status,Amount,Address,Phone
+30001,CUST001,PRD065,12/1/2025,Arujn Bose,Baggit Ladies Handbag,2,Offline,STR012,Complete,2999.0,11 Lake Road Kolkata,9001001
+30002,CUST002,PRD026,12/1/2025,Priya Sen,Lee Classic Tee,1,Offline,STR012,Complete,799.0,12 Lake Road Kolkata,9001002
+30003,CUST003,PRD032,12/2/2025,Amit Verma,Hrx Training Tee,3,Offline,STR007,Complete,999.0,13 Lake Road Kolkata,9001003
+30004,CUST004,PRD054,12/2/2025,Neha Gupta,Zara Knit Top,2,Offline,STR006,Complete,1999.0,14 Lake Road Kolkata,9001004
+30005,CUST005,PRD023,12/3/2025,Arjun Das,Reebok Sportswear,1,Offline,STR020,Complete,2199.0,15 Lake Road Kolkata,9001005
+30006,CUST006,PRD005,12/3/2025,Sanya Malhotra,Arrow Jeans,2,Offline,STR018,Complete,1599.0,16 Lake Road Kolkata,9001006
+30007,CUST007,PRD038,12/4/2025,Rohit Kapoor,United Colors Hoodie,1,Offline,STR013,Complete,1799.0,17 Lake Road Kolkata,9001007
+30008,CUST008,PRD065,12/4/2025,Anjali Mehta,Baggit Ladies Handbag,3,Offline,STR004,Complete,2999.0,18 Lake Road Kolkata,9001008
+30009,CUST009,PRD037,12/5/2025,Soumya Roy,Pepe Jeans Denim,1,Offline,STR001,Complete,2899.0,19 Lake Road Kolkata,9001009
+30010,CUST010,PRD037,12/5/2025,Ritika Banerjee,Pepe Jeans Denim,2,Offline,STR016,Complete,2899.0,20 Lake Road Kolkata,9001010
+30011,CUST011,PRD009,12/6/2025,Kunal Mishra,Fastrack Watch,1,Offline,STR023,Complete,1499.0,21 Lake Road Kolkata,9001011
+30012,CUST012,PRD015,12/6/2025,Pooja Nair,US Polo Shirt,2,Offline,STR023,Complete,2799.0,22 Lake Road Kolkata,9001012
+30013,CUST013,PRD008,12/7/2025,Ankit Singh,Levis Leather Jacket,3,Offline,STR021,Complete,5999.0,23 Lake Road Kolkata,9001013
+30014,CUST014,PRD001,12/7/2025,Nisha Agarwal,Being Human Hoodie,1,Offline,STR020,Complete,1999.0,24 Lake Road Kolkata,9001014
+30015,CUST015,PRD008,12/8/2025,Rahul Meena,Levis Leather Jacket,2,Offline,STR011,Complete,5999.0,25 Lake Road Kolkata,9001015
+30016,CUST016,PRD012,12/8/2025,Ishita Paul,Zara Casual Top,1,Offline,STR002,Complete,1999.0,26 Lake Road Kolkata,9001016
+30017,CUST017,PRD062,12/9/2025,Varun Chatterjee,Only Women Denim Jacket,2,Offline,STR008,Complete,3299.0,27 Lake Road Kolkata,9001017
+30018,CUST018,PRD012,12/9/2025,Tanvi Joshi,Zara Casual Top,1,Offline,STR002,Complete,1999.0,28 Lake Road Kolkata,9001018
+30019,CUST019,PRD043,12/10/2025,Manish Kumar,Lee Denim Jacket,2,Offline,STR008,Complete,2699.0,29 Lake Road Kolkata,9001019
+30020,CUST020,PRD067,12/10/2025,Reema Saxena,Nykaa Fashion Ethnic Gown,1,Offline,STR009,Complete,5999.0,30 Lake Road Kolkata,9001020
+30021,CUST021,PRD001,12/11/2025,Siddharth Rao,Being Human Hoodie,2,Offline,STR018,Complete,1999.0,31 Lake Road Kolkata,9001021
+30022,CUST022,PRD046,12/11/2025,Kavita Iyer,Calvin Klein Trousers,1,Offline,STR014,Complete,3799.0,32 Lake Road Kolkata,9001022
+30023,CUST023,PRD042,12/12/2025,Deepak Yadav,Arrow Formal Belt,3,Offline,STR017,Complete,599.0,33 Lake Road Kolkata,9001023
+30024,CUST024,PRD010,12/12/2025,Mehul Jain,Spykar Denim,1,Offline,STR004,Complete,1699.0,34 Lake Road Kolkata,9001024
+30025,CUST025,PRD018,12/13/2025,Sneha Kulkarni,Global Desi Kurti,2,Offline,STR020,Complete,2599.0,35 Lake Road Kolkata,9001025
+30026,CUST026,PRD054,12/13/2025,Abhishek Pandey,Zara Knit Top,1,Offline,STR001,Complete,1999.0,36 Lake Road Kolkata,9001026
+30027,CUST027,PRD023,12/14/2025,Pallavi Deshmukh,Reebok Sportswear,2,Offline,STR008,Complete,2199.0,37 Lake Road Kolkata,9001027
+30028,CUST028,PRD008,12/14/2025,Rakesh Sinha,Levis Leather Jacket,1,Offline,STR023,Complete,5999.0,38 Lake Road Kolkata,9001028
+30029,CUST029,PRD002,12/15/2025,Rajeev Mallick,Flying Machine Shorts,2,Offline,STR001,Complete,899.0,39 Lake Road Kolkata,9001029
+30030,CUST030,PRD049,12/15/2025,Swati Ghosh,Biba Anarkali Set,1,Offline,STR003,Complete,3599.0,40 Lake Road Kolkata,9001030
+30031,CUST031,PRD067,12/16/2025,Nikhil Arora,Nykaa Fashion Ethnic Gown,1,Offline,STR010,Complete,5999.0,41 Lake Road Kolkata,9001031
+30032,CUST032,PRD044,12/16/2025,Monika Reddy,Peter England Sweatshirt,2,Offline,STR016,Complete,1599.0,42 Lake Road Kolkata,9001032
+30033,CUST033,PRD022,12/17/2025,Ayush Tiwari,Only Denim Jacket,1,Offline,STR011,Complete,4299.0,43 Lake Road Kolkata,9001033
+30034,CUST034,PRD065,12/17/2025,Shruti Kulkarni,Baggit Ladies Handbag,2,Offline,STR011,Complete,2999.0,44 Lake Road Kolkata,9001034
+30035,CUST035,PRD021,12/18/2025,Vikram Bansal,Peter England Trousers,1,Offline,STR014,Complete,2999.0,45 Lake Road Kolkata,9001035
+30036,CUST036,PRD004,12/18/2025,Alisha Khan,Louis Philippe Shirt,2,Offline,STR023,Complete,2199.0,46 Lake Road Kolkata,9001036
+30037,CUST037,PRD002,12/19/2025,Karthik Iyer,Flying Machine Shorts,1,Offline,STR009,Complete,899.0,47 Lake Road Kolkata,9001037
+30038,CUST038,PRD001,12/19/2025,Rhea Mukherjee,Being Human Hoodie,2,Offline,STR018,Complete,1999.0,48 Lake Road Kolkata,9001038
+30039,CUST039,PRD017,12/20/2025,Sameer Sheikh,Puma Sports Shoes,1,Offline,STR015,Complete,4999.0,49 Lake Road Kolkata,9001039
+30040,CUST040,PRD066,12/20/2025,Payal Sood,Libas Cotton Kurta Set,2,Offline,STR005,Complete,3499.0,50 Lake Road Kolkata,9001040
+30041,CUST041,PRD017,12/21/2025,Aditya Sengupta,Puma Sports Shoes,1,Offline,STR020,Complete,4999.0,51 Lake Road Kolkata,9001041
+30042,CUST042,PRD059,12/21/2025,Sonal Tripathi,Zara Pleated Skirt,2,Offline,STR013,Complete,1999.0,52 Lake Road Kolkata,9001042
+30043,CUST043,PRD066,12/22/2025,Harsh Vardhan,Libas Cotton Kurta Set,1,Offline,STR009,Complete,3499.0,53 Lake Road Kolkata,9001043
+30044,CUST044,PRD033,12/22/2025,Isha Dutta,Van Heusen Formal Shirt,2,Offline,STR017,Complete,2499.0,54 Lake Road Kolkata,9001044
+30045,CUST045,PRD031,12/23/2025,Pranav Kulshreshtha,Fossil Leather Belt,1,Offline,STR010,Complete,699.0,55 Lake Road Kolkata,9001045
+30046,CUST046,PRD030,12/23/2025,Madhuri Patil,Monte Carlo Sweater,2,Offline,STR011,Complete,1899.0,56 Lake Road Kolkata,9001046
+30047,CUST047,PRD065,12/24/2025,Aakash Choudhary,Baggit Ladies Handbag,1,Offline,STR001,Complete,2999.0,57 Lake Road Kolkata,9001047
+30048,CUST048,PRD058,12/24/2025,Priyanka Menon,Biba Printed Anarkali,2,Offline,STR002,Complete,3999.0,58 Lake Road Kolkata,9001048
+30049,CUST049,PRD018,12/25/2025,Rahul Sharma,Global Desi Kurti,1,Offline,STR011,Complete,2599.0,59 Lake Road Kolkata,9001049
+30050,CUST050,PRD026,12/25/2025,Ananya Dey,Lee Classic Tee,2,Offline,STR020,Complete,799.0,60 Lake Road Kolkata,9001050
+30051,CUST051,PRD012,12/26/2025,Vishal Sharma,Zara Casual Top,1,Offline,STR006,Complete,1999.0,61 Lake Road Kolkata,9001051
+30052,CUST052,PRD017,12/26/2025,Lakshmi Reddy,Puma Sports Shoes,2,Offline,STR008,Complete,4999.0,62 Lake Road Kolkata,9001052
+30053,CUST053,PRD044,12/27/2025,Rajesh Kumar,Peter England Sweatshirt,1,Offline,STR012,Complete,1599.0,63 Lake Road Kolkata,9001053
+30054,CUST054,PRD017,12/27/2025,Divya Sharma,Puma Sports Shoes,2,Offline,STR020,Complete,4999.0,64 Lake Road Kolkata,9001054
+30055,CUST055,PRD029,12/28/2025,Suresh Patel,Oxemberg Formal Pants,1,Offline,STR011,Complete,2199.0,65 Lake Road Kolkata,9001055
+30056,CUST056,PRD040,12/28/2025,Preeti Agarwal,Wrangler Casual Shirt,2,Offline,STR007,Complete,1399.0,66 Lake Road Kolkata,9001056
+30057,CUST057,PRD064,12/29/2025,Ashok Reddy,Catwalk Women Heels,1,Offline,STR017,Complete,2599.0,67 Lake Road Kolkata,9001057
+30058,CUST058,PRD064,12/29/2025,Sunita Patel,Catwalk Women Heels,2,Offline,STR003,Complete,2599.0,68 Lake Road Kolkata,9001058
+30059,CUST059,PRD063,12/30/2025,Ramesh Singh,Forever New Party Dress,1,Offline,STR019,Complete,4499.0,69 Lake Road Kolkata,9001059
+30060,CUST060,PRD014,12/30/2025,Kavya Nair,Biba Kurti Set,2,Offline,STR006,Complete,3299.0,70 Lake Road Kolkata,9001060
+30061,CUST061,PRD035,12/31/2025,Sandeep Jain,Reebok Gym Shorts,1,Offline,STR021,Complete,799.0,71 Lake Road Kolkata,9001061
+30062,CUST062,PRD006,12/31/2025,Rekha Gupta,Tommy Hilfiger Sweater,2,Offline,STR007,Complete,2999.0,72 Lake Road Kolkata,9001062
+30063,CUST063,PRD038,1/1/2026,Manoj Gupta,United Colors Hoodie,1,Offline,STR022,Complete,1799.0,73 Lake Road Kolkata,9001063
+30064,CUST064,PRD058,1/1/2026,Meena Iyer,Biba Printed Anarkali,2,Offline,STR015,Complete,3999.0,74 Lake Road Kolkata,9001064
+30065,CUST065,PRD048,1/2/2026,Ravi Nair,Adidas Running Shoes,1,Offline,STR022,Complete,4499.0,75 Lake Road Kolkata,9001065
+30066,CUST066,PRD002,1/2/2026,Shweta Singh,Flying Machine Shorts,2,Offline,STR021,Complete,899.0,76 Lake Road Kolkata,9001066
+30067,CUST067,PRD038,1/3/2026,Prakash Iyer,United Colors Hoodie,1,Offline,STR019,Complete,1799.0,77 Lake Road Kolkata,9001067
+30068,CUST068,PRD033,1/3/2026,Deepa Kumar,Van Heusen Formal Shirt,2,Offline,STR005,Complete,2499.0,78 Lake Road Kolkata,9001068
+30069,CUST069,PRD018,1/4/2026,Anil Desai,Global Desi Kurti,1,Offline,STR019,Complete,2599.0,79 Lake Road Kolkata,9001069
+30070,CUST070,PRD063,1/4/2026,Anjana Menon,Forever New Party Dress,2,Offline,STR011,Complete,4499.0,80 Lake Road Kolkata,9001070
+30071,CUST071,PRD017,1/5/2026,Vinod Pillai,Puma Sports Shoes,1,Offline,STR019,Complete,4999.0,81 Lake Road Kolkata,9001071
+30072,CUST072,PRD035,1/5/2026,Vidya Deshmukh,Reebok Gym Shorts,2,Offline,STR022,Complete,799.0,82 Lake Road Kolkata,9001072
+30073,CUST073,PRD059,1/6/2026,Naveen Rao,Zara Pleated Skirt,1,Offline,STR022,Complete,1999.0,83 Lake Road Kolkata,9001073
+30074,CUST074,PRD032,1/6/2026,Gayatri Rao,Hrx Training Tee,2,Offline,STR019,Complete,999.0,84 Lake Road Kolkata,9001074
+30075,CUST075,PRD050,1/7/2026,Gopal Krishna,Global Desi Maxi Kurta,1,Offline,STR008,Complete,2799.0,85 Lake Road Kolkata,9001075
+30076,CUST076,PRD031,1/7/2026,Savita Joshi,Fossil Leather Belt,2,Offline,STR012,Complete,699.0,86 Lake Road Kolkata,9001076
+30077,CUST077,PRD048,1/8/2026,Sanjay Menon,Adidas Running Shoes,1,Offline,STR014,Complete,4499.0,87 Lake Road Kolkata,9001077
+30078,CUST078,PRD006,1/8/2026,Urmila Bansal,Tommy Hilfiger Sweater,2,Offline,STR018,Complete,2999.0,88 Lake Road Kolkata,9001078
+30079,CUST079,PRD011,1/9/2026,Dinesh Kulkarni,Adidas Track Pants,2,Offline,STR021,Complete,2499.0,89 Lake Road Kolkata,9001079
+30080,CUST080,PRD060,1/9/2026,Radha Mishra,H&M Women Crop Top,1,Offline,STR021,Complete,1499.0,90 Lake Road Kolkata,9001080
+30081,CUST081,PRD057,1/10/2026,Nishant Verma,AND Floral Maxi Dress,2,Offline,STR018,Complete,2799.0,91 Lake Road Kolkata,9001081
+30082,CUST082,PRD021,1/10/2026,Tanisha Bose,Peter England Trousers,1,Offline,STR007,Complete,2999.0,92 Lake Road Kolkata,9001082
+30083,CUST083,PRD022,1/11/2026,Rohan Kapadia,Only Denim Jacket,1,Offline,STR021,Complete,4299.0,93 Lake Road Kolkata,9001083
+30084,CUST084,PRD042,1/11/2026,Simran Kaur,Arrow Formal Belt,2,Offline,STR008,Complete,599.0,94 Lake Road Kolkata,9001084
+30085,CUST085,PRD039,1/12/2026,Aryan Chatterjee,Tom Tailor Denim Jacket,1,Offline,STR021,Complete,3299.0,95 Lake Road Kolkata,9001085
+30086,CUST086,PRD031,1/12/2026,Prachi Desai,Fossil Leather Belt,2,Offline,STR018,Complete,699.0,96 Lake Road Kolkata,9001086
+30087,CUST087,PRD066,1/13/2026,Yash Mehta,Libas Cotton Kurta Set,1,Offline,STR015,Complete,3499.0,97 Lake Road Kolkata,9001087
+30088,CUST088,PRD024,1/13/2026,Diya Agarwal,H&M Casual Shirt,2,Offline,STR003,Complete,1899.0,98 Lake Road Kolkata,9001088
+30089,CUST089,PRD049,1/14/2026,Karan Singh,Biba Anarkali Set,1,Offline,STR012,Complete,3599.0,99 Lake Road Kolkata,9001089
+30090,CUST090,PRD040,1/14/2026,Riya Kapoor,Wrangler Casual Shirt,2,Offline,STR001,Complete,1399.0,100 Lake Road Kolkata,9001090
+30091,CUST091,PRD046,1/15/2026,Aditya Kumar,Calvin Klein Trousers,1,Offline,STR011,Complete,3799.0,101 Lake Road Kolkata,9001091
+30092,CUST092,PRD024,1/15/2026,Shreya Reddy,H&M Casual Shirt,2,Offline,STR001,Complete,1899.0,102 Lake Road Kolkata,9001092
+30093,CUST093,PRD066,1/16/2026,Varun Malhotra,Libas Cotton Kurta Set,1,Offline,STR014,Complete,3499.0,103 Lake Road Kolkata,9001093
+30094,CUST094,PRD017,1/16/2026,Anushka Singh,Puma Sports Shoes,2,Offline,STR006,Complete,4999.0,104 Lake Road Kolkata,9001094
+30095,CUST095,PRD065,1/17/2026,Arnav Gupta,Baggit Ladies Handbag,1,Offline,STR003,Complete,2999.0,105 Lake Road Kolkata,9001095
+30096,CUST096,PRD050,1/17/2026,Ishita Sharma,Global Desi Maxi Kurta,2,Offline,STR012,Complete,2799.0,106 Lake Road Kolkata,9001096
+30097,CUST097,PRD065,1/18/2026,Siddharth Joshi,Baggit Ladies Handbag,1,Offline,STR021,Complete,2999.0,107 Lake Road Kolkata,9001097
+30098,CUST098,PRD007,1/18/2026,Ananya Roy,Woodland Boots,2,Offline,STR003,Complete,3799.0,108 Lake Road Kolkata,9001098
+30099,CUST099,PRD015,1/19/2026,Aarav Nair,US Polo Shirt,1,Offline,STR009,Complete,2799.0,109 Lake Road Kolkata,9001099
+30100,CUST100,PRD015,1/19/2026,Meera Patel,US Polo Shirt,2,Offline,STR016,Complete,2799.0,110 Lake Road Kolkata,9001100
+30101,CUST101,PRD051,1/20/2026,Kabir Shah,Only Floral Dress,1,Offline,STR001,Complete,2399.0,111 Lake Road Kolkata,9001101

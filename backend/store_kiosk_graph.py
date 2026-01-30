@@ -122,64 +122,12 @@ def payment_method_node(state: KioskState):
                 customer_id = state["customer_id"]
                 product_id = state["product_id"]
                 order_id = state["order_id"]
-                store_id = state.get("store_id")
-                # 1. Process payment
+                # Only process payment here
                 payment_msg = payment_agent.invoke({
                     "product_id": product_id,
                     "payment_method": method,
                     "customer_id": customer_id
                 })
-
-                # 2. Remove from cart, add to order history and storekeeper transaction
-                from crud import CartCRUD, OrderHistoryCRUD, StoreKeeperTransactionCRUD, ProductCRUD, StoreCRUD, CustomerCRUD
-                from models import OrderHistory, StoreKeeperTransaction
-                from database import get_db_session
-                import datetime
-                with get_db_session() as session:
-                    # Debug print for order_id being deleted
-                    print(
-                        f"[DEBUG] Deleting cart entry with order_id: {order_id}")
-                    CartCRUD.delete(session, order_id)
-
-                    # Fetch product, customer, store details
-                    product = ProductCRUD.get_by_id(session, product_id)
-                    customer = CustomerCRUD.get_by_id(session, customer_id)
-                    store = StoreCRUD.get_by_id(
-                        session, store_id) if store_id else None
-
-                    # Add to order history
-                    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    order_history = OrderHistory(
-                        transaction_id=order_id,
-                        customer_id=customer_id,
-                        customer_name=customer.customer_name if customer else "",
-                        product_id=product_id,
-                        product_name=product.product_name if product else "",
-                        quantity=product.quantity if product else 1,
-                        order_dates=now,
-                        loyalty_points=product.loyalty_points if product else 0
-                    )
-                    OrderHistoryCRUD.create(session, order_history)
-
-                    # Add to storekeeper transaction
-                    store_keeper_txn = StoreKeeperTransaction(
-                        customer_id=customer_id,
-                        product_id=product_id,
-                        date=now,
-                        user_name=customer.customer_name if customer else "",
-                        product=product.product_name if product else "",
-                        qty=1,
-                        mode="Offline",
-                        store_name=store.store_name if store else "",
-                        store_id=store_id,
-                        status="Complete",
-                        amount=product.price if product else 0.0,
-                        address=customer.address if customer else "",
-                        phone=customer.phone if customer else ""
-                    )
-                    StoreKeeperTransactionCRUD.create(
-                        session, store_keeper_txn)
-
                 return {"messages": [ToolMessage(content=payment_msg, tool_call_id="payment_agent")], "payment_completed": True}
         return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, or Net Banking.")]}
     return {"messages": []}
@@ -229,6 +177,79 @@ def post_purchase_node(state: KioskState):
     post_msg = post_purchase_agent.invoke({
         "order_id": order_id
     })
+
+    # === DB operations after post-purchase agent ===
+    try:
+        product_id = state["product_id"]
+        customer_id = state["customer_id"]
+        store_id = state.get("store_id")
+        print(
+            f"[DEBUG] post_purchase_node: order_id={order_id}, product_id={product_id}, customer_id={customer_id}, store_id={store_id}")
+        from crud import CartCRUD, OrderHistoryCRUD, StoreKeeperTransactionCRUD, ProductCRUD, StoreCRUD, CustomerCRUD
+        from models import OrderHistory, StoreKeeperTransaction
+        from database import get_db_session
+        import datetime
+        with get_db_session() as session:
+            print("[DEBUG] Fetching product, customer, store from DB...")
+            product = ProductCRUD.get_by_id(session, product_id)
+            customer = CustomerCRUD.get_by_id(session, customer_id)
+            store = StoreCRUD.get_by_id(
+                session, store_id) if store_id else None
+            print(f"[DEBUG] Product: {product}")
+            print(f"[DEBUG] Customer: {customer}")
+            print(f"[DEBUG] Store: {store}")
+
+            # Only proceed if product and customer exist
+            if product and customer:
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print("[DEBUG] Creating OrderHistory record...")
+                order_history = OrderHistory(
+                    transaction_id=order_id,
+                    customer_id=customer_id,
+                    customer_name=customer.customer_name,
+                    product_id=product_id,
+                    product_name=product.product_name,
+                    quantity=product.quantity,
+                    order_dates=now,
+                    loyalty_points=getattr(product, 'loyalty_points', 0)
+                )
+                OrderHistoryCRUD.create(session, order_history)
+                print("[DEBUG] OrderHistory record created.")
+
+                print("[DEBUG] Creating StoreKeeperTransaction record...")
+                store_keeper_txn = StoreKeeperTransaction(
+                    customer_id=customer_id,
+                    product_id=product_id,
+                    date=now,
+                    user_name=customer.customer_name,
+                    product=product.product_name,
+                    qty=1,
+                    mode="Offline",
+                    store_name=store.store_name if store else "",
+                    store_id=store_id,
+                    status="Complete",
+                    amount=getattr(product, 'price', 0.0),
+                    address=getattr(customer, 'address', ""),
+                    phone=getattr(customer, 'phone', "")
+                )
+                StoreKeeperTransactionCRUD.create(session, store_keeper_txn)
+                print("[DEBUG] StoreKeeperTransaction record created.")
+                session.flush()  # Ensure ORM flushes inserts before delete
+            else:
+                print(
+                    f"[ERROR] Product or Customer not found for order_id: {order_id}")
+
+            # Remove from cart after all details fetched
+            print(f"[DEBUG] Deleting cart entry with order_id: {order_id}")
+            CartCRUD.delete(session, order_id)
+            print(f"[DEBUG] Cart entry deleted for order_id: {order_id}")
+            session.commit()  # Commit all changes
+            print(f"[DEBUG] DB commit successful for order_id: {order_id}")
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Post-purchase DB operations failed: {e}")
+        traceback.print_exc()
+
     return {"messages": [ToolMessage(content=post_msg, tool_call_id="post_purchase_agent")], "post_purchase_done": True}
 
 # ============ Build Linear Graph ============

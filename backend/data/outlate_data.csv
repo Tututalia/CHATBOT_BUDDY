@@ -1,0 +1,24 @@
+store_id,store_name,address,manager_name,store_phone
+STR001,Quest Mall Kolkata,"Quest Mall, Park Circus, Kolkata",Amit Roy,9000000201
+STR002,South City Mall Kolkata,"South City Mall, Prince Anwar Shah Road, Kolkata",Sneha Mukherjee,9000000202
+STR003,Axis Mall Sector V Kolkata,"Axis Mall, Sector V, Salt Lake, Kolkata",Rahul Banerjee,9000000203
+STR004,City Centre Salt Lake Kolkata,"City Centre Mall, Salt Lake, Kolkata",Ananya Das,9000000204
+STR005,City Centre New Town Kolkata,"City Centre Mall, New Town, Kolkata",Sourav Chatterjee,9000000205
+STR006,Mani Square Mall Kolkata,"Mani Square Mall, EM Bypass, Kolkata",Priyanka Sen,9000000206
+STR007,Acropolis Mall Kolkata,"Acropolis Mall, Kasba, Kolkata",Arindam Ghosh,9000000207
+STR008,Diamond Plaza Mall Kolkata,"Diamond Plaza Mall, Jessore Road, Kolkata",Neha Paul,9000000208
+STR009,Zudio Ground Floor,"Zudio Store, Ground Floor, Kolkata",Rohit Malhotra,9000000209
+STR010,Zudio Park Street Ground Floor,"Zudio Store, Park Street, Kolkata",Kunal Verma,9000000210
+STR011,ABFRL Store South City,"ABFRL Store, South City Mall, Kolkata",Debanjan Dutta,9000000211
+STR012,Eden Pavilion Mall Third Floor,"Eden Pavilion Mall, 3rd Floor, Kolkata",Shreya Gupta,9000000212
+STR013,Mani Square Mall First Floor,"Mani Square Mall, 1st Floor, Kolkata",Vikram Mehta,9000000213
+STR014,Acropolis Mall Ground Floor,"Acropolis Mall, Ground Floor, Kolkata",Pooja Kapoor,9000000214
+STR015,Acropolis Mall First Floor,"Acropolis Mall, 1st Floor, Kolkata",Nitin Agarwal,9000000215
+STR016,South City Mall Second Floor,"South City Mall, 2nd Floor, Kolkata",Ritu Mallick,9000000216
+STR017,Quest Mall First Floor,"Quest Mall, 1st Floor, Kolkata",Abhishek Nair,9000000217
+STR018,Forum Mall Second Floor,"Forum Mall, Elgin Road, Kolkata",Swati Khandelwal,9000000218
+STR019,City Centre Mall Ground Floor,"City Centre Mall, Ground Floor, Salt Lake, Kolkata",Manoj Kumar,9000000219
+STR020,Axis Mall Ground Floor,"Axis Mall, Ground Floor, Sector V, Kolkata",Tanvi Shah,9000000220
+STR021,Zara Store Park Street,"Zara Store, Park Street, Kolkata",Siddharth Bose,9000000221
+STR022,H&M Store Park Street,"H&M Store, Park Street, Kolkata",Rakesh Pandey,9000000222
+STR023,Max Store City Centre,"Max Store, City Centre Mall, Kolkata",Meenal Joshi,9000000223
