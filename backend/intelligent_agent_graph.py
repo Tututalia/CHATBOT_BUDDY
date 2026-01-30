@@ -3,6 +3,7 @@ Intelligent Sales Agent System using LangGraph
 LLM decides which agent tools to call based on user query
 """
 
+from unittest import result
 from crud import (
     product_crud, store_crud, customer_crud, order_history_crud,
     ProductCRUD, StoreCRUD, CustomerCRUD, OrderHistoryCRUD, cart_crud,
@@ -272,19 +273,43 @@ def recommendation_agent(query: str) -> str:
         # If no matches, get all products and show random sample
         all_products = load_products_from_db()
         if not all_products:
-            return "❌ Failed to load product database. Please try again."
+            return json.dumps({
+                "name": "Recommendation Agent",
+                "id": "recommendation_agent",
+                "responses": {
+                    "default": "❌ Failed to load product database. Please try again.",
+                    "recommendation": []
+                }
+            })
         products = random.sample(all_products, min(4, len(all_products)))
     else:
         products = products[:4]  # Limit to 4 products
 
-    # Format results
-    result = "🛍️ **Product Recommendations:**\n\n"
+    # Build recommendation list
+    recommendations = []
     for product in products:
-        result += f"- **{product.product_name}** (ID: {product.product_id})\n"
-        result += f"  Price: ₹{int(product.price):,} | Category: {product.category}\n\n"
+        recommendations.append({
+            "product_name": product.product_name,
+            "price": int(product.price),
+            # Placeholder logic
+            "image": f"/images/{product.product_name.replace(' ', '_').lower()}.avif",
+            "description": f"Recommended {product.category} for you.",
+            "sku": product.product_id
+        })
 
-    result += "Would you like to select any product? Or see more options?"
-    return result
+    # Default message (can be improved with context)
+    default_msg = f"I recommend these {products[0].category if products else 'products'} based on your preferences. {products[0].product_name if products else ''} is ₹{int(products[0].price) if products else ''} and trending — want me to check availability?"
+
+    response_obj = {
+        "name": "Recommendation Agent",
+        "id": "recommendation_agent",
+        "responses": {
+            "default": default_msg,
+            "recommendation": recommendations
+        }
+    }
+    print(json.dumps(response_obj, indent=2))
+    return json.dumps(response_obj)
 
 
 @tool

@@ -399,7 +399,7 @@ def create_store_transaction_endpoint(tx: StoreTransactionCreateModel):
         return {"success": False, "error": str(e)}
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat_with_agent(chat_message: ChatMessage):
     """
     Chat endpoint for the intelligent agent system
@@ -435,9 +435,6 @@ async def chat_with_agent(chat_message: ChatMessage):
             else:
                 messages.append(AIMessage(content=msg["content"]))
 
-        # Add current query (already in history, but need for state)
-        # The last message should be the user query
-
         # Create initial state with conversation history
         initial_state = {
             "messages": messages,
@@ -455,7 +452,16 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Run the graph with conversation history
         result = await graph.ainvoke(initial_state)
 
-        # Extract the AI response from messages
+        # Try to return tool output as JSON if present
+        from langchain_core.messages import ToolMessage
+        for message in reversed(result["messages"]):
+            if isinstance(message, ToolMessage):
+                try:
+                    return json.loads(message.content)
+                except Exception:
+                    pass
+
+        # Fallback: Extract the AI response from messages
         ai_response = ""
         agent_calls = []
 
@@ -485,10 +491,11 @@ async def chat_with_agent(chat_message: ChatMessage):
             save_message(customer_id, session_id, "assistant",
                          ai_response, agent_calls)
 
-        return ChatResponse(
-            response=ai_response if ai_response else "I apologize, but I couldn't generate a response. Please try again.",
-            agent_calls=agent_calls
-        )
+        # Return as legacy chat response if not a tool JSON
+        return {
+            "response": ai_response if ai_response else "I apologize, but I couldn't generate a response. Please try again.",
+            "agent_calls": agent_calls
+        }
 
     except Exception as e:
         print(f"\n{'='*60}")
@@ -498,10 +505,10 @@ async def chat_with_agent(chat_message: ChatMessage):
         traceback.print_exc()
         print(f"{'='*60}\n")
 
-        return ChatResponse(
-            response=f"Sorry, I encountered an error: {str(e)}",
-            agent_calls=[]
-        )
+        return {
+            "response": f"Sorry, I encountered an error: {str(e)}",
+            "agent_calls": []
+        }
 
 
 @app.delete("/api/chat/history/{customer_id}")
