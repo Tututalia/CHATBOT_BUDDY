@@ -193,35 +193,60 @@ def get_product_by_id_from_database(product_id: str):
 #     }
 
 
-@app.get("/api/customer/{customer_id}")
-def get_customer_profile(customer_id: str):
-    """Get customer profile by customer ID"""
-    customer = load_customer_from_db(customer_id)
+@app.get("/api/customer/{customer_id}/{role_id}")
+def get_customer_profile(customer_id: str, role_id: str):
+    """Get customer or store profile by ID and role ID"""
+    try:
+        with get_db_session() as session:
+            if str(role_id) == "2":  # Store Keeper
+                # Fetch from stores table using customer_id as store_id
+                store = store_crud.get_by_id(session, customer_id)
+                if store is None:
+                    return {"error": f"Store with ID {customer_id} not found"}
+                return {
+                    "store_id": store.store_id,
+                    "store_name": store.store_name,
+                    "address": store.address,
+                    "phone": store.store_phone,
+                    "manager": store.manager_name,
+                    # "store_type": store.store_type,
+                    # "products": store.products,
+                    "role_id": 2
+                }
+            else:
+                customer = customer_crud.get_by_id(session, customer_id)
+                if customer is None:
+                    return {"error": f"Customer with ID {customer_id} not found"}
+                # Check role_id matches
+                if not hasattr(customer, 'role_id'):
+                    return {"error": "Customer record does not have a role_id field"}
+                if str(customer.role_id) != str(role_id):
+                    return {"error": f"Role ID {role_id} does not match for customer {customer_id}"}
 
-    if customer is None:
-        return {"error": f"Customer with ID {customer_id} not found"}
+                # Parse order history (comma-separated product IDs)
+                order_history = []
+                if customer.order_history:
+                    product_ids = customer.order_history.split('|')
+                    order_history = [pid.strip() for pid in product_ids]
 
-    # Parse order history (comma-separated product IDs)
-    order_history = []
-    if customer.order_history:
-        product_ids = customer.order_history.split('|')
-        order_history = [pid.strip() for pid in product_ids]
+                # Parse pending orders
+                pending_orders = []
+                if customer.pending_orders:
+                    product_ids = customer.pending_orders.split('|')
+                    pending_orders = [pid.strip() for pid in product_ids]
 
-    # Parse pending orders
-    pending_orders = []
-    if customer.pending_orders:
-        product_ids = customer.pending_orders.split('|')
-        pending_orders = [pid.strip() for pid in product_ids]
-
-    return {
-        "customer_id": customer.customer_id,
-        "customer_name": customer.customer_name,
-        "phone": customer.phone or '',
-        "address": customer.address or '',
-        "loyalty_points": customer.loyalty_points,
-        "order_history": order_history,
-        "pending_orders": pending_orders
-    }
+                return {
+                    "customer_id": customer.customer_id,
+                    "customer_name": customer.customer_name,
+                    "phone": customer.phone or '',
+                    "address": customer.address or '',
+                    "loyalty_points": customer.loyalty_points,
+                    "role_id": customer.role_id,
+                    "order_history": order_history,
+                    "pending_orders": pending_orders
+                }
+    except Exception as e:
+        return {"error": f"Error fetching customer/store: {str(e)}"}
 
 
 @app.get("/api/customer/{customer_id}/orders")

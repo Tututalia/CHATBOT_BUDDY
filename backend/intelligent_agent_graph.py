@@ -285,17 +285,18 @@ def recommendation_agent(query: str) -> str:
     else:
         products = products[:4]  # Limit to 4 products
 
-    # Build recommendation list
-    recommendations = []
-    for product in products:
-        recommendations.append({
-            "product_name": product.product_name,
-            "price": int(product.price),
-            # Placeholder logic
-            "image": f"/images/{product.product_name.replace(' ', '_').lower()}.avif",
-            "description": f"Recommended {product.category} for you.",
-            "sku": product.product_id
-        })
+        # Build recommendation list with image_reference
+        recommendations = []
+        for product in products:
+            recommendations.append({
+                "product_id": getattr(product, "sku", None) or getattr(product, "product_id", None) or getattr(product, "id", None),
+                "product_name": product.product_name,
+                "price": product.price,
+                "category": getattr(product, "category", None),
+                "description": getattr(product, "description", None),
+                "image_reference": getattr(product, "image_reference", None),
+                # Add more fields if needed
+            })
 
     # Default message (can be improved with context)
     default_msg = f"I recommend these {products[0].category if products else 'products'} based on your preferences. {products[0].product_name if products else ''} is ₹{int(products[0].price) if products else ''} and trending — want me to check availability?"
