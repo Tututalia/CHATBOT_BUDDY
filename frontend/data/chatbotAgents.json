@@ -1,0 +1,286 @@
+{
+  "welcome_message": "Welcome to your AI Shopping Assistant! 🛍️ I'm powered by 6 specialized agents ready to assist you:\n\n✨ **Recommendation Agent** - Personalized product suggestions\n📦 **Inventory Agent** - Real-time stock checking\n💳 **Payment Agent** - Secure payment processing\n🚚 **Fulfillment Agent** - Delivery scheduling\n🎁 **Loyalty Agent** - Rewards & special offers\n💬 **Post-Purchase Agent** - Returns, tracking & support\n\nHow can I help you shop today?",
+  "agents": [
+    {
+      "name": "Recommendation Agent",
+      "id": "recommendation_agent",
+      "responses": {
+        "default": "I recommend these shirts based on your past buys (Raymond last month). Raymond Shirt is ₹1,789 and trending — want me to check size 40 availability?",
+        "recommendation": [
+          {
+            "product_name": "Raymond Shirt",
+            "price": 1789,
+            "image": "/images/shirt 2.avif",
+            "description": "Trending shirt based on your past purchases.",
+            "sku": "SKU285"
+          },
+          {
+            "product_name": "Black Formal Shirt",
+            "price": 1999,
+            "image": "/images/shirt 4.avif",
+            "description": "Perfect for formal occasions.",
+            "sku": "SKU441"
+          },
+          {
+            "product_name": "Blue Casual Shirt",
+            "price": 1599,
+            "image": "/images/shirt 2.avif",
+            "description": "Ideal for casual outings.",
+            "sku": "SKU333"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Inventory Agent",
+      "id": "inventory_agent",
+      "responses": {
+        "default": "Inventory checked! Choose Buy Online or nearest store.",
+        "purchase_methods": [
+          {
+            "method": "Buy Online",
+            "description": "Home Delivery",
+            "icon": "public/images/buy_online_icon.png"
+          },
+          {
+            "method": "Nearest Store",
+            "description": "Store Pickup",
+            "icon": "public/images/store_pickup_icon.png"
+          }
+        ],
+        "store_selection": {
+          "message": "Inventory checked! Choose Buy Online or nearest store.",
+          "title": "Select Store for Pickup",
+          "stores": [
+            {
+              "store_name": "ABFRL Store South City",
+              "manager": "Manager Sophia",
+              "availability": "Available"
+            },
+            {
+              "store_name": "City Centre Salt Lake, First Floor",
+              "manager": "Manager Rahul",
+              "availability": "Available"
+            },
+            {
+              "store_name": "Quest Mall, Second Floor",
+              "manager": "Manager Priya",
+              "availability": "Limited"
+            },
+            {
+              "store_name": "South City Mall, Third Floor",
+              "manager": "Manager Neha",
+              "availability": "Available"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Payment Agent",
+      "id": "payment_agent",
+      "responses": {
+        "default": "How would you like to pay?",
+        "online_delivery": {
+          "message": "Great! Proceeding with home delivery from our online warehouse.\n\nDelivery to your address:\nSodepur, West Bengal\n\nEstimated delivery: 2-3 business days\n\nHow would you like to pay?",
+          "show_payment_input": true
+        },
+        "offline_pickup": {
+          "message": "Perfect! You can pick up from these nearby stores:\n\n📍 South City Mall - 3.2 km away\n   Stock: Available (Size 40)\n   Timings: 10 AM - 9 PM\n\n📍 City Centre - 5.1 km away\n   Stock: Available (Size 40)\n   Timings: 11 AM - 8 PM\n\nHow would you like to pay?",
+          "show_payment_input": true
+        },
+        "payment_methods": [
+          {
+            "method": "UPI",
+            "icon": "public/images/upi_icon.png"
+          },
+          {
+            "method": "Credit Card",
+            "icon": "public/images/credit_card_icon.png"
+          },
+          {
+            "method": "Debit Card",
+            "icon": "public/images/debit_card_icon.png"
+          },
+          {
+            "method": "Cash on Delivery",
+            "icon": "public/images/cash_on_delivery_icon.png"
+          }
+        ],
+        "upi_prompt": "Enter your UPI ID to complete payment."
+      }
+    },
+    {
+      "name": "Fulfillment Agent",
+      "id": "fulfillment_agent",
+      "responses": {
+        "default": "Your delivery has been scheduled!",
+        "online_order_confirmation": {
+          "message": "Your delivery has been scheduled!",
+          "payment_status": {
+            "status": "Payment Successful!",
+            "description": "Your order has been confirmed"
+          },
+          "order_details": {
+            "order_id": "#ORD789456",
+            "amount_paid": 1879,
+            "payment_method": "UPI",
+            "delivery_time": "2-3 business days"
+          },
+          "confirmation_message": "Order confirmed and will be dispatched soon"
+        },
+        "store_handoff": {
+          "channel_switching": "Online → In-Store Kiosk",
+          "session_transfer": {
+            "session_id": "#SESSION789456",
+            "customer_name": "Arjun Bose"
+          },
+          "product": {
+            "name": "Louis Philippe",
+            "size": "40 (Medium)",
+            "color": "White",
+            "sku": "LP-WH-40-001",
+            "price": 2199
+          },
+          "store_handoff_details": {
+            "store_name": "ABFRL Store South City",
+            "manager": "Sophia",
+            "availability": "Available"
+          }
+        },
+        "order_details": {
+          "order_id": "#ORD789456",
+          "amount_paid": 1789,
+          "delivery_time": "2-3 business days"
+        }
+      }
+    },
+    {
+      "name": "Loyalty Agent",
+      "id": "loyalty_agent",
+      "responses": {
+        "default": "Loyalty rewards applied!",
+        "loyalty_applied": {
+          "title": "Loyalty Rewards Applied!",
+          "description": "Your rewards have been processed and applied",
+          "benefits_title": "💰 Loyalty Benefits Applied:",
+          "benefits": [
+            {
+              "type": "points",
+              "title": "Loyalty Points Earned",
+              "description": "+120 points added to your account",
+              "value": "120 pts",
+              "icon": "✓"
+            },
+            {
+              "type": "coupon",
+              "title": "Coupon Applied",
+              "description": "FIRST10 - 10% discount applied",
+              "value": "₹120",
+              "icon": "🎟️"
+            },
+            {
+              "type": "offer",
+              "title": "Personalized Offer",
+              "description": "Free delivery on next 3 orders",
+              "value": "Unlocked",
+              "icon": "🎁"
+            }
+          ]
+        },
+        "benefits": {
+          "points_earned": 120,
+          "coupons_applied": "FIRST10 - 10% discount applied",
+          "personalized_offer": "Free delivery on next 3 orders"
+        }
+      }
+    },
+    {
+      "name": "Post Purchase Agent",
+      "id": "post_purchase_agent",
+      "responses": {
+        "default": "Post-Purchase Support Activated!",
+        "support_activated": {
+          "title": "Post-Purchase Support Activated!",
+          "description": "We're here to help you throughout your journey",
+          "services_title": "🛡️ Available Support Services:",
+          "services": [
+            {
+              "name": "Returns & Exchanges",
+              "status": "Active",
+              "description": "30-day hassle-free return policy",
+              "icon": "↩️",
+              "type": "returns"
+            },
+            {
+              "name": "Shipment Tracking",
+              "status": "Enabled",
+              "description": "Real-time delivery updates via SMS & email",
+              "icon": "📦",
+              "type": "tracking"
+            },
+            {
+              "name": "Feedback System",
+              "status": "Ready",
+              "description": "Share your experience & earn reward points",
+              "icon": "⭐",
+              "type": "feedback"
+            },
+            {
+              "name": "24/7 Customer Support",
+              "status": "Online",
+              "description": "Live chat, email & phone support available",
+              "icon": "💬",
+              "type": "support"
+            }
+          ]
+        },
+        "services": [
+          {
+            "name": "Returns & Exchanges",
+            "status": "Active",
+            "description": "30-day hassle-free return policy"
+          },
+          {
+            "name": "Shipment Tracking",
+            "status": "Enabled",
+            "description": "Real-time delivery updates via SMS & email"
+          },
+          {
+            "name": "Feedback System",
+            "status": "Ready",
+            "description": "Share your experience & earn reward points"
+          },
+          {
+            "name": "24/7 Customer Support",
+            "status": "Online",
+            "description": "Live chat, email & phone support available"
+          }
+        ]
+      }
+    }
+  ],
+  "user_inputs": [
+    {
+      "input": "show me shirts",
+      "agent": "recommendation_agent",
+      "response_key": "recommendation"
+    },
+    {
+      "input": "check inventory",
+      "agent": "inventory_agent",
+      "response_key": "default"
+    },
+    {
+      "input": "payment options",
+      "agent": "payment_agent",
+      "response_key": "payment_methods"
+    },
+    {
+      "input": "post purchase support",
+      "agent": "post_purchase_agent",
+      "response_key": "services"
+    }
+  ],
+  "fallback": "I'm sorry, I didn't understand that. Can you rephrase?"
+}
