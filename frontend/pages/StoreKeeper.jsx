@@ -22,6 +22,8 @@ export default function StoreKeeper() {
   const [aiInsights, setAiInsights] = useState(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
+  const [dailyOrdersData, setDailyOrdersData] = useState(null);
+  const [dailyOrdersTimeRange, setDailyOrdersTimeRange] = useState("weekly");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -57,6 +59,13 @@ export default function StoreKeeper() {
     }
   }, [timeRange, storeKeeperData]);
 
+  // Fetch daily orders data when time range changes
+  useEffect(() => {
+    if (storeKeeperData) {
+      fetchDailyOrders(storeKeeperData.store_id, dailyOrdersTimeRange);
+    }
+  }, [dailyOrdersTimeRange, storeKeeperData]);
+
   const fetchTransactionData = async (storeId, range) => {
     try {
       setLoading(true);
@@ -74,6 +83,25 @@ export default function StoreKeeper() {
       console.error("Error fetching transaction data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDailyOrders = async (storeId, range) => {
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/store/${storeId}/daily-orders?time_range=${range}`,
+      );
+      const data = await response.json();
+
+      if (data.error) {
+        console.error("Error fetching daily orders:", data.error);
+        setDailyOrdersData(null);
+      } else {
+        setDailyOrdersData(data);
+      }
+    } catch (error) {
+      console.error("Error fetching daily orders:", error);
+      setDailyOrdersData(null);
     }
   };
 
@@ -150,44 +178,44 @@ export default function StoreKeeper() {
     <div className="bg-[#f5f5f5] min-h-screen p-6">
       <div className="max-w-7xl mx-auto">
         {/* Store Keeper Info Section */}
-        <div className="mb-6 p-6 bg-gradient-to-r from-yellow-600 to-yellow-700 rounded-lg shadow-lg">
+        <div className="mb-6 p-6 bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 rounded-lg shadow-lg">
           <h2 className="text-2xl font-bold mb-4 text-white">
             Store Keeper Dashboard
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-lg">
-              <p className="text-yellow-100 font-semibold mb-1">Store ID</p>
-              <p className="text-white text-lg font-bold">
+            <div className="bg-white p-3 rounded-lg shadow-sm">
+              <p className="text-gray-600 font-semibold mb-1">Store ID</p>
+              <p className="text-gray-900 text-lg font-bold">
                 {storeKeeperData.store_id}
               </p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-lg">
-              <p className="text-yellow-100 font-semibold mb-1">Store Name</p>
-              <p className="text-white text-lg font-bold">
+            <div className="bg-white p-3 rounded-lg shadow-sm">
+              <p className="text-gray-600 font-semibold mb-1">Store Name</p>
+              <p className="text-gray-900 text-lg font-bold">
                 {storeKeeperData.store_name}
               </p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-lg">
-              <p className="text-yellow-100 font-semibold mb-1">Manager</p>
-              <p className="text-white text-lg font-bold">
+            <div className="bg-white p-3 rounded-lg shadow-sm">
+              <p className="text-gray-600 font-semibold mb-1">Manager</p>
+              <p className="text-gray-900 text-lg font-bold">
                 {storeKeeperData.manager}
               </p>
             </div>
-            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-lg">
-              <p className="text-yellow-100 font-semibold mb-1">Phone</p>
-              <p className="text-white text-lg font-bold">
+            <div className="bg-white p-3 rounded-lg shadow-sm">
+              <p className="text-gray-600 font-semibold mb-1">Phone</p>
+              <p className="text-gray-900 text-lg font-bold">
                 {storeKeeperData.phone}
               </p>
             </div>
           </div>
-          <div className="mt-3 bg-white/20 backdrop-blur-sm p-3 rounded-lg">
-            <p className="text-yellow-100 font-semibold mb-1">Address</p>
-            <p className="text-white">{storeKeeperData.address}</p>
+          <div className="mt-3 bg-white p-3 rounded-lg shadow-sm">
+            <p className="text-gray-600 font-semibold mb-1">Address</p>
+            <p className="text-gray-900">{storeKeeperData.address}</p>
           </div>
         </div>
 
         {/* AI Insights & Recommendations Section */}
-        <div className="mb-6 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="mb-6 bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 rounded-2xl shadow-2xl overflow-hidden">
           <button
             onClick={handleViewInsights}
             className="w-full p-6 flex items-center justify-between hover:bg-white/10 transition-all duration-300"
@@ -549,7 +577,7 @@ export default function StoreKeeper() {
         <div className="space-y-6">
           {/* Product Performance Section */}
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-red-700 via-orange-600 to-orange-500 p-6">
+            <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-6">
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <div className="bg-white/20 backdrop-blur-sm p-3 rounded-xl">
@@ -565,7 +593,7 @@ export default function StoreKeeper() {
                     <h3 className="text-2xl font-bold text-white">
                       Product Performance
                     </h3>
-                    <p className="text-orange-100 text-sm mt-1">
+                    <p className="text-red-100 text-sm mt-1">
                       Real-time performance metrics and insights
                     </p>
                   </div>
@@ -614,7 +642,7 @@ export default function StoreKeeper() {
                     </button>
                   </div>
                   <div className="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg">
-                    <p className="text-orange-100 text-xs font-medium">
+                    <p className="text-red-100 text-xs font-medium">
                       Total Transactions
                     </p>
                     <p className="text-white text-2xl font-bold">
@@ -624,12 +652,12 @@ export default function StoreKeeper() {
                 </div>
               </div>
             </div>
-            <div className="p-8 bg-gradient-to-br from-gray-50 to-white">
-              <div style={{ height: 450 }}>
+            <div className="p-4 bg-gradient-to-br from-gray-50 to-white">
+              <div style={{ height: 700 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={sold}
-                    margin={{ top: 20, right: 30, left: 20, bottom: 120 }}
+                    margin={{ top: 40, right: 50, left: 50, bottom: 160 }}
                   >
                     <defs>
                       <linearGradient id="colorBar" x1="0" y1="0" x2="0" y2="1">
@@ -645,31 +673,36 @@ export default function StoreKeeper() {
                       dataKey="name"
                       angle={-45}
                       textAnchor="end"
-                      height={120}
+                      height={140}
                       interval={0}
-                      tick={{ fontSize: 11, fill: "#6b7280" }}
+                      tick={{ fontSize: 13, fill: "#4b5563", fontWeight: 500, dy: 5 }}
                       stroke="#d1d5db"
+                      tickMargin={12}
                     />
                     <YAxis
                       allowDecimals={false}
-                      tick={{ fontSize: 12, fill: "#6b7280" }}
+                      tick={{ fontSize: 13, fill: "#4b5563", fontWeight: 500 }}
                       stroke="#d1d5db"
+                      tickMargin={8}
+                      label={{ value: 'Quantity Sold', angle: -90, position: 'insideLeft', style: { fill: '#6b7280', fontWeight: 600 } }}
                     />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: "#1f2937",
                         border: "none",
-                        borderRadius: "8px",
+                        borderRadius: "12px",
                         color: "#fff",
                         boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
+                        padding: "12px 16px",
+                        fontSize: "14px"
                       }}
                       cursor={{ fill: "rgba(249, 115, 22, 0.1)" }}
                     />
                     <Bar
                       dataKey="count"
                       fill="url(#colorBar)"
-                      radius={[8, 8, 0, 0]}
-                      maxBarSize={60}
+                      radius={[10, 10, 0, 0]}
+                      maxBarSize={70}
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -677,132 +710,259 @@ export default function StoreKeeper() {
             </div>
           </div>
 
-          {/* Payments Section */}
+          {/* Last 7 Days Orders Section */}
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 backdrop-blur-sm p-3 rounded-xl">
-                  <svg
-                    className="w-8 h-8 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                    <path
-                      fillRule="evenodd"
-                      d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+            <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-6">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 backdrop-blur-sm p-3 rounded-xl">
+                    <svg
+                      className="w-8 h-8 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-white">
+                      {dailyOrdersData?.title || "Last 7 Days Orders"}
+                    </h3>
+                    <p className="text-red-100 text-sm mt-1">
+                      Daily order trends and patterns
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-2xl font-bold text-white">
-                    Payment Analytics
-                  </h3>
-                  <p className="text-indigo-100 text-sm mt-1">
-                    Transaction success rate and status
-                  </p>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setDailyOrdersTimeRange("daily")}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-all duration-200 ${
+                      dailyOrdersTimeRange === "daily"
+                        ? "bg-yellow-500 text-white shadow-lg scale-105"
+                        : "bg-white/20 backdrop-blur-sm text-white hover:bg-white/30"
+                    }`}
+                  >
+                    Daily
+                  </button>
+                  <button
+                    onClick={() => setDailyOrdersTimeRange("weekly")}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-all duration-200 ${
+                      dailyOrdersTimeRange === "weekly"
+                        ? "bg-yellow-500 text-white shadow-lg scale-105"
+                        : "bg-white/20 backdrop-blur-sm text-white hover:bg-white/30"
+                    }`}
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    onClick={() => setDailyOrdersTimeRange("monthly")}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-all duration-200 ${
+                      dailyOrdersTimeRange === "monthly"
+                        ? "bg-yellow-500 text-white shadow-lg scale-105"
+                        : "bg-white/20 backdrop-blur-sm text-white hover:bg-white/30"
+                    }`}
+                  >
+                    Past Month
+                  </button>
                 </div>
               </div>
             </div>
             <div className="p-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-xl border border-green-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-green-700 text-sm font-semibold uppercase tracking-wide">
-                        Successful
-                      </p>
-                      <p className="text-4xl font-bold text-green-900 mt-2">
-                        {successCount}
-                      </p>
+              {dailyOrdersData && dailyOrdersData.daily_orders && dailyOrdersData.daily_orders.length > 0 ? (
+                <>
+                  <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+                    {/* Total Orders Card */}
+                    <div className="bg-gradient-to-br from-gray-50 to-white p-6 rounded-xl border border-gray-200">
+                      <div className="flex flex-col items-center justify-center h-full text-center">
+                        <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-4 rounded-full mb-4">
+                          <svg
+                            className="w-8 h-8 text-white"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+                          </svg>
+                        </div>
+                        <p className="text-gray-600 text-sm font-semibold uppercase tracking-wide mb-2">
+                          Total Orders
+                        </p>
+                        <p className="text-5xl font-bold text-gray-900">
+                          {dailyOrdersData.total_orders}
+                        </p>
+                      </div>
                     </div>
-                    <div className="bg-green-500 p-4 rounded-full">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
+
+                    {/* Pie Chart */}
+                    <div className="lg:col-span-3 bg-gradient-to-br from-gray-50 to-white p-6 rounded-xl border border-gray-200">
+                      <div style={{ height: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={dailyOrdersData.daily_orders}
+                              dataKey="count"
+                              nameKey="date"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={140}
+                              innerRadius={80}
+                              label={({ date, count, percentage }) =>
+                                `${new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${count} (${percentage}%)`
+                              }
+                              labelLine={{ stroke: "#6b7280", strokeWidth: 2 }}
+                            >
+                              {dailyOrdersData.daily_orders.map((entry, index) => {
+                                const colors = ['#991b1b', '#b91c1c', '#dc2626', '#f97316', '#fb923c', '#fbbf24', '#fde047'];
+                                return (
+                                  <Cell
+                                    key={`cell-${index}`}
+                                    fill={colors[index % colors.length]}
+                                  />
+                                );
+                              })}
+                            </Pie>
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: "#1f2937",
+                                border: "none",
+                                borderRadius: "12px",
+                                color: "#fff",
+                                padding: "12px 16px",
+                                boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
+                              }}
+                              formatter={(value, name, props) => [
+                                `${value} orders (${props.payload.percentage}%)`,
+                                new Date(name).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+                              ]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="bg-gradient-to-br from-red-50 to-red-100 p-6 rounded-xl border border-red-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-red-700 text-sm font-semibold uppercase tracking-wide">
-                        Failed
-                      </p>
-                      <p className="text-4xl font-bold text-red-900 mt-2">
-                        {failedCount}
-                      </p>
-                    </div>
-                    <div className="bg-red-500 p-4 rounded-full">
-                      <svg
-                        className="w-8 h-8 text-white"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
+
+                  {/* Daily Breakdown Cards */}
+                  <div className="mb-6">
+                    <h4 className="text-lg font-bold text-gray-800 mb-4">Daily Breakdown</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                      {dailyOrdersData.daily_orders.map((day, index) => {
+                        const colors = ['#991b1b', '#b91c1c', '#dc2626', '#f97316', '#fb923c', '#fbbf24', '#fde047'];
+                        const date = new Date(day.date);
+                        return (
+                          <div
+                            key={day.date}
+                            className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <div
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: colors[index % colors.length] }}
+                              />
+                              <p className="text-xs font-semibold text-gray-600 uppercase">
+                                {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                              </p>
+                            </div>
+                            <p className="text-2xl font-bold text-gray-900 mb-1">
+                              {day.count}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-6 rounded-xl">
-                <div style={{ height: 320 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={payments}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={100}
-                        label={({ name, percent }) =>
-                          `${name}: ${(percent * 100).toFixed(0)}%`
-                        }
-                        labelLine={{ stroke: "#6b7280", strokeWidth: 1 }}
-                      >
-                        {payments.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={COLORS[index % COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Legend
-                        wrapperStyle={{ paddingTop: "20px" }}
-                        iconType="circle"
+
+                  {/* Summary Statistics */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-gradient-to-br from-red-50 to-orange-50 p-5 rounded-xl border border-red-200">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
+                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-xs text-red-700 font-semibold uppercase tracking-wide">
+                            Peak Day
+                          </p>
+                          <p className="text-lg font-bold text-red-900">
+                            {dailyOrdersData.peak_day
+                              ? `${new Date(dailyOrdersData.peak_day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${dailyOrdersData.peak_day.count})`
+                              : "N/A"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-orange-50 to-yellow-50 p-5 rounded-xl border border-orange-200">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
+                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-xs text-orange-700 font-semibold uppercase tracking-wide">
+                            Avg Daily
+                          </p>
+                          <p className="text-lg font-bold text-orange-900">
+                            {dailyOrdersData.avg_daily} orders
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-yellow-50 to-amber-50 p-5 rounded-xl border border-yellow-200">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
+                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-xs text-yellow-700 font-semibold uppercase tracking-wide">
+                            Growth
+                          </p>
+                          <p className="text-lg font-bold text-yellow-900">
+                            {dailyOrdersData.growth || "N/A"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="bg-gray-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg
+                      className="w-10 h-10 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                       />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#1f2937",
-                          border: "none",
-                          borderRadius: "8px",
-                          color: "#fff",
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                    </svg>
+                  </div>
+                  <p className="text-gray-600 font-medium">No orders found</p>
+                  <p className="text-gray-400 text-sm mt-2">
+                    No orders in the selected time range
+                  </p>
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
           {/* Transaction Table Section */}
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-gray-700 to-gray-800 p-6">
+            <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-6">
               <div className="flex items-center gap-3">
                 <div className="bg-white/20 backdrop-blur-sm p-3 rounded-xl">
                   <svg
@@ -821,7 +981,7 @@ export default function StoreKeeper() {
                   <h3 className="text-2xl font-bold text-white">
                     Transaction History
                   </h3>
-                  <p className="text-gray-300 text-sm mt-1">
+                  <p className="text-red-100 text-sm mt-1">
                     Detailed transaction records and history
                   </p>
                 </div>
