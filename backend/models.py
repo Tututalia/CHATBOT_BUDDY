@@ -152,6 +152,7 @@ class Cart(SQLModel, table=True):
     channel: Optional[str] = Field(default="online")
     status: Optional[str] = Field(default="pending")
     created_at: Optional[str] = Field(default=None)
+    quantity: int = Field(default=1)  # Quantity of product in cart
 
     # Relationships
     customer: Optional[Customer] = Relationship()
