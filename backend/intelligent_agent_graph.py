@@ -599,17 +599,8 @@ def add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
     # Add to cart database as pending
     try:
         with get_db_session() as session:
-            # Get a valid store_id for FK constraints
-            store_id_val = None
-            if getattr(product, "store_ids", None):
-                ids = [s.strip()
-                       for s in product.store_ids.split(";") if s.strip()]
-                if ids:
-                    store_id_val = ids[0]
-            if not store_id_val:
-                stores = store_crud.get_all(session, limit=1)
-                if stores:
-                    store_id_val = stores[0].store_id
+            # Leave store_id as None initially
+            # It will be populated only when user selects offline mode with a specific store
 
             # Create unique order_id for this cart item
             order_id = f"CART{int(time.time() * 1000) % 1000000}{random.randint(100, 999)}"
@@ -618,7 +609,7 @@ def add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
                 "order_id": order_id,
                 "customer_id": customer_id,
                 "product_id": product_id,
-                "store_id": store_id_val,
+                "store_id": None,  # Will be set when user chooses offline mode
                 "channel": "pending",  # Mark as pending until user decides online/offline
                 "status": "pending",
                 "quantity": quantity,
@@ -820,11 +811,15 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
     """
     try:
         with get_db_session() as session:
-            # Get all pending cart items for this customer
+            # Get only fresh cart items (channel still "pending", not yet processed)
+            # This excludes old offline items (channel="offline", status="pending")
             cart_items = cart_crud.filter(
                 session,
-                filters={"customer_id": customer_id, "status": "pending"},
-                operators={"customer_id": "==", "status": "=="},
+                filters={"customer_id": customer_id,
+                         "status": "pending",
+                         "channel": "pending"},
+                operators={"customer_id": "==",
+                           "status": "==", "channel": "=="},
                 limit=50
             )
 
@@ -877,80 +872,22 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
     result += f"Payment ID: {payment_id}\\n\\n"
     result += "✅ **Payment Successful!**\\n\\n"
 
-    # Process each cart item: update cart status, add to order history, deduct inventory
+    # Just mark payment as completed - ALL DB operations (order_history, store_keeper_transaction, inventory deduction)
+    # are handled by post_purchase_agent to avoid duplicates
     try:
         with get_db_session() as session:
-            customer = customer_crud.get_by_id(session, customer_id)
-            customer_name = customer.customer_name if customer else ''
-
+            # Update cart status to 'paid' and channel to 'online'
+            # post_purchase_agent will later: create order_history, create store_keeper_transaction, deduct inventory, and DELETE cart items
             for item_summary in cart_summary:
                 item_order_id = item_summary["order_id"]
-                product_id = item_summary["product_id"]
-                qty = item_summary["quantity"]
-                product_name = item_summary["product_name"]
-
-                # Update cart status from pending to completed
                 try:
                     cart_crud.update(session, item_order_id, {
-                                     "status": "completed", "channel": "online"})
+                        "status": "paid", "channel": "online"})
                 except Exception as e:
                     print(
                         f"Warning: failed to update cart {item_order_id}: {e}")
-
-                # Add to order_history
-                try:
-                    product = get_product_by_id(product_id)
-                    loyalty_pts = product.loyalty_points if product and getattr(
-                        product, 'loyalty_points', None) else 0
-
-                    order_record = {
-                        "transaction_id": f"TRX{order_id}_{product_id}",
-                        "customer_id": customer_id,
-                        "customer_name": customer_name,
-                        "product_id": product_id,
-                        "product_name": product_name,
-                        "quantity": qty,
-                        "order_dates": datetime.utcnow().isoformat(),
-                        "loyalty_points": loyalty_pts * qty
-                    }
-                    order_history_crud.create(session, order_record)
-                except Exception as e:
-                    print(
-                        f"Warning: failed to create order_history for {product_id}: {e}")
-
-                # Add to store_keeper_transaction
-                try:
-                    tx_id = int(time.time() * 1000) % 100000000 + \
-                        random.randint(1, 999)
-                    stores = store_crud.get_all(session, limit=1)
-                    store_id_val = stores[0].store_id if stores else None
-
-                    store_tx = {
-                        "id": tx_id,
-                        "customer_id": customer_id,
-                        "product_id": product_id,
-                        "date": datetime.utcnow().isoformat(),
-                        "user_name": customer_name,
-                        "product": product_name,
-                        "qty": qty,
-                        "mode": "Online",
-                        "store_name": "Online",
-                        "store_id": store_id_val,
-                        "status": "Complete",
-                        "amount": float(item_summary["price"] * qty),
-                        "address": customer.address if customer else '',
-                        "phone": customer.phone if customer else ''
-                    }
-                    store_keeper_transaction_crud.create(session, store_tx)
-                except Exception as e:
-                    print(
-                        f"Warning: failed to create store_keeper_transaction for {product_id}: {e}")
-
-                # Deduct quantity from inventory
-                deduct_product_quantity(product_id, quantity=qty)
-
     except Exception as e:
-        print(f"Warning during payment post-processing: {e}")
+        print(f"Warning during payment processing: {e}")
 
     result += f"Your order is being processed...\\n\\n"
     result += "[SYSTEM: Now call fulfillment_agent with purchase_type='online', order_id='{order_id}', customer_id='{customer_id}']"
@@ -980,20 +917,27 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
     # Get cart items to show in fulfillment
     try:
         with get_db_session() as session:
-            # For online: get completed cart items, for offline: get pending
+            # For online: get completed cart items with online channel
+            # For offline: get pending cart items with pending channel (not yet processed)
             if purchase_type.lower() == "online":
                 cart_items = cart_crud.filter(
                     session,
                     filters={"customer_id": customer_id,
-                             "status": "completed"},
-                    operators={"customer_id": "==", "status": "=="},
+                             "status": "completed",
+                             "channel": "online"},
+                    operators={"customer_id": "==",
+                               "status": "==", "channel": "=="},
                     limit=50
                 )
             else:
+                # Only get items that haven't been processed yet (channel still "pending")
                 cart_items = cart_crud.filter(
                     session,
-                    filters={"customer_id": customer_id, "status": "pending"},
-                    operators={"customer_id": "==", "status": "=="},
+                    filters={"customer_id": customer_id,
+                             "status": "pending",
+                             "channel": "pending"},
+                    operators={"customer_id": "==",
+                               "status": "==", "channel": "=="},
                     limit=50
                 )
 
@@ -1039,7 +983,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
 
         # Auto-call loyalty agent and post-purchase agent for online orders
         result += f"[SYSTEM: AUTOMATICALLY call loyalty_agent with order_id='{order_id}' and customer_id='{customer_id}']\\n"
-        result += f"[SYSTEM: After loyalty_agent completes, AUTOMATICALLY call post_purchase_agent with order_id='{order_id}']"
+        result += f"[SYSTEM: After loyalty_agent completes, AUTOMATICALLY call post_purchase_agent with order_id='{order_id}' and customer_id='{customer_id}']"
     else:
         # Offline purchase
         if not store_name or store_name == "Store":
@@ -1145,18 +1089,21 @@ def loyalty_agent(order_id: str, customer_id: str) -> str:
 
     result += "\\nThank you for shopping with us!\\n\\n"
     # Instruction for LLM to automatically call post_purchase_agent
-    result += f"[SYSTEM: AUTOMATICALLY call post_purchase_agent with order_id='{order_id}' NOW]"
+    result += f"[SYSTEM: AUTOMATICALLY call post_purchase_agent with order_id='{order_id}' and customer_id='{customer_id}' NOW]"
     return result
 
 
 @tool
-def post_purchase_agent(order_id: str) -> str:
+def post_purchase_agent(order_id: str, customer_id: str) -> str:
     """
     Provides post-purchase services like feedback, support, and order tracking.
     Use this as the final step after loyalty rewards (online flow).
+    Also handles DB operations: adds to order_history and store_keeper_transaction, 
+    deducts inventory, and DELETES items from cart.
 
     Args:
         order_id: The order ID for post-purchase services
+        customer_id: The customer ID
 
     Returns:
         Feedback link and support information
@@ -1164,6 +1111,126 @@ def post_purchase_agent(order_id: str) -> str:
     # Add 2-3 seconds delay before showing post-purchase services
     print("⏳ Processing your request...")
     time.sleep(2.5)
+
+    # === DB operations: Add to order_history, store_keeper_transaction, and delete from cart ===
+    try:
+        print(
+            f"[DEBUG] post_purchase_agent: order_id={order_id}, customer_id={customer_id}")
+        from crud import CartCRUD, OrderHistoryCRUD, StoreKeeperTransactionCRUD, ProductCRUD, StoreCRUD, CustomerCRUD
+        from models import OrderHistory, StoreKeeperTransaction
+
+        with get_db_session() as session:
+            print("[DEBUG] Fetching paid cart items for customer...")
+            # Get all cart items with status 'paid' for this customer
+            cart_items = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id,
+                         "status": "paid", "channel": "online"},
+                operators={"customer_id": "==",
+                           "status": "==", "channel": "=="},
+                limit=50
+            )
+
+            if not cart_items:
+                print(
+                    f"[WARNING] No paid cart items found for customer {customer_id}")
+
+            # Get customer details
+            customer = CustomerCRUD.get_by_id(session, customer_id)
+            customer_name = customer.customer_name if customer else ''
+
+            print(f"[DEBUG] Processing {len(cart_items)} cart items...")
+            for cart_item in cart_items:
+                product_id = cart_item.product_id
+                item_order_id = cart_item.order_id
+                qty = getattr(cart_item, 'quantity', 1)
+
+                # Get product details
+                product = ProductCRUD.get_by_id(session, product_id)
+                if not product:
+                    print(
+                        f"[WARNING] Product {product_id} not found, skipping...")
+                    continue
+
+                product_name = product.product_name
+                product_price = product.price
+                total_amount = product_price * qty
+
+                print(
+                    f"[DEBUG] Processing cart item: {item_order_id}, product: {product_name}, qty: {qty}")
+
+                # Add to order_history
+                try:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    loyalty_pts = getattr(product, 'loyalty_points', 0)
+
+                    order_history = OrderHistory(
+                        transaction_id=item_order_id,
+                        customer_id=customer_id,
+                        customer_name=customer_name,
+                        product_id=product_id,
+                        product_name=product_name,
+                        quantity=qty,
+                        order_dates=now,
+                        loyalty_points=loyalty_pts * qty
+                    )
+                    OrderHistoryCRUD.create(session, order_history)
+                    print(
+                        f"[DEBUG] OrderHistory record created for {product_id}")
+                except Exception as e:
+                    print(
+                        f"[ERROR] Failed to create order_history for {product_id}: {e}")
+
+                # Add to store_keeper_transaction
+                try:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    store_keeper_txn = StoreKeeperTransaction(
+                        customer_id=customer_id,
+                        product_id=product_id,
+                        date=now,
+                        user_name=customer_name,
+                        product=product_name,
+                        qty=qty,
+                        mode="Online",
+                        store_name="Online",
+                        store_id=None,
+                        status="Complete",
+                        amount=total_amount,
+                        address=getattr(customer, 'address', ""),
+                        phone=getattr(customer, 'phone', "")
+                    )
+                    StoreKeeperTransactionCRUD.create(
+                        session, store_keeper_txn)
+                    print(
+                        f"[DEBUG] StoreKeeperTransaction record created for {product_id}")
+                except Exception as e:
+                    print(
+                        f"[ERROR] Failed to create store_keeper_transaction for {product_id}: {e}")
+
+                # Deduct quantity from inventory
+                try:
+                    deduct_product_quantity(product_id, quantity=qty)
+                    print(
+                        f"[DEBUG] Deducted {qty} units from product {product_id} inventory")
+                except Exception as e:
+                    print(
+                        f"[ERROR] Failed to deduct inventory for {product_id}: {e}")
+
+                # Delete from cart
+                try:
+                    CartCRUD.delete(session, item_order_id)
+                    print(f"[DEBUG] Deleted cart item {item_order_id}")
+                except Exception as e:
+                    print(
+                        f"[ERROR] Failed to delete cart item {item_order_id}: {e}")
+
+            session.commit()
+            print(f"[DEBUG] DB commit successful for customer {customer_id}")
+
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] Post-purchase DB operations failed: {e}")
+        traceback.print_exc()
 
     result = f"📝 **Post-Purchase Services**\n\n"
     result += f"Order ID: {order_id}\n\n"
@@ -1218,6 +1285,18 @@ def agent_node(state: AgentState):
         content=f"""
 You are a helpful, proactive AI shopping assistant for an e-commerce platform.
 
+**CRITICAL: CONVERSATION HISTORY AWARENESS**
+Before choosing which tool to call, CHECK the conversation history:
+1. What was the LAST tool you called?
+2. What did it return?
+3. This determines your NEXT action
+
+**OFFLINE FLOW STATE TRACKING:**
+- If LAST tool was `inventory_agent(product_id=X)` AND it returned a list of stores → You are in "WAITING FOR STORE SELECTION" state
+- In this state, user's NEXT message is their store selection
+- Action: Call ONLY `fulfillment_agent(purchase_type="offline", store_name=<user_message>)`
+- DO NOT call inventory_agent or view_cart_agent again
+
 CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
@@ -1225,16 +1304,49 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 - Then immediately call `recommendation_agent` with the inventory data to display products beautifully
 - Ask if they want to add any products to cart with quantity
 
-**STEP 2: ADD TO CART**
-- When user wants to add a product, CAREFULLY extract the quantity from their message
-- Examples of quantity in user messages:
-  * "add PRD049 quantity 4" → quantity=4
-  * "add 3 units of PRD056" → quantity=3
-  * "I want 5 of this product" → quantity=5
-  * "add PRD049" (no quantity mentioned) → quantity=1 (default)
-- ALWAYS call `add_to_cart_agent` with the EXACT quantity the user specified
-- Use product_id, quantity (extracted from user message), and customer_id ({customer_id})
-- Products are stored in cart database as 'pending' status
+**STEP 2: ADD TO CART - RECOGNIZE PURCHASE INTENT**
+
+**PURCHASE INTENT KEYWORDS** - When user's message contains these phrases, they want to ADD TO CART:
+- "i want to buy X" / "buy X" / "purchase X"
+- "i'll take X" / "get me X" / "i want X"
+- "add X" / "add to cart X"
+- Product name followed by "quantity N" (e.g., "US Polo Shirt quantity 3")
+
+**CRITICAL: PRODUCT IDENTIFICATION FROM CONVERSATION HISTORY**
+When user wants to add a product to cart:
+
+1. **SEARCH CONVERSATION HISTORY**: Look at the MOST RECENT tool call results from inventory_agent or recommendation_agent
+2. **FIND EXACT MATCH**: Match the user's product name/ID to the products that were JUST SHOWN to them
+3. **EXTRACT CORRECT product_id**: Use the product_id field from the matching product in the recent results
+4. **NEVER USE HARDCODED IDs**: Do NOT default to PRD056 or any fixed product ID
+
+**MATCHING RULES**:
+- User says: "US Polo Shirt" → Find product with product_name containing "US Polo Shirt" → Use that product's product_id (e.g., PRD015)
+- User says: "PRD028 quantity 2" → Use product_id="PRD028" directly
+- User says: "Louis Philippe" → Find product with product_name containing "Louis Philippe" → Use that product's product_id
+- If product name is ambiguous, ask user to clarify which product they mean
+
+**QUANTITY EXTRACTION** - Extract from user message:
+- "add PRD049 quantity 4" → quantity=4
+- "US Polo Shirt quantity 3" → quantity=3
+- "I want 5 of this product" → quantity=5
+- "buy X" (no quantity mentioned) → quantity=1 (default)
+
+**ACTION**: 
+- IMMEDIATELY call `add_to_cart_agent(product_id=<MATCHED_ID_FROM_RECENT_RESULTS>, quantity=<extracted_or_1>, customer_id="{customer_id}")`
+- DO NOT call inventory_agent again if product was already shown
+- DO NOT search for the product again
+
+**CORRECT EXAMPLE FLOW**:
+Agent shows: PRD004: "Louis Philippe Shirt", PRD015: "US Polo Shirt", PRD024: "H&M Casual Shirt", PRD028: "Gap Cotton Shirt"
+User says: "US Polo Shirt quantity 3"
+Correct Action: `add_to_cart_agent(product_id="PRD015", quantity=3, customer_id="{customer_id}")` ✅
+Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not in the shown list!)
+
+**VERIFICATION BEFORE CALLING add_to_cart_agent**:
+- Confirm the product_id you're using was actually shown in the recent inventory_agent results
+- If unsure, ask user to specify the product ID or clarify which product they mean
+
 - After adding, ask if they want to add more products or view their cart
 
 **STEP 3: VIEW CART & CONFIRMATION**
@@ -1249,13 +1361,37 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 - `choose_channel_agent` displays ONLINE (home delivery with loyalty rewards) vs OFFLINE (store pickup) options
 - After channel selection, IMMEDIATELY move to the appropriate flow below (do NOT call choose_channel_agent again)
 
-**STEP 5A: OFFLINE FLOW**
+**STEP 5A: OFFLINE FLOW - STORE SELECTION**
 - If user types "offline" or selects offline option:
-  1. Call `inventory_agent` with product_id for each cart item to show available offline stores
-  2. User selects a store
-  3. Call `fulfillment_agent` with purchase_type="offline", store_name, and customer_id
-  4. Show order confirmation and END conversation (switching to store kiosk)
-  5. Do NOT call loyalty or post-purchase agents for offline
+  
+  **STAGE 1: Show Available Stores (ONE TIME ONLY)**
+  1. Call `inventory_agent(product_id="PRD056")` ONCE to show stores (PRD056 = first cart item)
+     - Tool shows: "STR016 - South City Mall", "STR011 - ABFRL Store South City"
+     - After this call COMPLETES → **WORKFLOW IS NOW IN STAGE 2**
+     - Mark in your memory: "Stores have been shown, next message is store selection"
+  
+  **STAGE 2: DETECT STORE SELECTION → SKIP TO FULFILLMENT**
+  2. **STATE CHECK**: Look at conversation history
+     - IF previous tool call was inventory_agent(product_id=X) AND it returned store list
+     - THEN user's current message is store selection (NOT a product search, NOT a cart view request)
+  
+  3. **RECOGNITION RULE**: User's message contains store info like:
+     - Just ID: "STR016" or "STR011"
+     - Full name: "ABFRL Store South City" or "South City Mall"
+     - Combined: "STR011 - ABFRL Store South City"
+  
+  4. **IMMEDIATE ACTION - NO OTHER TOOLS**:
+     - Call `fulfillment_agent(purchase_type="offline", store_name="<user_exact_message>", customer_id="{customer_id}")`
+     - **FORBIDDEN**: DO NOT call view_cart_agent (cart already known)
+     - **FORBIDDEN**: DO NOT call inventory_agent again (stores already shown)
+     - **FORBIDDEN**: DO NOT call any other tool
+     - Skip directly to fulfillment_agent
+  
+  **STAGE 3: Complete Order**
+  5. fulfillment_agent returns "In-Store Pickup Confirmed! Show this Order ID at the store kiosk."
+     - Display confirmation message
+     - Show "Switch to in-store kiosk" instruction
+     - END conversation immediately (no loyalty/post-purchase for offline)
 
 **STEP 5B: ONLINE FLOW**
 - If user types "online" or confirms online purchase:
@@ -1283,7 +1419,7 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
      - DO NOT ask user for anything
      - Move directly to fulfillment
   4. AUTOMATICALLY call `loyalty_agent` (don't wait for user) with order_id and customer_id
-  5. AUTOMATICALLY call `post_purchase_agent` (don't wait for user) with order_id
+  5. AUTOMATICALLY call `post_purchase_agent` (don't wait for user) with order_id and customer_id
   6. END conversation
 
 **KEY POINT**: payment_agent is called EXACTLY TWICE in online flow:
@@ -1294,6 +1430,13 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 **MANDATORY RULES:**
 - NEVER skip tool calls or generate data yourself
 - ALWAYS use customer_id: {customer_id}
+- **PURCHASE INTENT RULE - CRITICAL PRODUCT MATCHING**: 
+  * When user wants to add a product to cart, FIRST look at the MOST RECENT inventory_agent/recommendation_agent results in conversation history
+  * MATCH the user's product name to the products that were JUST shown
+  * EXTRACT the correct product_id from the matching product in those results
+  * NEVER use a hardcoded product_id like PRD056 unless it was actually in the recent results
+  * Example: If recent results show [PRD015: "US Polo Shirt", PRD024: "H&M Casual Shirt"] and user says "US Polo Shirt quantity 3", use product_id="PRD015", NOT PRD056
+  * If product not found in recent results, call inventory_agent with search_query first
 - When user says "online" after choose_channel_agent, IMMEDIATELY call payment_agent (do NOT loop back)
 - **PAYMENT AGENT TWO-CALL RULE**: 
   * Call payment_agent FIRST TIME with only customer_id (no payment_method) → shows options
@@ -1302,7 +1445,13 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
   * DO NOT call payment_agent a THIRD time
   * DO NOT ask user for anything after payment success
 - **PAYMENT METHOD SELECTION RULE**: After payment_agent shows options, the user's NEXT message containing "upi"/"credit card"/"debit card"/"net banking" is their selection. IMMEDIATELY call payment_agent(payment_method="<method>"). DO NOT ask for confirmation.
-- When user says "offline" after choose_channel_agent, IMMEDIATELY call inventory_agent for stores
+- **OFFLINE FLOW CRITICAL RULE - CHECK CONVERSATION HISTORY**: 
+  * STEP 1: User says "offline" → call inventory_agent(product_id=X) to show stores → stores displayed
+  * STEP 2: Check last tool call - was it inventory_agent showing stores? If YES, then user's current message is store selection
+  * STEP 2 ACTION: Call ONLY fulfillment_agent(purchase_type="offline", store_name=<user_message>)
+  * STEP 2 FORBIDDEN: DO NOT call inventory_agent again, DO NOT call view_cart_agent, DO NOT call any other tool
+  * The offline flow has exactly 2 tool calls: (1) inventory_agent → (2) fulfillment_agent → END
+  * If you just showed stores in previous turn, next call MUST be fulfillment_agent with user's store selection
 - For online: automatically call loyalty_agent → post_purchase_agent after fulfillment
 - For offline: END after fulfillment (no loyalty/post-purchase)
 - Clarify ambiguous requests before calling tools
@@ -1325,6 +1474,7 @@ User: "Proceed"
 → choose_channel_agent(customer_id="{customer_id}")
 → Shows ONLINE vs OFFLINE options
 
+**ONLINE FLOW EXAMPLE:**
 User: "Online"
 → CALL 1: payment_agent(customer_id="{customer_id}")  # NO payment_method parameter
 → Shows: "Choose payment: UPI, Credit Card, Debit Card, or Net Banking?"
@@ -1337,6 +1487,23 @@ User: "upi"
 → loyalty_agent(order_id, customer_id) [AUTO]
 → post_purchase_agent(order_id) [AUTO]
 → END
+
+**OFFLINE FLOW EXAMPLE (EXACT SEQUENCE):**
+User: "Offline"
+→ STAGE 1: inventory_agent(product_id="PRD056")  # Use actual product_id from cart - CALL ONCE
+→ Tool returns: "STR016 - South City Mall", "STR011 - ABFRL Store South City"
+→ Agent displays stores to user
+→ inventory_agent is NOW DONE - do not call it again
+
+User: "STR011 - ABFRL Store South City"  # User selects a store
+→ STAGE 2: fulfillment_agent(purchase_type="offline", store_name="STR011 - ABFRL Store South City", customer_id="{customer_id}")
+→ ✅ CORRECT: Go directly to fulfillment_agent
+→ ❌ WRONG: Do NOT call inventory_agent(product_id="STR011")
+→ ❌ WRONG: Do NOT call view_cart_agent again
+→ Tool returns: "In-Store Pickup Confirmed! Show this Order ID at the store kiosk."
+→ END conversation
+
+**OFFLINE FLOW SUMMARY**: 2 tool calls total = inventory_agent (show stores) + fulfillment_agent (pickup)
 
 **CRITICAL**: When user types "upi", "credit card", "debit card", or "net banking" after seeing payment options, that IS their payment method selection. Call payment_agent immediately with that method. Do NOT ask for confirmation.
 
