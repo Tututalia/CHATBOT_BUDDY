@@ -57,7 +57,7 @@ export default function Home({ onLoginClick }) {
 
               <div className="flex gap-2 mt-auto">
                 <button
-                  onClick={onLoginClick}
+                  onClick={() => onLoginClick("customer")}
                   className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-700 to-orange-600 text-white rounded-lg font-semibold hover:from-red-800 hover:to-orange-700 transition-all duration-200 flex items-center justify-center gap-1 text-sm whitespace-nowrap shadow-md"
                 >
                   Online
@@ -76,7 +76,7 @@ export default function Home({ onLoginClick }) {
                   </svg>
                 </button>
                 <button
-                  onClick={onLoginClick}
+                  onClick={() => onLoginClick("customer")}
                   className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg font-semibold hover:from-orange-600 hover:to-yellow-600 transition-all duration-200 flex items-center justify-center gap-1 text-sm whitespace-nowrap shadow-md"
                 >
                   In-Store Kiosk
@@ -113,7 +113,7 @@ export default function Home({ onLoginClick }) {
               </p>
 
               <button
-                onClick={() => nav("/store")}
+                onClick={() => onLoginClick("storekeeper")}
                 className="w-full px-0 py-2 text-orange-600 rounded-lg font-semibold hover:text-orange-700 transition-colors flex items-center gap-1 text-base mt-auto"
               >
                 Manage Store
@@ -163,10 +163,10 @@ export default function Home({ onLoginClick }) {
               </p>
 
               <button
-                onClick={() => nav("/admin")}
+                onClick={() => onLoginClick("admin")}
                 className="w-full px-0 py-2 text-red-700 rounded-lg font-semibold hover:text-red-800 transition-colors flex items-center gap-1 text-base mt-auto"
               >
-                Open Admin
+                Login to Admin
                 <svg
                   className="w-4 h-4"
                   fill="none"

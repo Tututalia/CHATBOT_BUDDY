@@ -123,18 +123,13 @@ export default function StoreDetailsTable({ storeId }) {
   );
 
   const storeName = useMemo(() => {
-     var store = {};
-    if(storeId.length==0 || storeId==undefined || storeId=="")
-    {
-         store = {};
-    }else{
-         store = data.storeKeepers.find(s => s.id === storeId);
+    if(!storeId || storeId.length === 0 || storeId === undefined || storeId === "") {
+      return 'All Stores';
     }
-
-    console.log("store",store.name!=undefined ? store.name : 'All Store')
-
-    return store.name ? store.name : 'All Store';
-  }, [storeId]);
+    
+    const store = data.storeKeepers.find(s => s.id === storeId);
+    return store?.name || 'Unknown Store';
+  }, [storeId, data.storeKeepers]);
 
   return (
     <div className="bg-white rounded-xl shadow p-6">

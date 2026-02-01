@@ -17,22 +17,26 @@ BACKUP_CSV = os.path.join(os.path.dirname(
 
 
 def backup_customers():
+    from sqlalchemy import text
     with Session(engine) as session:
-        customers = session.exec(Customer.__table__.select()).all()
-        if not customers:
-            print("[INFO] No customers to backup.")
-            return
-        with open(BACKUP_CSV, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'customer_id', 'customer_name', 'gender', 'phone', 'address', 'loyalty_points',
-                'order_history', 'order_dates', 'pending_orders', 'role_id'])
-            for c in customers:
-                writer.writerow([
-                    c.customer_id, c.customer_name, c.gender, c.phone, c.address, c.loyalty_points,
-                    c.order_history, c.order_dates, c.pending_orders, c.role_id
-                ])
-    print(f"[OK] Backed up {len(customers)} customers to {BACKUP_CSV}")
+        try:
+            # Use raw SQL to handle missing columns gracefully
+            result = session.exec(text("SELECT * FROM customers")).all()
+            if not result:
+                print("[INFO] No customers to backup.")
+                return
+            
+            # Get column names from the first row
+            columns = result[0]._mapping.keys() if result else []
+            
+            with open(BACKUP_CSV, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(columns)
+                for row in result:
+                    writer.writerow([row._mapping.get(col) for col in columns])
+            print(f"[OK] Backed up {len(result)} customers to {BACKUP_CSV}")
+        except Exception as e:
+            print(f"[INFO] Could not backup existing data: {e}")
 
 # 2. Drop and recreate the customers table
 
