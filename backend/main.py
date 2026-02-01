@@ -313,6 +313,139 @@ def get_multiple_products(product_ids: str):
     }
 
 
+@app.get("/api/store/{store_id}/transactions")
+def get_store_transactions(store_id: str, time_range: str = "all"):
+    """
+    Get transaction history for a specific store with product analytics (offline mode only)
+
+    Args:
+        store_id: Store ID
+        time_range: Filter by time range - 'daily', 'weekly', 'monthly', or 'all' (default)
+    """
+    try:
+        from datetime import datetime, timedelta
+
+        with get_db_session() as session:
+            # Fetch store details
+            store = store_crud.get_by_id(session, store_id)
+
+            if store is None:
+                return {
+                    "error": f"Store with ID {store_id} not found",
+                    "store_name": "Unknown Store",
+                    "transactions": [],
+                    "products_sold": []
+                }
+
+            # Fetch all transactions for this store
+            transactions = store_keeper_transaction_crud.filter(
+                session,
+                {'store_id': store_id},
+                operators={'store_id': '=='}
+            )
+
+            # Calculate date threshold based on time_range
+            now = datetime.utcnow()
+            date_threshold = None
+
+            if time_range == "daily":
+                date_threshold = now - timedelta(days=1)
+            elif time_range == "weekly":
+                date_threshold = now - timedelta(weeks=1)
+            elif time_range == "monthly":
+                date_threshold = now - timedelta(days=30)
+
+            # Filter for OFFLINE mode only and apply date range
+            filtered_transactions = []
+            for tx in transactions:
+                # Only include offline mode transactions
+                if tx.mode and tx.mode.lower() != "online":
+                    # Apply date filter if specified
+                    if date_threshold:
+                        try:
+                            # Parse transaction date - handle multiple formats
+                            tx_date = None
+                            # Try M/D/YYYY format first (e.g., "12/5/2025")
+                            try:
+                                tx_date = datetime.strptime(
+                                    tx.date, "%m/%d/%Y")
+                            except:
+                                # Try ISO format
+                                try:
+                                    tx_date = datetime.fromisoformat(
+                                        tx.date.replace('Z', '+00:00'))
+                                except:
+                                    pass
+
+                            if tx_date and tx_date >= date_threshold:
+                                filtered_transactions.append(tx)
+                        except Exception as e:
+                            print(f"Date parsing error for {tx.date}: {e}")
+                            # Skip transactions with unparseable dates when filter is active
+                            pass
+                    else:
+                        # No date filter, include all offline transactions
+                        filtered_transactions.append(tx)
+
+            # Format transaction data and calculate product analytics
+            transaction_list = []
+            product_sales = {}  # Dictionary to aggregate product quantities
+
+            for tx in filtered_transactions:
+                transaction_list.append({
+                    "id": tx.id,
+                    "date": tx.date,
+                    "user_name": tx.user_name,
+                    "product": tx.product,
+                    "product_id": tx.product_id,
+                    "qty": tx.qty,
+                    "mode": tx.mode,
+                    "status": tx.status,
+                    "amount": tx.amount,
+                    "address": tx.address,
+                    "phone": tx.phone,
+                    "customer_id": tx.customer_id
+                })
+
+                # Aggregate product quantities
+                product_name = tx.product
+                if product_name in product_sales:
+                    product_sales[product_name] += tx.qty
+                else:
+                    product_sales[product_name] = tx.qty
+
+            # Convert product sales to list format for frontend
+            products_sold = [
+                {
+                    "product_name": product,
+                    "total_quantity": quantity
+                }
+                for product, quantity in product_sales.items()
+            ]
+
+            # Sort by quantity descending
+            products_sold.sort(key=lambda x: x['total_quantity'], reverse=True)
+
+            return {
+                "store_id": store.store_id,
+                "store_name": store.store_name,
+                "store_address": store.address,
+                "manager_name": store.manager_name,
+                "time_range": time_range,
+                "total_transactions": len(transaction_list),
+                "transactions": transaction_list,
+                "products_sold": products_sold
+            }
+
+    except Exception as e:
+        return {
+            "error": f"Error fetching store transactions: {str(e)}",
+            "store_name": "Unknown Store",
+            "transactions": [],
+            "products_sold": []
+        }
+
+
 # ============ Chatbot Endpoints ============
 
 class ChatMessage(BaseModel):

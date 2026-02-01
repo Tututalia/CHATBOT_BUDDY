@@ -111,8 +111,9 @@ dmypy.json
 .pyre/
 
 # FastAPI specific
-*.db
-*.sqlite3
+# *.db
+# *.sqlite3
+# Note: Database files are now tracked in git for team collaboration
 
 # IDE files
 .vscode/
