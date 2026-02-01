@@ -446,6 +446,185 @@ def get_store_transactions(store_id: str, time_range: str = "all"):
         }
 
 
+@app.get("/api/store/{store_id}/ai-insights")
+async def get_store_ai_insights(store_id: str, time_range: str = "monthly"):
+    """
+    Generate AI-powered insights for a store using LLM
+
+    Args:
+        store_id: Store ID
+        time_range: Filter by time range - 'daily', 'weekly', 'monthly', or 'all' (default: monthly)
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from datetime import datetime, timedelta
+        import json
+
+        with get_db_session() as session:
+            # Fetch store details
+            store = store_crud.get_by_id(session, store_id)
+
+            if store is None:
+                return {"error": f"Store with ID {store_id} not found"}
+
+            # Get store transactions using the existing endpoint logic
+            transactions = store_keeper_transaction_crud.filter(
+                session,
+                {'store_id': store_id},
+                operators={'store_id': '=='}
+            )
+
+            # Calculate date threshold based on time_range
+            now = datetime.utcnow()
+            date_threshold = None
+
+            if time_range == "daily":
+                date_threshold = now - timedelta(days=1)
+            elif time_range == "weekly":
+                date_threshold = now - timedelta(weeks=1)
+            elif time_range == "monthly":
+                date_threshold = now - timedelta(days=30)
+
+            # Filter for OFFLINE mode only and apply date range
+            filtered_transactions = []
+            for tx in transactions:
+                if tx.mode and tx.mode.lower() != "online":
+                    if date_threshold:
+                        try:
+                            tx_date = None
+                            try:
+                                tx_date = datetime.strptime(
+                                    tx.date, "%m/%d/%Y")
+                            except:
+                                try:
+                                    tx_date = datetime.fromisoformat(
+                                        tx.date.replace('Z', '+00:00'))
+                                except:
+                                    pass
+
+                            if tx_date and tx_date >= date_threshold:
+                                filtered_transactions.append(tx)
+                        except:
+                            pass
+                    else:
+                        filtered_transactions.append(tx)
+
+            # Calculate analytics
+            product_sales = {}
+            successful_transactions = 0
+            failed_transactions = 0
+            total_revenue = 0
+
+            for tx in filtered_transactions:
+                product_name = tx.product
+                if product_name in product_sales:
+                    product_sales[product_name] += tx.qty
+                else:
+                    product_sales[product_name] = tx.qty
+
+                if tx.status == "Success":
+                    successful_transactions += 1
+                    total_revenue += tx.amount
+                elif tx.status == "Failed":
+                    failed_transactions += 1
+
+            # Sort products by sales
+            sorted_products = sorted(
+                product_sales.items(), key=lambda x: x[1], reverse=True)
+            top_products = sorted_products[:5] if len(
+                sorted_products) >= 5 else sorted_products
+            bottom_products = sorted_products[-5:] if len(
+                sorted_products) >= 5 else []
+
+            # Prepare data for LLM
+            store_data = {
+                "store_id": store.store_id,
+                "store_name": store.store_name,
+                "manager": store.manager_name,
+                "address": store.address,
+                "time_range": time_range,
+                "total_transactions": len(filtered_transactions),
+                "successful_transactions": successful_transactions,
+                "failed_transactions": failed_transactions,
+                "total_revenue": total_revenue,
+                "top_selling_products": [{"product": p[0], "quantity": p[1]} for p in top_products],
+                "lowest_selling_products": [{"product": p[0], "quantity": p[1]} for p in bottom_products]
+            }
+
+            # Create LLM prompt
+            prompt = f"""You are an AI retail analytics advisor. Analyze the following store performance data and provide detailed insights.
+
+Store Data:
+{json.dumps(store_data, indent=2)}
+
+Generate a comprehensive analysis with the following sections. Return ONLY a valid JSON object with these exact keys:
+
+{{
+  "performance_overview": "A brief 2-3 sentence overview of the store's overall performance",
+  "key_metrics": [
+    {{"metric": "Success Rate", "value": "XX%", "insight": "brief insight"}},
+    {{"metric": "Revenue", "value": "$X,XXX", "insight": "brief insight"}},
+    {{"metric": "Transaction Volume", "value": "XXX", "insight": "brief insight"}}
+  ],
+  "top_products": [
+    {{"product": "product name", "quantity": X, "recommendation": "why it's performing well"}}
+  ],
+  "underperforming_products": [
+    {{"product": "product name", "quantity": X, "recommendation": "actionable improvement suggestion"}}
+  ],
+  "strategic_recommendations": [
+    {{"title": "Recommendation Title", "description": "Detailed actionable recommendation", "priority": "High/Medium/Low"}},
+    {{"title": "Another Recommendation", "description": "Another detailed recommendation", "priority": "High/Medium/Low"}}
+  ],
+  "customer_attraction_strategies": [
+    {{"strategy": "Strategy name", "description": "How to implement this strategy", "expected_impact": "Expected outcome"}}
+  ],
+  "loss_minimization": [
+    {{"area": "Area of concern", "suggestion": "Specific action to reduce losses", "potential_savings": "Estimated impact"}}
+  ]
+}}
+
+Important: Return ONLY the JSON object, no additional text or markdown formatting."""
+
+            # Initialize LLM
+            llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0.7,
+                max_tokens=2000
+            )
+
+            # Get LLM response
+            response = await llm.ainvoke(prompt)
+
+            # Parse the JSON response
+            try:
+                insights = json.loads(response.content)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract JSON from markdown code blocks
+                content = response.content
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0]
+                insights = json.loads(content.strip())
+
+            return {
+                "store_id": store.store_id,
+                "store_name": store.store_name,
+                "time_range": time_range,
+                "insights": insights,
+                "generated_at": datetime.utcnow().isoformat()
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": f"Error generating AI insights: {str(e)}",
+            "insights": None
+        }
+
+
 # ============ Chatbot Endpoints ============
 
 class ChatMessage(BaseModel):
