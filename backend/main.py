@@ -480,7 +480,7 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Extract timeline messages from AIMessage content (for orchestrated flows)
         timeline_messages = []
         from langchain_core.messages import ToolMessage, AIMessage as LangChainAIMessage
-        
+
         for message in result["messages"]:
             if isinstance(message, LangChainAIMessage) and message.content:
                 # Check if this is a timeline message (contains emoji indicators)
@@ -491,7 +491,7 @@ async def chat_with_agent(chat_message: ChatMessage):
                         "message": message.content,
                         "timestamp": "now"
                     })
-        
+
         # Try to return tool output as JSON if present (with timeline)
         for message in reversed(result["messages"]):
             if isinstance(message, ToolMessage):

@@ -97,17 +97,18 @@ def load_products_from_db(
             if search_query:
                 query_lower = search_query.lower()
                 keywords = query_lower.split()
-                
+
                 # Filter out common words that don't help with product search
-                common_words = {'show', 'me', 'find', 'search', 'get', 'want', 'looking', 'for', 'a', 'an', 'the', 'some', 'any'}
+                common_words = {'show', 'me', 'find', 'search', 'get',
+                                'want', 'looking', 'for', 'a', 'an', 'the', 'some', 'any'}
                 keywords = [k for k in keywords if k not in common_words]
-                
+
                 if keywords:
                     # Score products based on relevance
                     scored_products = []
                     for p in products:
                         score = 0
-                        
+
                         for keyword in keywords:
                             # Exact match in product name or category (highest priority)
                             if keyword in p.product_name.lower():
@@ -121,17 +122,18 @@ def load_products_from_db(
                                 score += 2
                             elif p.festival and keyword in p.festival.lower():
                                 score += 2
-                        
+
                         if score > 0:
                             scored_products.append((score, p))
-                    
+
                     # Sort by score (descending) and take products
                     scored_products.sort(key=lambda x: x[0], reverse=True)
                     products = [p for score, p in scored_products]
-                    
+
                     # If no scored matches, keep all products (fallback)
                     if not products:
-                        products = product_crud.get_all(session, limit=100) if not filters else products
+                        products = product_crud.get_all(
+                            session, limit=100) if not filters else products
 
             return products
     except Exception as e:
