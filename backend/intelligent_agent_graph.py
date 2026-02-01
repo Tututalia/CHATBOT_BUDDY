@@ -97,20 +97,41 @@ def load_products_from_db(
             if search_query:
                 query_lower = search_query.lower()
                 keywords = query_lower.split()
-                filtered = []
-                for p in products:
-                    match = False
-                    for keyword in keywords:
-                        if (keyword in p.product_name.lower() or
-                            keyword in p.category.lower() or
-                            keyword in p.season.lower() or
-                            keyword in p.gender.lower() or
-                                (p.festival and keyword in p.festival.lower())):
-                            match = True
-                            break
-                    if match:
-                        filtered.append(p)
-                products = filtered if filtered else products
+                
+                # Filter out common words that don't help with product search
+                common_words = {'show', 'me', 'find', 'search', 'get', 'want', 'looking', 'for', 'a', 'an', 'the', 'some', 'any'}
+                keywords = [k for k in keywords if k not in common_words]
+                
+                if keywords:
+                    # Score products based on relevance
+                    scored_products = []
+                    for p in products:
+                        score = 0
+                        
+                        for keyword in keywords:
+                            # Exact match in product name or category (highest priority)
+                            if keyword in p.product_name.lower():
+                                score += 10
+                            if keyword in p.category.lower():
+                                score += 8
+                            # Partial matches in other fields
+                            elif keyword in p.season.lower():
+                                score += 3
+                            elif keyword in p.gender.lower():
+                                score += 2
+                            elif p.festival and keyword in p.festival.lower():
+                                score += 2
+                        
+                        if score > 0:
+                            scored_products.append((score, p))
+                    
+                    # Sort by score (descending) and take products
+                    scored_products.sort(key=lambda x: x[0], reverse=True)
+                    products = [p for score, p in scored_products]
+                    
+                    # If no scored matches, keep all products (fallback)
+                    if not products:
+                        products = product_crud.get_all(session, limit=100) if not filters else products
 
             return products
     except Exception as e:
@@ -193,6 +214,57 @@ def get_customer_orders(customer_id: str) -> List[OrderHistory]:
     except Exception as e:
         print(f"Error getting orders for customer {customer_id}: {e}")
         return []
+
+
+def format_products_for_recommendation(products: List[Product]) -> str:
+    """
+    Format a list of products into recommendation JSON structure.
+    This helper function avoids duplicate database queries.
+
+    Args:
+        products: List of Product objects already fetched from database
+
+    Returns:
+        JSON string with formatted product recommendations
+    """
+    if not products:
+        return json.dumps({
+            "name": "Recommendation Agent",
+            "id": "recommendation_agent",
+            "responses": {
+                "default": "❌ No products found matching your query. Please try a different search.",
+                "recommendation": []
+            }
+        })
+
+    # Limit to 4 products for display
+    display_products = products[:4]
+
+    # Build recommendation list with image_reference
+    recommendations = []
+    for product in display_products:
+        recommendations.append({
+            "product_id": getattr(product, "sku", None) or getattr(product, "product_id", None) or getattr(product, "id", None),
+            "product_name": product.product_name,
+            "price": product.price,
+            "category": getattr(product, "category", None),
+            "description": getattr(product, "description", None),
+            "image_reference": getattr(product, "image_reference", None),
+        })
+
+    # Default message
+    default_msg = f"I recommend these {display_products[0].category if display_products else 'products'} based on your preferences. {display_products[0].product_name if display_products else ''} is ₹{int(display_products[0].price) if display_products else ''} and trending — want me to check availability?"
+
+    response_obj = {
+        "name": "Recommendation Agent",
+        "id": "recommendation_agent",
+        "responses": {
+            "default": default_msg,
+            "recommendation": recommendations
+        }
+    }
+    print(json.dumps(response_obj, indent=2))
+    return json.dumps(response_obj)
 
 
 @tool
@@ -795,7 +867,6 @@ def agent_node(state: AgentState):
     llm = create_llm()
     llm_with_tools = llm.bind_tools(tools)
 
-    # Always add system message with customer context at the beginning
     from langchain_core.messages import SystemMessage
     customer_id = state.get("customer_id", "UNKNOWN")
     system_message = SystemMessage(
@@ -805,7 +876,9 @@ You are a helpful, proactive AI shopping assistant for an e-commerce platform.
 CRITICAL INSTRUCTIONS (STRICT):
 
 1. TOOL USAGE IS MANDATORY:
-    - You MUST ALWAYS use the available agent tools for every user request related to product recommendations, inventory/availability, payment, fulfillment, loyalty, and post-purchase information.
+    - For any product search, recommendation, or purchase intent, you MUST first call `inventory_agent` to check product availability, quantity, and purchase options based on the user's query.
+    - After calling `inventory_agent`, you MUST call `recommendation_agent` to show the fetched products in the chat UI.
+    - Show the call to `inventory_agent` in the agent timeline, so the user sees that the agent is checking inventory before recommending products.
     - NEVER generate product lists, availability, payment, order, or fulfillment responses yourself. ALWAYS call the appropriate tool for each action.
 
 2. INVENTORY CHECKS:
@@ -813,7 +886,7 @@ CRITICAL INSTRUCTIONS (STRICT):
     - If the product is NOT explicitly mentioned in the user's message, you MUST clarify or confirm the product with the user before calling `inventory_agent`.
 
 3. PRODUCT RECOMMENDATIONS:
-    - Use `recommendation_agent` for any product suggestions, browsing, or when the user asks for options.
+    - After inventory check, use `recommendation_agent` to show the products found by inventory search.
 
 4. PAYMENT FLOWS:
     - Use `payment_agent` for ALL payment-related actions. Do NOT describe payment steps yourself.
@@ -834,10 +907,9 @@ CRITICAL INSTRUCTIONS (STRICT):
     - Do NOT make assumptions—always confirm details if not explicit.
 
 9. EXAMPLES:
-    - If user says "I want to buy online" but does not specify the product, ask "Which product would you like to buy?" before calling `inventory_agent`.
-    - If user says "Show me hoodies", call `recommendation_agent`.
-    - If user says "Is this in stock?", call `inventory_agent` for the referenced product.
-    - If user says "Proceed to payment", call `payment_agent`.
+    - If user says "Show me hoodies", first call `inventory_agent` with the query, then call `recommendation_agent` to show the products found.
+    - If user says "Is this in stock?", call `inventory_agent` for the referenced product, then show recommendations if available.
+    - Show the call to `inventory_agent` in the agent timeline.
 
 You must strictly follow these instructions for every user query. Do NOT skip tool calls or generate information yourself.
 """
@@ -846,11 +918,60 @@ You must strictly follow these instructions for every user query. Do NOT skip to
     # Prepend system message to all messages
     messages = [system_message] + state["messages"]
 
-    # Removed heuristic that injected inventory info as a SystemMessage.
+    # Custom logic: If the user's query is a product search or recommendation intent, call inventory_agent first, then recommendation_agent
+    user_message = state["messages"][-1].content.lower(
+    ) if state["messages"] else ""
+    product_search_keywords = ["show", "find", "search", "recommend",
+                               "browse", "options", "hoodie", "hoodies", "kurti", "kurtis", "t-shirt", "shirt", "product", "products", "item", "items", "display", "dress", "kurta", "top", "shorts", "jeans", "pants"]
+    if any(kw in user_message for kw in product_search_keywords):
+        # Extract product query from user message
+        query = user_message
 
-    # Call LLM with tools
+        # Step 1: Call inventory system to fetch products from database (internal, but show in timeline)
+        inventory_timeline_msg = AIMessage(
+            content="🔍 Inventory Agent: Searching products in database...")
+
+        # Fetch products from database based on query (this is the inventory check) - SINGLE DB QUERY
+        products = load_products_from_db(search_query=query)
+
+        # Filter products to only show items with quantity > 0 (in stock)
+        products = [p for p in products if p.quantity > 0]
+
+        # Create inventory result message
+        if products:
+            inventory_result = f"✅ Inventory Agent: Found {len(products)} products in stock"
+        else:
+            inventory_result = "⚠️ Inventory Agent: No in-stock products found. Showing alternatives..."
+            # If no matches, get all products with quantity > 0 and show random sample
+            all_products = load_products_from_db()
+            all_products = [p for p in all_products if p.quantity > 0]
+            if all_products:
+                products = random.sample(
+                    all_products, min(4, len(all_products)))
+
+        inventory_tool_msg = ToolMessage(
+            content=inventory_result, tool_call_id="inventory_agent")
+
+        # Step 2: Format the already-fetched products for display (NO additional DB query)
+        recommendation_timeline_msg = AIMessage(
+            content="📋 Recommendation Agent: Preparing product display...")
+        recommendation_result = format_products_for_recommendation(products)
+        recommendation_tool_msg = ToolMessage(
+            content=recommendation_result, tool_call_id="recommendation_agent")
+
+        # Show all steps in timeline
+        response = [
+            inventory_timeline_msg,
+            inventory_tool_msg,
+            recommendation_timeline_msg,
+            recommendation_tool_msg
+        ]
+        return {
+            "messages": response
+        }
+
+    # Otherwise, default LLM tool selection
     response = llm_with_tools.invoke(messages)
-
     return {
         "messages": [response]
     }
@@ -1074,6 +1195,6 @@ if __name__ == "__main__":
                 print(f"\n🔧 Tool Result: {msg.content[:200]}...")
 
     # Run example
-    # asyncio.run(test_conversation())
+    asyncio.run(test_conversation())
     print("\nTo run the agent:")
     print("  result = await run_agent('CUST001', 'Show me some hoodies')")

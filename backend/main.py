@@ -477,12 +477,30 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Run the graph with conversation history
         result = await graph.ainvoke(initial_state)
 
-        # Try to return tool output as JSON if present
-        from langchain_core.messages import ToolMessage
+        # Extract timeline messages from AIMessage content (for orchestrated flows)
+        timeline_messages = []
+        from langchain_core.messages import ToolMessage, AIMessage as LangChainAIMessage
+        
+        for message in result["messages"]:
+            if isinstance(message, LangChainAIMessage) and message.content:
+                # Check if this is a timeline message (contains emoji indicators)
+                if '🔍 Inventory Agent:' in message.content or '📋 Recommendation Agent:' in message.content:
+                    agent_name = "Inventory Agent" if "🔍" in message.content else "Recommendation Agent"
+                    timeline_messages.append({
+                        "agent": agent_name,
+                        "message": message.content,
+                        "timestamp": "now"
+                    })
+        
+        # Try to return tool output as JSON if present (with timeline)
         for message in reversed(result["messages"]):
             if isinstance(message, ToolMessage):
                 try:
-                    return json.loads(message.content)
+                    response_data = json.loads(message.content)
+                    # Add timeline to response if it's a recommendation agent response
+                    if isinstance(response_data, dict) and response_data.get("id") == "recommendation_agent":
+                        response_data["timeline"] = timeline_messages
+                    return response_data
                 except Exception:
                     pass
 
@@ -507,7 +525,8 @@ async def chat_with_agent(chat_message: ChatMessage):
 
         print(f"\n{'='*60}")
         print(f"Chat Response:")
-        print(f"AI Response: {ai_response[:100]}...")
+        print(f"Timeline Messages: {len(timeline_messages)}")
+        print(f"AI Response: {ai_response[:100] if ai_response else 'N/A'}...")
         print(f"Agent Calls: {agent_calls}")
         print(f"{'='*60}\n")
 
@@ -519,7 +538,8 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Return as legacy chat response if not a tool JSON
         return {
             "response": ai_response if ai_response else "I apologize, but I couldn't generate a response. Please try again.",
-            "agent_calls": agent_calls
+            "agent_calls": agent_calls,
+            "timeline": timeline_messages
         }
 
     except Exception as e:
