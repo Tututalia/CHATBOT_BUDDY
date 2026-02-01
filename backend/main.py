@@ -193,6 +193,41 @@ def get_product_by_id_from_database(product_id: str):
 #     }
 
 
+@app.get("/api/customer/{customer_id}/orders")
+def get_customer_orders_endpoint(customer_id: str):
+    """Get customer's order history with product details"""
+    # First get customer data
+    customer = load_customer_from_db(customer_id)
+
+    if customer is None:
+        return {"error": f"Customer with ID {customer_id} not found"}
+
+    # Get order history from database
+    orders = get_customer_orders_from_db(customer_id)
+
+    order_products = []
+    for order in orders:
+        # Get full product details
+        product = get_product_from_db(order.product_id)
+        if product:
+            order_products.append({
+                "transaction_id": order.transaction_id,
+                "product_id": product.product_id,
+                "product_name": product.product_name,
+                "category": product.category,
+                "price": product.price,
+                "quantity": order.quantity,
+                "purchase_date": order.order_dates,
+                "loyalty_points": order.loyalty_points,
+                "image_reference": product.image_reference
+            })
+
+    return {
+        "customer_id": customer_id,
+        "order_history": order_products
+    }
+
+
 @app.get("/api/customer/{customer_id}/{role_id}")
 def get_customer_profile(customer_id: str, role_id: str):
     """Get customer or store profile by ID and role ID"""
@@ -247,41 +282,6 @@ def get_customer_profile(customer_id: str, role_id: str):
                 }
     except Exception as e:
         return {"error": f"Error fetching customer/store: {str(e)}"}
-
-
-@app.get("/api/customer/{customer_id}/orders")
-def get_customer_orders_endpoint(customer_id: str):
-    """Get customer's order history with product details"""
-    # First get customer data
-    customer = load_customer_from_db(customer_id)
-
-    if customer is None:
-        return {"error": f"Customer with ID {customer_id} not found"}
-
-    # Get order history from database
-    orders = get_customer_orders_from_db(customer_id)
-
-    order_products = []
-    for order in orders:
-        # Get full product details
-        product = get_product_from_db(order.product_id)
-        if product:
-            order_products.append({
-                "transaction_id": order.transaction_id,
-                "product_id": product.product_id,
-                "product_name": product.product_name,
-                "category": product.category,
-                "price": product.price,
-                "quantity": order.quantity,
-                "purchase_date": order.order_dates,
-                "loyalty_points": order.loyalty_points,
-                "image_reference": product.image_reference
-            })
-
-    return {
-        "customer_id": customer_id,
-        "order_history": order_products
-    }
 
 
 @app.get("/api/products/multiple/{product_ids}")

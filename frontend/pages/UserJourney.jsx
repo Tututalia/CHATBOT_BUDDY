@@ -43,7 +43,8 @@ export default function UserJourney() {
     }
 
     // Fetch customer profile from backend
-    fetch(`http://localhost:8000/api/customer/${loggedInCustomerId}`)
+    const roleId = localStorage.getItem("userRole") || "1";
+    fetch(`http://localhost:8000/api/customer/${loggedInCustomerId}/${roleId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {

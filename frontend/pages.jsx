@@ -26,8 +26,11 @@ export default function Pages() {
   const handleLogin = async (e) => {
     e.preventDefault();
 
+    // Trim whitespace from customer ID
+    const trimmedCustomerId = customerId.trim();
+
     // Simple validation - check if password is "123"
-    if (!customerId || password !== "123") {
+    if (!trimmedCustomerId || password !== "123") {
       alert("Invalid credentials! Please use password: 123");
       return;
     }
@@ -37,7 +40,7 @@ export default function Pages() {
       const roleId = loginType === "admin" ? "3" : loginType === "storekeeper" ? "2" : "1";
       
       // Call backend API to authenticate
-      const response = await fetch(`http://localhost:8000/api/customer/${customerId}/${roleId}`);
+      const response = await fetch(`http://localhost:8000/api/customer/${trimmedCustomerId}/${roleId}`);
       const data = await response.json();
 
       if (data.error) {
@@ -47,11 +50,11 @@ export default function Pages() {
 
       // Store user data based on login type
       if (loginType === "admin") {
-        localStorage.setItem("loggedInAdminId", customerId);
+        localStorage.setItem("loggedInAdminId", trimmedCustomerId);
         localStorage.setItem("userRole", roleId);
         localStorage.setItem("adminData", JSON.stringify(data));
       } else {
-        localStorage.setItem("loggedInCustomerId", customerId);
+        localStorage.setItem("loggedInCustomerId", trimmedCustomerId);
         localStorage.setItem("userRole", roleId);
         
         if (loginType === "storekeeper") {
