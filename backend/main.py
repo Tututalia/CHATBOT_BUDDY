@@ -446,6 +446,98 @@ def get_store_transactions(store_id: str, time_range: str = "all"):
         }
 
 
+@app.get("/api/store/{store_id}/daily-orders")
+def get_store_daily_orders(store_id: str, time_range: str = "weekly"):
+    """
+    Get daily order counts for a specific store
+
+    Args:
+        store_id: Store ID
+        time_range: 'daily' (24h), 'weekly' (7d), or 'monthly' (30d)
+    """
+    try:
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        with get_db_session() as session:
+            store = store_crud.get_by_id(session, store_id)
+            if not store:
+                return {"error": f"Store {store_id} not found"}
+
+            # Calculate date range
+            now = datetime.utcnow()
+            if time_range == "daily":
+                date_threshold = now - timedelta(days=1)
+                days_count = 1
+                title = "Last 24 Hours"
+            elif time_range == "monthly":
+                date_threshold = now - timedelta(days=30)
+                days_count = 30
+                title = "Past Month"
+            else:  # weekly
+                date_threshold = now - timedelta(days=7)
+                days_count = 7
+                title = "Last 7 Days"
+
+            # Fetch transactions
+            transactions = store_keeper_transaction_crud.filter(
+                session,
+                {'store_id': store_id},
+                operators={'store_id': '=='}
+            )
+
+            # Count orders by day
+            daily_counts = defaultdict(int)
+            total_orders = 0
+
+            for tx in transactions:
+                if tx.mode and tx.mode.lower() != "online":
+                    try:
+                        tx_date = None
+                        try:
+                            tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
+                        except:
+                            try:
+                                tx_date = datetime.fromisoformat(tx.date.replace('Z', '+00:00'))
+                            except:
+                                pass
+
+                        if tx_date and tx_date >= date_threshold:
+                            day_key = tx_date.strftime("%Y-%m-%d")
+                            daily_counts[day_key] += 1
+                            total_orders += 1
+                    except:
+                        pass
+
+            # Format daily orders with percentages
+            daily_orders = []
+            for date_str, count in sorted(daily_counts.items()):
+                percentage = (count / total_orders * 100) if total_orders > 0 else 0
+                daily_orders.append({
+                    "date": date_str,
+                    "count": count,
+                    "percentage": round(percentage, 1)
+                })
+
+            # Calculate peak day and average
+            peak_day = max(daily_counts.items(), key=lambda x: x[1]) if daily_counts else (None, 0)
+            avg_daily = total_orders / len(daily_counts) if daily_counts else 0
+
+            return {
+                "store_id": store.store_id,
+                "store_name": store.store_name,
+                "total_orders": total_orders,
+                "time_range": time_range,
+                "title": title,
+                "daily_orders": daily_orders,
+                "peak_day": {"date": peak_day[0], "count": peak_day[1]} if peak_day[0] else None,
+                "avg_daily": round(avg_daily, 1),
+                "growth": None
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/store/{store_id}/ai-insights")
 async def get_store_ai_insights(store_id: str, time_range: str = "monthly"):
     """
