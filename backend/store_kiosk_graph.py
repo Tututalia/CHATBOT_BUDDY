@@ -56,25 +56,30 @@ def welcome_node(state: KioskState):
     customer_id = state["customer_id"]
     pending_orders = get_pending_offline_orders(customer_id)
     if not pending_orders:
-        return {"messages": [AIMessage(content="No pending offline orders found for your account. Please contact staff for assistance.")], "order_id": None, "product_id": None}
+        return {"messages": [AIMessage(content="Your cart is empty. Please contact staff for assistance.")], "order_id": None, "product_id": None}
 
     # Show all pending orders and ask user to select one
-    msg = "Welcome back!\n\nWe found the following pending offline orders linked to your account:\n"
+    msg = "Welcome back!\n\nYou have the following items in your cart:\n"
     order_map = {}
+    total_amount = 0
     try:
         from intelligent_agent_graph import get_product_by_id, get_store_by_id
         for idx, order in enumerate(pending_orders, 1):
             product = get_product_by_id(order.product_id)
             store = get_store_by_id(order.store_id) if order.store_id else None
-            product_info = f"Product: {product.product_name if product else order.product_id}\nCategory: {product.category if product else ''}\nPrice: ₹{int(product.price) if product else ''}\nQuantity: {product.quantity if product else ''}\n"
+            qty = getattr(order, 'quantity', 1)
+            item_total = int(product.price * qty) if product else 0
+            total_amount += item_total
+            product_info = f"Product: {product.product_name if product else order.product_id}\nCategory: {product.category if product else ''}\nPrice: ₹{int(product.price) if product else ''}\nQuantity: {qty}\nItem Total: ₹{item_total}\n"
             store_info = f"Store: {store.store_name if store else order.store_id} (ID: {order.store_id})\n" if order.store_id else ""
             msg += f"\n{idx}. Order ID: {order.order_id}\n{product_info}{store_info}"
             order_map[str(idx)] = order
-    except Exception:
+    except Exception as e:
+        print(f"Error formatting cart items: {e}")
         for idx, order in enumerate(pending_orders, 1):
             msg += f"\n{idx}. Order ID: {order.order_id}\nProduct ID: {order.product_id}\nStore ID: {order.store_id}\n"
             order_map[str(idx)] = order
-    msg += "\nPlease type the number of the order you want to pay for."
+    msg += f"\n{'='*50}\n**Total Amount to Pay: ₹{int(total_amount)}**\n{'='*50}\n\nWould you like to proceed with payment?"
     # Save order_map in state for selection
     state["_order_map"] = order_map
     return {"messages": [AIMessage(content=msg)], "order_id": None, "product_id": None, "store_id": None}
@@ -83,36 +88,47 @@ def welcome_node(state: KioskState):
 
 
 def payment_prompt_node(state: KioskState):
-    # Wait for user to say 'proceed with payment' or similar
+    # Wait for user to confirm payment or select an order number
     last_msg = state["messages"][-1] if state["messages"] else None
     if last_msg and isinstance(last_msg, HumanMessage):
         content = last_msg.content.strip()
-        # If user selects an order number
+        content_lower = content.lower()
+
+        # Check if user wants to proceed with all items
+        if "proceed" in content_lower or "pay" in content_lower or "yes" in content_lower:
+            # User confirmed - proceed with all items in cart
+            return {
+                "messages": [AIMessage(content="Great! Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "pay_all": True  # Flag to indicate paying for all items
+            }
+
+        # If user selects a specific order number
         if "_order_map" in state and content in state["_order_map"]:
             selected_order = state["_order_map"][content]
-            # Update state with selected order details
-            state["order_id"] = selected_order.order_id
-            state["product_id"] = selected_order.product_id
-            state["store_id"] = selected_order.store_id
-            # Prompt for payment method
-            return {"messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")]}
-        # Fallback: old proceed logic
-        content_lower = content.lower()
-        if "proceed" in content_lower or "pay" in content_lower or "yes" in content_lower:
-            customer_id = state["customer_id"]
-            product_id = state["product_id"]
-            payment_msg = payment_agent.invoke({
-                "product_id": product_id,
-                "payment_method": "",
-                "customer_id": customer_id
-            })
-            return {"messages": [ToolMessage(content=payment_msg, tool_call_id="payment_agent")]}
+            # Update state with selected order details - return them so they persist
+            print(
+                f"[DEBUG] Selected order: {selected_order.order_id}, product: {selected_order.product_id}, store: {selected_order.store_id}")
+            return {
+                "messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "order_id": selected_order.order_id,
+                "product_id": selected_order.product_id,
+                "store_id": selected_order.store_id,
+                "pay_all": False
+            }
         else:
-            return {"messages": [AIMessage(content="Please type the number of the order you want to pay for.")]}
+            # User didn't select a valid option
+            return {"messages": [AIMessage(content="Please type 'yes' to proceed with payment, or type a number to select a specific item.")]}
     return {"messages": []}
 
 
 def payment_method_node(state: KioskState):
+    # Check if user wants to pay for all items or specific item
+    pay_all = state.get("pay_all", False)
+
+    # If not paying for all and no specific order selected, return error
+    if not pay_all and not state.get("order_id"):
+        return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
+
     # Wait for user to select a payment method
     last_msg = state["messages"][-1] if state["messages"] else None
     if last_msg and isinstance(last_msg, HumanMessage):
@@ -120,15 +136,95 @@ def payment_method_node(state: KioskState):
         for method in ["upi", "credit", "debit", "net banking"]:
             if method in content:
                 customer_id = state["customer_id"]
-                product_id = state["product_id"]
-                order_id = state["order_id"]
-                # Only process payment here
-                payment_msg = payment_agent.invoke({
-                    "product_id": product_id,
-                    "payment_method": method,
-                    "customer_id": customer_id
-                })
-                return {"messages": [ToolMessage(content=payment_msg, tool_call_id="payment_agent")], "payment_completed": True}
+
+                try:
+                    from intelligent_agent_graph import get_product_by_id
+                    with get_db_session() as session:
+                        if pay_all:
+                            # Process all items in cart
+                            pending_orders = get_pending_offline_orders(
+                                customer_id)
+                            if not pending_orders:
+                                return {"messages": [AIMessage(content="❌ No items found in cart.")]}
+
+                            total_amount = 0
+                            order_details = []
+
+                            for order in pending_orders:
+                                # Get product details
+                                product = get_product_by_id(order.product_id)
+                                if product:
+                                    qty = getattr(order, 'quantity', 1)
+                                    item_total = product.price * qty
+                                    total_amount += item_total
+                                    order_details.append(
+                                        f"- {product.product_name} (x{qty}): ₹{int(item_total)}")
+
+                                    # Update cart status to 'paid'
+                                    order.status = 'paid'
+
+                            session.commit()
+
+                            payment_msg = f"""✅ **Payment Successful!**
+
+Payment Method: {method.upper()}
+Items Paid:
+{chr(10).join(order_details)}
+
+Total Amount Paid: ₹{int(total_amount)}
+
+Your orders are now ready for pickup. Please proceed to the store counter."""
+
+                            # Store first order details for subsequent nodes
+                            first_order = pending_orders[0]
+                            return {
+                                "messages": [AIMessage(content=payment_msg)],
+                                "payment_completed": True,
+                                "order_id": first_order.order_id,
+                                "product_id": first_order.product_id,
+                                "store_id": first_order.store_id,
+                                "all_orders": [{"order_id": o.order_id, "product_id": o.product_id, "store_id": o.store_id} for o in pending_orders]
+                            }
+                        else:
+                            # Process single item
+                            product_id = state["product_id"]
+                            order_id = state["order_id"]
+
+                            # Get cart item
+                            cart_item = cart_crud.get_by_id(session, order_id)
+                            if not cart_item:
+                                return {"messages": [AIMessage(content="❌ Order not found. Please try again.")]}
+
+                            # Get product details
+                            product = get_product_by_id(product_id)
+                            if not product:
+                                return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
+
+                            qty = getattr(cart_item, 'quantity', 1)
+                            total_amount = product.price * qty
+
+                            # Update cart status to 'paid' but keep channel as 'offline'
+                            cart_item.status = 'paid'
+                            session.commit()
+
+                            payment_msg = f"""✅ **Payment Successful!**
+
+Payment Method: {method.upper()}
+Order ID: {order_id}
+Product: {product.product_name}
+Quantity: {qty}
+Amount Paid: ₹{int(total_amount)}
+
+Your order is now ready for pickup. Please proceed to the store counter."""
+
+                            return {"messages": [AIMessage(content=payment_msg)], "payment_completed": True}
+
+                except Exception as e:
+                    print(f"Error processing payment: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return {"messages": [AIMessage(content=f"❌ Payment processing failed: {str(e)}. Please try again.")]}
+
         return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, or Net Banking.")]}
     return {"messages": []}
 
@@ -138,119 +234,317 @@ def payment_method_node(state: KioskState):
 def fulfillment_node(state: KioskState):
     # After payment, auto-run fulfillment
     customer_id = state["customer_id"]
-    product_id = state["product_id"]
-    order_id = state["order_id"]
+    product_id = state.get("product_id")
+    order_id = state.get("order_id")
     store_id = state.get("store_id")
+    all_orders = state.get("all_orders", [])
+
+    # Validate required data
+    if not order_id or not product_id:
+        print(f"[ERROR] fulfillment_node: Missing order_id or product_id")
+        return {"messages": [AIMessage(content="⚠️ Order information missing. Please start over.")], "fulfillment_done": False}
+
     # Fetch store name if possible
     try:
-        from intelligent_agent_graph import get_store_by_id
-        store = get_store_by_id(store_id) if store_id else None
-        store_name = store.store_name if store else store_id or "Store"
-    except Exception:
-        store_name = store_id or "Store"
-    fulfillment_msg = fulfillment_agent.invoke({
-        "product_id": product_id,
-        "purchase_type": "offline",
-        "store_name": store_name,
-        "customer_id": customer_id,
-        "order_id": order_id
-    })
-    return {"messages": [ToolMessage(content=fulfillment_msg, tool_call_id="fulfillment_agent")], "fulfillment_done": True}
+        from intelligent_agent_graph import get_store_by_id, get_product_by_id
+
+        if all_orders:
+            # Multiple items - show summary
+            total_amount = 0
+            item_list = []
+            store_name = None
+            store_address = None
+
+            for order_data in all_orders:
+                curr_product_id = order_data["product_id"]
+                curr_order_id = order_data["order_id"]
+                curr_store_id = order_data.get("store_id")
+
+                product = get_product_by_id(curr_product_id)
+                if not store_name and curr_store_id:
+                    store = get_store_by_id(curr_store_id)
+                    if store:
+                        store_name = store.store_name
+                        store_address = store.address
+
+                if product:
+                    with get_db_session() as session:
+                        cart_item = cart_crud.get_by_id(session, curr_order_id)
+                        if cart_item:
+                            qty = getattr(cart_item, 'quantity', 1)
+                            item_total = product.price * qty
+                            total_amount += item_total
+                            item_list.append(
+                                f"- {product.product_name} (x{qty})")
+
+            fulfillment_msg = f"""🏪 **In-Store Pickup Confirmed!**
+
+Items Ready for Pickup:
+{chr(10).join(item_list)}
+
+Total Amount: ₹{int(total_amount)}
+Pickup Store: {store_name or 'Store'}
+Store Address: {store_address or 'N/A'}
+Status: Ready for pickup now
+
+Please show your order details at the store counter to collect your items.
+
+Thank you for shopping with us! 🛍️"""
+        else:
+            # Single item
+            store = get_store_by_id(store_id) if store_id else None
+            store_name = store.store_name if store else store_id or "Store"
+            store_address = store.address if store else "N/A"
+
+            # Get product details for quantity
+            product = get_product_by_id(product_id)
+            qty = 1
+            total_amount = 0
+            if product:
+                # Get quantity from cart
+                with get_db_session() as session:
+                    cart_item = cart_crud.get_by_id(session, order_id)
+                    if cart_item:
+                        qty = getattr(cart_item, 'quantity', 1)
+                        total_amount = product.price * qty
+
+            fulfillment_msg = f"""🏪 **In-Store Pickup Confirmed!**
+
+Order ID: {order_id}
+Product: {product.product_name if product else product_id}
+Quantity: {qty}
+Total Amount: ₹{int(total_amount)}
+Pickup Store: {store_name}
+Store Address: {store_address}
+Status: Ready for pickup now
+
+Please show this Order ID at the store counter to collect your items.
+
+Thank you for shopping with us! 🛍️"""
+
+    except Exception as e:
+        print(f"Error in fulfillment_node: {e}")
+        fulfillment_msg = f"""🏪 **In-Store Pickup Confirmed!**
+
+Status: Ready for pickup
+
+Please show your order details at the store counter."""
+
+    return {"messages": [AIMessage(content=fulfillment_msg)], "fulfillment_done": True}
 
 # ============ Node 4: Loyalty Agent ============
 
 
 def loyalty_node(state: KioskState):
-    order_id = state["order_id"]
-    product_id = state["product_id"]
-    loyalty_msg = loyalty_agent.invoke({
-        "order_id": order_id,
-        "product_id": product_id
-    })
-    return {"messages": [ToolMessage(content=loyalty_msg, tool_call_id="loyalty_agent")], "loyalty_done": True}
+    order_id = state.get("order_id")
+    product_id = state.get("product_id")
+    customer_id = state["customer_id"]
+    all_orders = state.get("all_orders", [])
+
+    # Validate required data
+    if not order_id or not product_id:
+        print(f"[ERROR] loyalty_node: Missing order_id or product_id")
+        return {"messages": [AIMessage(content="✅ Thank you for your purchase!")], "loyalty_done": True}
+
+    try:
+        from intelligent_agent_graph import get_product_by_id
+        from crud import CustomerCRUD
+
+        with get_db_session() as session:
+            # Calculate total loyalty points for all items
+            total_points_earned = 0
+
+            # Process all orders if paying for all, otherwise just the selected one
+            orders_to_process = all_orders if all_orders else [
+                {"order_id": order_id, "product_id": product_id}]
+
+            for order_data in orders_to_process:
+                curr_order_id = order_data["order_id"]
+                curr_product_id = order_data["product_id"]
+
+                # Get product and cart item for loyalty calculation
+                product = get_product_by_id(curr_product_id)
+                cart_item = cart_crud.get_by_id(session, curr_order_id)
+
+                if product and cart_item:
+                    qty = getattr(cart_item, 'quantity', 1)
+                    # Calculate loyalty points (e.g., 1 point per ₹100 spent)
+                    points_earned = int((product.price * qty) / 100)
+                    total_points_earned += points_earned
+
+            # Update customer loyalty points
+            if total_points_earned > 0:
+                customer = CustomerCRUD.get_by_id(session, customer_id)
+                if customer:
+                    current_points = getattr(customer, 'loyalty_points', 0)
+                    customer.loyalty_points = current_points + total_points_earned
+                    session.commit()
+
+                    loyalty_msg = f"""🎁 **Loyalty Points Earned!**
+
+Points Earned: {total_points_earned}
+Total Points: {customer.loyalty_points}
+
+Keep shopping to earn more rewards!"""
+                else:
+                    loyalty_msg = f"""🎁 **Loyalty Points Earned!**
+
+Points Earned: {total_points_earned}
+
+Thank you for your purchase!"""
+            else:
+                loyalty_msg = "✅ Thank you for your purchase!"
+
+    except Exception as e:
+        print(f"Error in loyalty_node: {e}")
+        loyalty_msg = "✅ Thank you for your purchase!"
+
+    return {"messages": [AIMessage(content=loyalty_msg)], "loyalty_done": True}
 
 # ============ Node 5: Post-Purchase Agent ============
 
 
 def post_purchase_node(state: KioskState):
-    order_id = state["order_id"]
-    post_msg = post_purchase_agent.invoke({
-        "order_id": order_id
-    })
+    order_id = state.get("order_id")
+    product_id = state.get("product_id")
+    customer_id = state["customer_id"]
+    all_orders = state.get("all_orders", [])
+
+    # Validate required data
+    if not order_id or not product_id:
+        print(f"[ERROR] post_purchase_node: Missing order_id or product_id")
+        return {"messages": [AIMessage(content="📧 Thank you for visiting! Have a great day! 🎉")], "post_purchase_done": True}
+
+    # Generate post-purchase message
+    try:
+        from intelligent_agent_graph import get_product_by_id
+
+        if all_orders:
+            # Multiple items processed
+            post_msg = f"""📧 **Orders Complete!**
+
+Thank you for your purchase! All {len(all_orders)} items have been successfully processed.
+
+📝 We'd love to hear your feedback. Please rate your experience at the store.
+
+🔔 You'll receive updates about new products and exclusive offers.
+
+Have a great day! 🎉"""
+        else:
+            # Single item processed
+            product = get_product_by_id(product_id)
+            product_name = product.product_name if product else "your purchase"
+
+            post_msg = f"""📧 **Order Complete!**
+
+Thank you for your purchase! Your order {order_id} has been successfully processed.
+
+We hope you enjoy {product_name}!
+
+📝 We'd love to hear your feedback. Please rate your experience at the store.
+
+🔔 You'll receive updates about new products and exclusive offers.
+
+Have a great day! 🎉"""
+    except Exception as e:
+        print(f"Error generating post-purchase message: {e}")
+        post_msg = f"""📧 **Order Complete!**
+
+Thank you for your purchase!
+
+Have a great day! 🎉"""
 
     # === DB operations after post-purchase agent ===
     try:
-        product_id = state["product_id"]
-        customer_id = state["customer_id"]
-        store_id = state.get("store_id")
-        print(
-            f"[DEBUG] post_purchase_node: order_id={order_id}, product_id={product_id}, customer_id={customer_id}, store_id={store_id}")
         from crud import CartCRUD, OrderHistoryCRUD, StoreKeeperTransactionCRUD, ProductCRUD, StoreCRUD, CustomerCRUD
         from models import OrderHistory, StoreKeeperTransaction
         from database import get_db_session
         import datetime
+
+        # Process all orders if paying for all, otherwise just the selected one
+        orders_to_process = all_orders if all_orders else [
+            {"order_id": order_id, "product_id": product_id, "store_id": state.get("store_id")}]
+
         with get_db_session() as session:
-            print("[DEBUG] Fetching product, customer, store from DB...")
-            product = ProductCRUD.get_by_id(session, product_id)
-            customer = CustomerCRUD.get_by_id(session, customer_id)
-            store = StoreCRUD.get_by_id(
-                session, store_id) if store_id else None
-            print(f"[DEBUG] Product: {product}")
-            print(f"[DEBUG] Customer: {customer}")
-            print(f"[DEBUG] Store: {store}")
+            for order_data in orders_to_process:
+                curr_order_id = order_data["order_id"]
+                curr_product_id = order_data["product_id"]
+                curr_store_id = order_data.get("store_id")
 
-            # Only proceed if product and customer exist
-            if product and customer:
-                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print("[DEBUG] Creating OrderHistory record...")
-                order_history = OrderHistory(
-                    transaction_id=order_id,
-                    customer_id=customer_id,
-                    customer_name=customer.customer_name,
-                    product_id=product_id,
-                    product_name=product.product_name,
-                    quantity=product.quantity,
-                    order_dates=now,
-                    loyalty_points=getattr(product, 'loyalty_points', 0)
-                )
-                OrderHistoryCRUD.create(session, order_history)
-                print("[DEBUG] OrderHistory record created.")
-
-                print("[DEBUG] Creating StoreKeeperTransaction record...")
-                store_keeper_txn = StoreKeeperTransaction(
-                    customer_id=customer_id,
-                    product_id=product_id,
-                    date=now,
-                    user_name=customer.customer_name,
-                    product=product.product_name,
-                    qty=1,
-                    mode="Offline",
-                    store_name=store.store_name if store else "",
-                    store_id=store_id,
-                    status="Complete",
-                    amount=getattr(product, 'price', 0.0),
-                    address=getattr(customer, 'address', ""),
-                    phone=getattr(customer, 'phone', "")
-                )
-                StoreKeeperTransactionCRUD.create(session, store_keeper_txn)
-                print("[DEBUG] StoreKeeperTransaction record created.")
-                session.flush()  # Ensure ORM flushes inserts before delete
-            else:
                 print(
-                    f"[ERROR] Product or Customer not found for order_id: {order_id}")
+                    f"[DEBUG] post_purchase_node: order_id={curr_order_id}, product_id={curr_product_id}, customer_id={customer_id}, store_id={curr_store_id}")
 
-            # Remove from cart after all details fetched
-            print(f"[DEBUG] Deleting cart entry with order_id: {order_id}")
-            CartCRUD.delete(session, order_id)
-            print(f"[DEBUG] Cart entry deleted for order_id: {order_id}")
+                print("[DEBUG] Fetching product, customer, store from DB...")
+                product = ProductCRUD.get_by_id(session, curr_product_id)
+                customer = CustomerCRUD.get_by_id(session, customer_id)
+                store = StoreCRUD.get_by_id(
+                    session, curr_store_id) if curr_store_id else None
+                cart_item = CartCRUD.get_by_id(session, curr_order_id)
+                print(f"[DEBUG] Product: {product}")
+                print(f"[DEBUG] Customer: {customer}")
+                print(f"[DEBUG] Store: {store}")
+                print(f"[DEBUG] Cart Item: {cart_item}")
+
+                # Only proceed if product and customer exist
+                if product and customer and cart_item:
+                    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    qty = getattr(cart_item, 'quantity', 1)
+                    total_amount = product.price * qty
+
+                    print("[DEBUG] Creating OrderHistory record...")
+                    order_history = OrderHistory(
+                        transaction_id=curr_order_id,
+                        customer_id=customer_id,
+                        customer_name=customer.customer_name,
+                        product_id=curr_product_id,
+                        product_name=product.product_name,
+                        quantity=qty,
+                        order_dates=now,
+                        loyalty_points=getattr(customer, 'loyalty_points', 0)
+                    )
+                    OrderHistoryCRUD.create(session, order_history)
+                    print("[DEBUG] OrderHistory record created.")
+
+                    print("[DEBUG] Creating StoreKeeperTransaction record...")
+                    store_keeper_txn = StoreKeeperTransaction(
+                        customer_id=customer_id,
+                        product_id=curr_product_id,
+                        date=now,
+                        user_name=customer.customer_name,
+                        product=product.product_name,
+                        qty=qty,
+                        mode="Offline",
+                        store_name=store.store_name if store else "",
+                        store_id=curr_store_id,
+                        status="Complete",
+                        amount=total_amount,
+                        address=getattr(customer, 'address', ""),
+                        phone=getattr(customer, 'phone', "")
+                    )
+                    StoreKeeperTransactionCRUD.create(
+                        session, store_keeper_txn)
+                    print("[DEBUG] StoreKeeperTransaction record created.")
+                    session.flush()  # Ensure ORM flushes inserts before delete
+                else:
+                    print(
+                        f"[ERROR] Product, Customer, or Cart Item not found for order_id: {curr_order_id}")
+
+                # Remove from cart after all details fetched
+                if cart_item:
+                    print(
+                        f"[DEBUG] Deleting cart entry with order_id: {curr_order_id}")
+                    CartCRUD.delete(session, curr_order_id)
+                    print(
+                        f"[DEBUG] Cart entry deleted for order_id: {curr_order_id}")
+
             session.commit()  # Commit all changes
-            print(f"[DEBUG] DB commit successful for order_id: {order_id}")
+            print(f"[DEBUG] DB commit successful for all orders")
     except Exception as e:
         import traceback
         print(f"[ERROR] Post-purchase DB operations failed: {e}")
         traceback.print_exc()
 
-    return {"messages": [ToolMessage(content=post_msg, tool_call_id="post_purchase_agent")], "post_purchase_done": True}
+    return {"messages": [AIMessage(content=post_msg)], "post_purchase_done": True}
 
 # ============ Build Linear Graph ============
 
@@ -319,7 +613,7 @@ if __name__ == "__main__":
                 state[k] = v
         state["messages"].extend(msgs)
 
-        # Step 2: Wait for user to proceed with payment
+        # Step 2: Wait for user to select order number
         user = input("\nYou: ")
         state["messages"].append(HumanMessage(content=user))
         result = payment_prompt_node(state)
@@ -329,6 +623,7 @@ if __name__ == "__main__":
                 print(f"\n🔧: {msg.content[:400]}...")
             elif isinstance(msg, AIMessage):
                 print(f"\n🤖: {msg.content}")
+        # Update state with all returned values
         for k, v in result.items():
             if k != "messages":
                 state[k] = v
