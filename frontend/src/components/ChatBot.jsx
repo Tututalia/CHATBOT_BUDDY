@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./ChatBot.css";
 import chatbotConfig from "../../data/chatbotAgents.json";
+import chatbotSchema from "../../data/chatbot.json";
 
 export default function ChatBot({ customerId = "CUST001" }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -10,6 +11,8 @@ export default function ChatBot({ customerId = "CUST001" }) {
   const [isLoading, setIsLoading] = useState(false);
   const [agentTimeline, setAgentTimeline] = useState([]);
   const [welcomeMessage, setWelcomeMessage] = useState("");
+  const [lastRecommendations, setLastRecommendations] = useState([]);
+  const [productQuantities, setProductQuantities] = useState({});
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
@@ -106,32 +109,94 @@ export default function ChatBot({ customerId = "CUST001" }) {
         response.responses.recommendation &&
         Array.isArray(response.responses.recommendation)
       ) {
+        // Track last recommendations for downstream UI (e.g., add-to-cart confirmation)
+        setLastRecommendations(response.responses.recommendation);
         const productCardsMessage = {
           type: "productCards",
           productCards: response.responses.recommendation,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, productCardsMessage]);
-
-        // Also add default text message if present
-        if (response.responses.default) {
-          const textMessage = {
-            type: "ai",
-            text: response.responses.default,
-            timestamp: new Date(),
-          };
-          setMessages((prev) => [...prev, textMessage]);
-        }
-      } else if (response.response) {
+      } else if (response.response.length==0) {
         // Fallback for text-only responses
+       if(response.cart_items!=undefined)
+        { 
+      setAgentTimeline((prev) => [
+        ...prev,
+        {
+          action: "View Cart Agent",
+          timestamp: new Date().toLocaleTimeString(),
+          status: "completed",
+        },
+      ]);
+
+      // If backend returns cart items, display as product cards
+      if (response.cart_items && Array.isArray(response.cart_items) && response.cart_items.length > 0) {
+        const cartCardsMessage = {
+          type: "cartItems",
+          cartItems: response.cart_items,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, cartCardsMessage]);
+      } else {
+       
         const aiMessage = {
+          type: "ai",
+          text: response.response || "Your cart is currently empty.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMessage]);
+      } }else{ 
+         console.log("fallback")
+         const aiMessage = {
           type: "ai",
           text: response.response,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+
+        // If backend confirmed add-to-cart in plain text, also render a structured confirmation card
+        if (/Added to Cart/i.test(response.response)) {
+          const qtyMatch = userMessage.text.match(/\b(\d+)\b/);
+          const quantity = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+          const product = lastRecommendations && lastRecommendations.length > 0
+            ? lastRecommendations[0]
+            : null;
+          if (product) {
+            const total = (product.price || 0) * quantity;
+            const cartConfirmMessage = {
+              type: "cartConfirmation",
+              data: {
+                message: "✅ Added to Cart!",
+                product: {
+                  product_id: product.product_id,
+                  product_name: product.product_name,
+                  quantity,
+                  price_per_unit: product.price,
+                  total
+                },
+                prompt: "Would you like to add more products or proceed to view your cart?"
+              },
+              timestamp: new Date()
+            };
+            setMessages((prev) => [...prev, cartConfirmMessage]);
+            setAgentTimeline((prev) => [
+              ...prev,
+              {
+                action: "Add to Cart Agent",
+                timestamp: new Date().toLocaleTimeString(),
+                status: "completed",
+              },
+            ]);
+          }
+        }
       }
-    } catch (err) {
+    }
+      
+
+        
+
+    }  catch (err) {
       console.error("Error calling agent:", err);
       const errorMessage = {
         type: "ai",
@@ -429,6 +494,224 @@ export default function ChatBot({ customerId = "CUST001" }) {
     }, 100);
   };
 
+  const handleQuantityChange = (productId, delta) => {
+    setProductQuantities((prev) => {
+      const currentQty = prev[productId] || 1;
+      const newQty = Math.max(1, Math.min(99, currentQty + delta));
+      return { ...prev, [productId]: newQty };
+    });
+  };
+
+  const handleRemoveFromCart = async (orderId, productName) => {
+    const userMessage = {
+      type: "user",
+      text: `Remove ${productName} from cart`,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Add to agent timeline
+    setAgentTimeline((prev) => [
+      ...prev,
+      {
+        action: "User Query",
+        timestamp: new Date().toLocaleTimeString(),
+        status: "completed",
+      },
+    ]);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Remove item ${orderId} from cart`,
+          customer_id: customerId,
+        }),
+      });
+
+      const data = await response.json();
+
+      setAgentTimeline((prev) => [
+        ...prev,
+        {
+          action: "Remove from Cart Agent",
+          timestamp: new Date().toLocaleTimeString(),
+          status: "completed",
+        },
+      ]);
+
+      const aiMessage = {
+        type: "ai",
+        text: data.response || "Item removed from cart successfully!",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // Auto-refresh cart after removal
+      setTimeout(() => handleViewCart(), 1000);
+    } catch (error) {
+      console.error("Error removing from cart:", error);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error removing the item. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleViewCart = async () => {
+    const userMessage = {
+      type: "user",
+      text: "View my cart",
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
+
+    // Add to agent timeline
+    setAgentTimeline((prev) => [
+      ...prev,
+      {
+        action: "User Query",
+        timestamp: new Date().toLocaleTimeString(),
+        status: "completed",
+      },
+    ]);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: "view cart",
+          customer_id: customerId,
+        }),
+      });
+
+      const data = await response.json();
+
+      setAgentTimeline((prev) => [
+        ...prev,
+        {
+          action: "View Cart Agent",
+          timestamp: new Date().toLocaleTimeString(),
+          status: "completed",
+        },
+      ]);
+
+      // If backend returns cart items, display as product cards
+      if (data.cart_items && Array.isArray(data.cart_items) && data.cart_items.length > 0) {
+        const cartCardsMessage = {
+          type: "cartItems",
+          cartItems: data.cart_items,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, cartCardsMessage]);
+      } else {
+        const aiMessage = {
+          type: "ai",
+          text: data.response || "Your cart is currently empty.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMessage]);
+      }
+    } catch (error) {
+      console.error("Error viewing cart:", error);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error loading your cart. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleAddToCart = async (product) => {
+    const quantity = productQuantities[product.product_id] || 1;
+    const userMessage = {
+      type: "user",
+      text: `Add ${quantity} x ${product.product_name} to cart`,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setIsLoading(true);
+
+    // Add to agent timeline
+    setAgentTimeline((prev) => [
+      ...prev,
+      {
+        action: "Add to Cart Request",
+        timestamp: new Date().toLocaleTimeString(),
+        status: "completed",
+      },
+    ]);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Add ${quantity} units of product ${product.product_id} to cart`,
+          customer_id: customerId,
+        }),
+      });
+
+      const data = await response.json();
+
+      setAgentTimeline((prev) => [
+        ...prev,
+        {
+          action: "Add to Cart Agent",
+          timestamp: new Date().toLocaleTimeString(),
+          status: "completed",
+        },
+      ]);
+
+      const aiMessage = {
+        type: "ai",
+        text: data.response || "Item added to cart successfully!",
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // Add View Cart button after successful add to cart
+      const viewCartMessage = {
+        type: "viewCartPrompt",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, viewCartMessage]);
+
+      // Reset quantity for this product
+      setProductQuantities((prev) => {
+        const updated = { ...prev };
+        delete updated[product.product_id];
+        return updated;
+      });
+    } catch (error) {
+      console.error("Error adding to cart:", error);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error adding the item to cart. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
   const clearChat = () => {
     // Clear local state with personalized greeting from JSON
     const greetingText =
@@ -445,6 +728,7 @@ export default function ChatBot({ customerId = "CUST001" }) {
       },
     ]);
     setAgentTimeline([]);
+    setProductQuantities({});
   };
 
   return (
@@ -964,7 +1248,7 @@ export default function ChatBot({ customerId = "CUST001" }) {
                         {message.productCards &&
                           message.productCards.length > 0 && (
                             <div className="product-cards-container">
-                              {message.productCards.map((product) => (
+                              {message.productCards.slice(0, 3).map((product) => (
                                 <div
                                   key={product.product_id}
                                   className="product-card"
@@ -996,21 +1280,156 @@ export default function ChatBot({ customerId = "CUST001" }) {
                                     <p className="product-price">
                                       ₹{product.price.toLocaleString()}
                                     </p>
+                                    <div className="quantity-controls">
+                                      <button
+                                        className="qty-btn"
+                                        onClick={() =>
+                                          handleQuantityChange(
+                                            product.product_id,
+                                            -1,
+                                          )
+                                        }
+                                      >
+                                        −
+                                      </button>
+                                      <span className="qty-value">
+                                        {productQuantities[product.product_id] || 1}
+                                      </span>
+                                      <button
+                                        className="qty-btn"
+                                        onClick={() =>
+                                          handleQuantityChange(
+                                            product.product_id,
+                                            1,
+                                          )
+                                        }
+                                      >
+                                        +
+                                      </button>
+                                    </div>
                                     <button
-                                      className="check-availability-btn"
-                                      onClick={() =>
-                                        setInputValue(
-                                          `Check availability for ${product.product_id}`,
-                                        )
-                                      }
+                                      className="add-to-cart-btn"
+                                      onClick={() => handleAddToCart(product)}
                                     >
-                                      Check Availability
+                                      Add to Cart
                                     </button>
                                   </div>
                                 </div>
                               ))}
                             </div>
                           )}
+
+                        {/* Render cart items as product cards */}
+                        {message.type === "cartItems" && message.cartItems && message.cartItems.length > 0 && (
+                          <div className="cart-items-container">
+                            <div className="cart-header-section">
+                              <span className="cart-icon">🛒</span>
+                              <h4>Your Cart ({message.cartItems.length} items)</h4>
+                            </div>
+                            <div className="product-cards-container">
+                              {message.cartItems.map((item) => (
+                                <div
+                                  key={item.order_id || item.product_id}
+                                  className="product-card cart-item-card"
+                                >
+                                  <button
+                                    className="cart-item-delete-btn"
+                                    onClick={() => handleRemoveFromCart(item.order_id, item.product_name)}
+                                    title="Remove from cart"
+                                  >
+                                    🗑️
+                                  </button>
+                                  <div className="product-image-wrapper">
+                                    <img
+                                      src={
+                                        item.image_reference ||
+                                        "/images/placeholder.png"
+                                      }
+                                      alt={item.product_name}
+                                      className="product-image"
+                                      onError={(e) => {
+                                        e.target.src =
+                                          "/images/placeholder.png";
+                                      }}
+                                    />
+                                    <span className="cart-quantity-badge">
+                                      Qty: {item.quantity}
+                                    </span>
+                                  </div>
+                                  <div className="product-info">
+                                    <h4 className="product-name">
+                                      {item.product_name}
+                                    </h4>
+                                    <p className="product-price">
+                                      ₹{(item.price || item.price_per_unit)?.toLocaleString()}
+                                    </p>
+                                    <div className="cart-item-details">
+                                      <span className="detail-label">Quantity:</span>
+                                      <span className="detail-value">{item.quantity}</span>
+                                    </div>
+                                    <div className="cart-item-total">
+                                      <span className="total-label">Total:</span>
+                                      <span className="total-value">₹{(item.total_amount || (item.price || item.price_per_unit) * item.quantity)?.toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Render View Cart Prompt */}
+                        {message.type === "viewCartPrompt" && (
+                          <div className="view-cart-prompt">
+                            <button
+                              className="view-cart-btn"
+                              onClick={handleViewCart}
+                            >
+                              🛒 View Cart
+                            </button>
+                            <button
+                              className="continue-shopping-btn"
+                              onClick={() => setInputValue("show me more products")}
+                            >
+                              Continue Shopping
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Render Add-to-Cart confirmation card */}
+                        {message.type === "cartConfirmation" && message.data && (
+                          <div className="cart-confirmation-container">
+                            <div className="cart-confirmation-card">
+                              <div className="cart-header">
+                                <span className="cart-icon">🛒</span>
+                                <h4>{message.data.message}</h4>
+                              </div>
+                              <div className="cart-details-grid">
+                                <div className="cart-detail-item">
+                                  <span className="detail-label">Product</span>
+                                  <span className="detail-value">{message.data.product.product_name} ({message.data.product.product_id})</span>
+                                </div>
+                                <div className="cart-detail-item">
+                                  <span className="detail-label">Quantity</span>
+                                  <span className="detail-value">{message.data.product.quantity}</span>
+                                </div>
+                                <div className="cart-detail-item">
+                                  <span className="detail-label">Price</span>
+                                  <span className="detail-value amount">₹{Number(message.data.product.price_per_unit).toLocaleString()}</span>
+                                </div>
+                                <div className="cart-detail-item">
+                                  <span className="detail-label">Total</span>
+                                  <span className="detail-value amount">₹{Number(message.data.product.total).toLocaleString()}</span>
+                                </div>
+                              </div>
+                              <div className="cart-actions">
+                                <button className="cart-btn primary" onClick={() => setInputValue("view cart")}>View Cart</button>
+                                <button className="cart-btn" onClick={() => setInputValue("add more")}>Add More</button>
+                              </div>
+                              <p className="cart-prompt">{message.data.prompt}</p>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Render Payment Input */}
                         {message.showPaymentInput && (

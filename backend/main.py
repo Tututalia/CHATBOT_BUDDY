@@ -848,8 +848,8 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Save user message to database
         save_message(customer_id, session_id, "user", user_query)
 
-        # Get conversation history from database
-        history = get_conversation_history(customer_id, session_id, limit=20)
+        # Get conversation history from database (limit to recent messages to force fresh tool calls)
+        history = get_conversation_history(customer_id, session_id, limit=6)
 
         print(f"Retrieved {len(history)} messages from history")
 
@@ -881,30 +881,54 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Run the graph with conversation history
         result = await graph.ainvoke(initial_state)
 
-        # Extract timeline messages from AIMessage content (for orchestrated flows)
+        # Extract timeline messages from all agent tool calls
         timeline_messages = []
         from langchain_core.messages import ToolMessage, AIMessage as LangChainAIMessage
-
+        
+        # Map tool names to agent names for timeline display
+        tool_to_agent_map = {
+            "search_products": "Inventory Agent",
+            "recommend_products": "Recommendation Agent",
+            "add_to_cart": "Add to Cart Agent",
+            "view_cart": "View Cart Agent",
+            "remove_from_cart": "Remove from Cart Agent",
+            "process_payment": "Payment Agent",
+            "schedule_delivery": "Fulfillment Agent",
+            "apply_loyalty_rewards": "Loyalty Agent",
+            "get_customer_info": "Customer Info Agent",
+            "post_purchase_support": "Post-Purchase Agent"
+        }
+        
+        # Track which agents have been called
+        seen_agents = set()
+        
         for message in result["messages"]:
-            if isinstance(message, LangChainAIMessage) and message.content:
-                # Check if this is a timeline message (contains emoji indicators)
-                if '🔍 Inventory Agent:' in message.content or '📋 Recommendation Agent:' in message.content:
-                    agent_name = "Inventory Agent" if "🔍" in message.content else "Recommendation Agent"
-                    timeline_messages.append({
-                        "agent": agent_name,
-                        "message": message.content,
-                        "timestamp": "now"
-                    })
+            # Check for tool calls in AIMessage
+            if isinstance(message, LangChainAIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_name = tool_call.get("name", "")
+                    agent_name = tool_to_agent_map.get(tool_name, tool_name)
+                    
+                    # Only add each agent once to timeline
+                    if agent_name not in seen_agents:
+                        seen_agents.add(agent_name)
+                        timeline_messages.append({
+                            "agent": agent_name,
+                            "timestamp": "now"
+                        })
 
         # Try to return tool output as JSON if present (with timeline)
         for message in reversed(result["messages"]):
             if isinstance(message, ToolMessage):
                 try:
                     response_data = json.loads(message.content)
-                    # Add timeline to response if it's a recommendation agent response
-                    if isinstance(response_data, dict) and response_data.get("id") == "recommendation_agent":
-                        response_data["timeline"] = timeline_messages
-                    return response_data
+                    # Add timeline to response if it's a dict
+                    if isinstance(response_data, dict):
+                        # Add timeline for agents that support it (check for id or cart_items)
+                        if response_data.get("id") in ["recommendation_agent", "view_cart_agent"] or "cart_items" in response_data:
+                            response_data["timeline"] = timeline_messages
+                        # Always return the parsed JSON if successful
+                        return response_data
                 except Exception:
                     pass
 

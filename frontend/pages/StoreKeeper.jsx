@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { json, useNavigate } from "react-router-dom";
 import {
   BarChart,
   Bar,
@@ -107,9 +107,10 @@ export default function StoreKeeper() {
 
   const fetchAIInsights = async (storeId, range) => {
     // COMMENTED OUT TO SAVE TOKENS - AI insights API call disabled
-    /*
+    
     try {
       setInsightsLoading(true);
+      console.log("calling store api")
       const response = await fetch(
         `http://localhost:8000/api/store/${storeId}/ai-insights?time_range=${range}`,
       );
@@ -120,6 +121,7 @@ export default function StoreKeeper() {
         setAiInsights(null);
       } else {
         setAiInsights(data.insights);
+        console.log("data",data?.insights)
       }
     } catch (error) {
       console.error("Error fetching AI insights:", error);
@@ -127,9 +129,9 @@ export default function StoreKeeper() {
     } finally {
       setInsightsLoading(false);
     }
-    */
+    
     // Temporarily disabled - uncomment above code to re-enable AI insights
-    setAiInsights(null);
+    // setAiInsights(null);
     setInsightsLoading(false);
   };
 

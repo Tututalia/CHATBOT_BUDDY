@@ -643,11 +643,15 @@ def view_cart_agent(customer_id: str) -> str:
         customer_id: The customer ID
 
     Returns:
-        Cart summary with total amount and action options
+        Cart summary with total amount and action options (returns JSON with cart_items array)
     """
     try:
+        print("customer id",customer_id)
+        
         with get_db_session() as session:
             # Get all pending cart items for this customer
+            
+            
             cart_items = cart_crud.filter(
                 session,
                 filters={"customer_id": customer_id, "status": "pending"},
@@ -656,10 +660,11 @@ def view_cart_agent(customer_id: str) -> str:
             )
 
             if not cart_items:
-                return "🛒 Your cart is empty. Would you like to browse products?"
-
-            result = f"🛒 **Your Shopping Cart**\\n\\n"
-            result += f"Total Items: {len(cart_items)}\\n\\n"
+                return json.dumps({
+                    "id": "view_cart_agent",
+                    "response": "🛒 Your cart is empty. Would you like to browse products?",
+                    "cart_items": []
+                })
 
             total_amount = 0
             cart_details = []
@@ -671,30 +676,34 @@ def view_cart_agent(customer_id: str) -> str:
                     item_total = product.price * qty
                     total_amount += item_total
 
-                    result += f"📦 **{product.product_name}** (ID: {item.product_id})\\n"
-                    result += f"   Quantity: {qty} × ₹{int(product.price):,} = ₹{int(item_total):,}\\n"
-                    result += f"   Order ID: {item.order_id}\\n\\n"
-
                     cart_details.append({
                         "order_id": item.order_id,
                         "product_id": item.product_id,
                         "product_name": product.product_name,
                         "quantity": qty,
-                        "price": product.price,
-                        "total": item_total
+                        "price": float(product.price),
+                        "price_per_unit": float(product.price),
+                        "total_amount": float(item_total),
+                        "image_reference": getattr(product, 'image_reference', '/images/placeholder.png')
                     })
 
-            result += f"💰 **Total Amount: ₹{int(total_amount):,}**\\n\\n"
-            result += "**What would you like to do?**\\n"
-            result += "- Type 'proceed' to continue to payment\\n"
-            result += "- Type 'add more' to browse more products\\n"
-            result += "- To remove an item, provide the Order ID\\n"
-
-            return result
+            # Return JSON format for frontend
+            # Don't include text in response - frontend will display product cards only
+            return json.dumps({
+                "id": "view_cart_agent",
+                "response": "",  # Empty - frontend displays product cards, no need for text
+                "cart_items": cart_details,
+                "total_amount": float(total_amount),
+                "total_items": len(cart_items)
+            })
 
     except Exception as e:
         print(f"Error viewing cart: {e}")
-        return f"❌ Error loading cart. Please try again."
+        return json.dumps({
+            "id": "view_cart_agent",
+            "response": "❌ Error loading cart. Please try again.",
+            "cart_items": []
+        })
 
 
 @tool
@@ -1336,6 +1345,7 @@ When user wants to add a product to cart:
 - IMMEDIATELY call `add_to_cart_agent(product_id=<MATCHED_ID_FROM_RECENT_RESULTS>, quantity=<extracted_or_1>, customer_id="{customer_id}")`
 - DO NOT call inventory_agent again if product was already shown
 - DO NOT search for the product again
+- **CRITICAL**: After the tool returns its confirmation message, relay ONLY that message - DO NOT add cart summaries or list all items from memory
 
 **CORRECT EXAMPLE FLOW**:
 Agent shows: PRD004: "Louis Philippe Shirt", PRD015: "US Polo Shirt", PRD024: "H&M Casual Shirt", PRD028: "Gap Cotton Shirt"
@@ -1350,7 +1360,9 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
 - After adding, ask if they want to add more products or view their cart
 
 **STEP 3: VIEW CART & CONFIRMATION**
-- When user says "view cart" or "show cart", call `view_cart_agent` with customer_id
+- When user says "view cart" or "show cart", ALWAYS call `view_cart_agent` with customer_id - NEVER generate cart summary from memory
+- CRITICAL: You MUST call the view_cart_agent tool, do NOT respond with cart details from conversation history
+- The tool will return current cart data from database with product images and details
 - Show all cart items with quantities and total amount
 - Ask if they want to remove any items, add more products, or proceed to payment
 - If they want to remove, use `remove_from_cart_agent` with order_id

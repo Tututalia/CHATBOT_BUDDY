@@ -1,0 +1,29 @@
+{
+  "welcome_message": "Welcome to your AI Shopping Assistant! 🛍️",
+  "agents": [
+    {
+      "agentId": "recommendation_agent",
+      "title": "Recommendation Agent",
+      "output": {
+        "message": "🛍️ Here are {count} products I found for you! **{first_product_name}** is ₹{price} and in stock ({quantity} available).",
+        "prompt": "Would you like to **add any of these to your cart** with quantity, or do you want to **browse more products**?"
+      }
+    },
+    {
+      "agentId": "add_to_cart_agent",
+      "title": "Add to Cart Agent",
+      "output": {
+        "status": "success",
+        "message": "✅ **Added to Cart!**",
+        "product": {
+          "product_id": "{product_id}",
+          "product_name": "{product_name}",
+          "quantity": "{quantity}",
+          "price_per_unit": "{price}",
+          "total": "{total}"
+        },
+        "prompt": "Would you like to **add more products** to your cart or **proceed to view your cart**?"
+      }
+    }
+  ]
+}
