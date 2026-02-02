@@ -1,286 +1,502 @@
 {
-  "welcome_message": "Welcome to your AI Shopping Assistant! 🛍️ I'm powered by 6 specialized agents ready to assist you:\n\n✨ **Recommendation Agent** - Personalized product suggestions\n📦 **Inventory Agent** - Real-time stock checking\n💳 **Payment Agent** - Secure payment processing\n🚚 **Fulfillment Agent** - Delivery scheduling\n🎁 **Loyalty Agent** - Rewards & special offers\n💬 **Post-Purchase Agent** - Returns, tracking & support\n\nHow can I help you shop today?",
+  "welcome_message": "Welcome to your AI Shopping Assistant! 🛍️",
+  "introduction": {
+    "greeting": "Hi! I'm your intelligent shopping assistant powered by specialized agents.",
+    "capabilities": [
+      "🔍 Search & Discovery - Find products from our catalog",
+      "🎁 Smart Recommendations - Personalized product displays",
+      "🛒 Cart Management - Add, view, and remove items",
+      "🛍️ Channel Selection - Choose online delivery or store pickup",
+      "💳 Secure Payment - Multiple payment options",
+      "📦 Order Fulfillment - Track your delivery or pickup",
+      "⭐ Loyalty Rewards - Earn points on every purchase",
+      "💬 Post-Purchase Support - Tracking, returns & assistance"
+    ],
+    "prompt": "How can I help you shop today?"
+  },
+  "workflow": {
+    "steps": [
+      "Search products",
+      "Add to cart",
+      "View/manage cart",
+      "Choose channel (online/offline)",
+      "Payment (online) or Store selection (offline)",
+      "Fulfillment",
+      "Loyalty & Support (online only)"
+    ],
+    "channels": {
+      "online": {
+        "flow": "Payment → Fulfillment → Loyalty → Post-Purchase",
+        "benefits": ["Home delivery", "Loyalty points", "Order tracking", "Post-purchase support"]
+      },
+      "offline": {
+        "flow": "Store Selection → Fulfillment",
+        "benefits": ["Store pickup", "No delivery wait", "Pay at store"]
+      }
+    }
+  },
   "agents": [
     {
-      "name": "Recommendation Agent",
-      "id": "recommendation_agent",
-      "responses": {
-        "default": "I recommend these shirts based on your past buys (Raymond last month). Raymond Shirt is ₹1,789 and trending — want me to check size 40 availability?",
-        "recommendation": [
-          {
-            "product_name": "Raymond Shirt",
-            "price": 1789,
-            "image": "/images/shirt 2.avif",
-            "description": "Trending shirt based on your past purchases.",
-            "sku": "SKU285"
-          },
-          {
-            "product_name": "Black Formal Shirt",
-            "price": 1999,
-            "image": "/images/shirt 4.avif",
-            "description": "Perfect for formal occasions.",
-            "sku": "SKU441"
-          },
-          {
-            "product_name": "Blue Casual Shirt",
-            "price": 1599,
-            "image": "/images/shirt 2.avif",
-            "description": "Ideal for casual outings.",
-            "sku": "SKU333"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Inventory Agent",
-      "id": "inventory_agent",
-      "responses": {
-        "default": "Inventory checked! Choose Buy Online or nearest store.",
-        "purchase_methods": [
-          {
-            "method": "Buy Online",
-            "description": "Home Delivery",
-            "icon": "public/images/buy_online_icon.png"
-          },
-          {
-            "method": "Nearest Store",
-            "description": "Store Pickup",
-            "icon": "public/images/store_pickup_icon.png"
-          }
-        ],
-        "store_selection": {
-          "message": "Inventory checked! Choose Buy Online or nearest store.",
-          "title": "Select Store for Pickup",
+      "agentId": "inventory_agent",
+      "title": "Inventory Agent",
+      "description": "Searches products from database and checks availability",
+      "status": "active",
+      "action": "Searching products in database...",
+      "output": {
+        "search_results": {
+          "status": "success",
+          "message": "✅ Found {count} products matching your search",
+          "products": [
+            {
+              "product_id": "PRD014",
+              "product_name": "Biba Kurti Set",
+              "category": "Kurti Set",
+              "quantity": 60,
+              "price": 3299.0,
+              "image_reference": "/images/PRD014.jpg",
+              "description": null
+            }
+          ]
+        },
+        "product_availability": {
+          "status": "in_stock",
+          "message": "✅ Product {product_id} is IN STOCK!",
+          "product_name": "{product_name}",
+          "price": "{price}",
+          "quantity": "{available_quantity}"
+        },
+        "offline_stores": {
+          "message": "📍 Available Stores for Pickup:",
           "stores": [
             {
+              "store_id": "STR016",
+              "store_name": "South City Mall Second Floor",
+              "location": "South City Mall, 2nd Floor, Kolkata",
+              "distance": "4.5 km away",
+              "stock": "Available"
+            },
+            {
+              "store_id": "STR011",
               "store_name": "ABFRL Store South City",
-              "manager": "Manager Sophia",
-              "availability": "Available"
-            },
-            {
-              "store_name": "City Centre Salt Lake, First Floor",
-              "manager": "Manager Rahul",
-              "availability": "Available"
-            },
-            {
-              "store_name": "Quest Mall, Second Floor",
-              "manager": "Manager Priya",
-              "availability": "Limited"
-            },
-            {
-              "store_name": "South City Mall, Third Floor",
-              "manager": "Manager Neha",
-              "availability": "Available"
+              "location": "ABFRL Store, South City Mall, Kolkata",
+              "distance": "7.5 km away",
+              "stock": "Available"
             }
           ]
         }
       }
     },
     {
-      "name": "Payment Agent",
-      "id": "payment_agent",
-      "responses": {
-        "default": "How would you like to pay?",
-        "online_delivery": {
-          "message": "Great! Proceeding with home delivery from our online warehouse.\n\nDelivery to your address:\nSodepur, West Bengal\n\nEstimated delivery: 2-3 business days\n\nHow would you like to pay?",
-          "show_payment_input": true
-        },
-        "offline_pickup": {
-          "message": "Perfect! You can pick up from these nearby stores:\n\n📍 South City Mall - 3.2 km away\n   Stock: Available (Size 40)\n   Timings: 10 AM - 9 PM\n\n📍 City Centre - 5.1 km away\n   Stock: Available (Size 40)\n   Timings: 11 AM - 8 PM\n\nHow would you like to pay?",
-          "show_payment_input": true
-        },
-        "payment_methods": [
+      "agentId": "recommendation_agent",
+      "title": "Recommendation Agent",
+      "description": "Displays products in beautiful UI-friendly format",
+      "status": "pending",
+      "action": "Formatting product recommendations...",
+      "output": {
+        "message": "🛍️ Here are {count} products I found for you! **{first_product_name}** is ₹{price} and in stock ({quantity} available).",
+        "prompt": "Would you like to **add any of these to your cart** with quantity, or do you want to **browse more products**?",
+        "recommendations": [
           {
-            "method": "UPI",
-            "icon": "public/images/upi_icon.png"
-          },
-          {
-            "method": "Credit Card",
-            "icon": "public/images/credit_card_icon.png"
+            "product_id": "PRD014",
+            "product_name": "Biba Kurti Set",
+            "price": 3299.0,
+            "category": "Kurti Set",
+            "quantity": 60,
+            "image_reference": "/images/PRD014.jpg",
+            "description": null
           },
           {
-            "method": "Debit Card",
-            "icon": "public/images/debit_card_icon.png"
-          },
-          {
-            "method": "Cash on Delivery",
-            "icon": "public/images/cash_on_delivery_icon.png"
-          }
-        ],
-        "upi_prompt": "Enter your UPI ID to complete payment."
-      }
-    },
-    {
-      "name": "Fulfillment Agent",
-      "id": "fulfillment_agent",
-      "responses": {
-        "default": "Your delivery has been scheduled!",
-        "online_order_confirmation": {
-          "message": "Your delivery has been scheduled!",
-          "payment_status": {
-            "status": "Payment Successful!",
-            "description": "Your order has been confirmed"
-          },
-          "order_details": {
-            "order_id": "#ORD789456",
-            "amount_paid": 1879,
-            "payment_method": "UPI",
-            "delivery_time": "2-3 business days"
-          },
-          "confirmation_message": "Order confirmed and will be dispatched soon"
-        },
-        "store_handoff": {
-          "channel_switching": "Online → In-Store Kiosk",
-          "session_transfer": {
-            "session_id": "#SESSION789456",
-            "customer_name": "Arjun Bose"
-          },
-          "product": {
-            "name": "Louis Philippe",
-            "size": "40 (Medium)",
-            "color": "White",
-            "sku": "LP-WH-40-001",
-            "price": 2199
-          },
-          "store_handoff_details": {
-            "store_name": "ABFRL Store South City",
-            "manager": "Sophia",
-            "availability": "Available"
-          }
-        },
-        "order_details": {
-          "order_id": "#ORD789456",
-          "amount_paid": 1789,
-          "delivery_time": "2-3 business days"
-        }
-      }
-    },
-    {
-      "name": "Loyalty Agent",
-      "id": "loyalty_agent",
-      "responses": {
-        "default": "Loyalty rewards applied!",
-        "loyalty_applied": {
-          "title": "Loyalty Rewards Applied!",
-          "description": "Your rewards have been processed and applied",
-          "benefits_title": "💰 Loyalty Benefits Applied:",
-          "benefits": [
-            {
-              "type": "points",
-              "title": "Loyalty Points Earned",
-              "description": "+120 points added to your account",
-              "value": "120 pts",
-              "icon": "✓"
-            },
-            {
-              "type": "coupon",
-              "title": "Coupon Applied",
-              "description": "FIRST10 - 10% discount applied",
-              "value": "₹120",
-              "icon": "🎟️"
-            },
-            {
-              "type": "offer",
-              "title": "Personalized Offer",
-              "description": "Free delivery on next 3 orders",
-              "value": "Unlocked",
-              "icon": "🎁"
-            }
-          ]
-        },
-        "benefits": {
-          "points_earned": 120,
-          "coupons_applied": "FIRST10 - 10% discount applied",
-          "personalized_offer": "Free delivery on next 3 orders"
-        }
-      }
-    },
-    {
-      "name": "Post Purchase Agent",
-      "id": "post_purchase_agent",
-      "responses": {
-        "default": "Post-Purchase Support Activated!",
-        "support_activated": {
-          "title": "Post-Purchase Support Activated!",
-          "description": "We're here to help you throughout your journey",
-          "services_title": "🛡️ Available Support Services:",
-          "services": [
-            {
-              "name": "Returns & Exchanges",
-              "status": "Active",
-              "description": "30-day hassle-free return policy",
-              "icon": "↩️",
-              "type": "returns"
-            },
-            {
-              "name": "Shipment Tracking",
-              "status": "Enabled",
-              "description": "Real-time delivery updates via SMS & email",
-              "icon": "📦",
-              "type": "tracking"
-            },
-            {
-              "name": "Feedback System",
-              "status": "Ready",
-              "description": "Share your experience & earn reward points",
-              "icon": "⭐",
-              "type": "feedback"
-            },
-            {
-              "name": "24/7 Customer Support",
-              "status": "Online",
-              "description": "Live chat, email & phone support available",
-              "icon": "💬",
-              "type": "support"
-            }
-          ]
-        },
-        "services": [
-          {
-            "name": "Returns & Exchanges",
-            "status": "Active",
-            "description": "30-day hassle-free return policy"
-          },
-          {
-            "name": "Shipment Tracking",
-            "status": "Enabled",
-            "description": "Real-time delivery updates via SMS & email"
-          },
-          {
-            "name": "Feedback System",
-            "status": "Ready",
-            "description": "Share your experience & earn reward points"
-          },
-          {
-            "name": "24/7 Customer Support",
-            "status": "Online",
-            "description": "Live chat, email & phone support available"
+            "product_id": "PRD018",
+            "product_name": "Global Desi Kurti",
+            "price": 2599.0,
+            "category": "Kurti",
+            "quantity": 135,
+            "image_reference": "/images/PRD018.jpg",
+            "description": null
           }
         ]
       }
+    },
+    {
+      "agentId": "add_to_cart_agent",
+      "title": "Add to Cart Agent",
+      "description": "Adds products to customer's cart with specified quantity",
+      "status": "pending",
+      "action": "Adding product to cart...",
+      "output": {
+        "status": "success",
+        "message": "✅ **Added to Cart!**",
+        "product": {
+          "product_id": "{product_id}",
+          "product_name": "{product_name}",
+          "quantity": "{quantity}",
+          "price_per_unit": "{price}",
+          "total": "{total}"
+        },
+        "prompt": "Would you like to **add more products** to your cart or **proceed to view your cart**?"
+      }
+    },
+    {
+      "agentId": "view_cart_agent",
+      "title": "View Cart Agent",
+      "description": "Displays all items in customer's cart with totals",
+      "status": "pending",
+      "action": "Loading your cart...",
+      "output": {
+        "message": "🛒 **Your Shopping Cart**",
+        "total_items": "{count}",
+        "cart_items": [
+          {
+            "order_id": "CART275679240",
+            "product_id": "PRD056",
+            "product_name": "W Global Women Kurti",
+            "quantity": 2,
+            "price_per_unit": 1899,
+            "total": 3798
+          }
+        ],
+        "total_amount": "{total_amount}",
+        "actions": [
+          "Type 'proceed' to continue to payment",
+          "Type 'add more' to browse more products",
+          "To remove an item, provide the Order ID"
+        ]
+      }
+    },
+    {
+      "agentId": "remove_from_cart_agent",
+      "title": "Remove from Cart Agent",
+      "description": "Removes items from cart by order ID",
+      "status": "pending",
+      "action": "Removing item from cart...",
+      "output": {
+        "status": "success",
+        "message": "✅ Removed **{product_name}** from your cart.",
+        "prompt": "Would you like to view your updated cart?"
+      }
+    },
+    {
+      "agentId": "choose_channel_agent",
+      "title": "Choose Channel Agent",
+      "description": "Presents online vs offline purchase options",
+      "status": "pending",
+      "action": "Preparing purchase options...",
+      "output": {
+        "message": "🛍️ **Choose Your Purchase Channel**",
+        "cart_summary": {
+          "total_items": "{count}",
+          "total_amount": "{total}"
+        },
+        "channels": [
+          {
+            "channel": "online",
+            "icon": "🌐",
+            "title": "ONLINE",
+            "subtitle": "Home delivery (3-5 business days)",
+            "benefits": [
+              "Secure online payment",
+              "Track your order",
+              "Earn loyalty points & coupons"
+            ]
+          },
+          {
+            "channel": "offline",
+            "icon": "🏪",
+            "title": "OFFLINE",
+            "subtitle": "Store pickup (Ready in 2 hours)",
+            "benefits": [
+              "Pay at store",
+              "Pick up from nearest location",
+              "Instant product availability check"
+            ]
+          }
+        ],
+        "prompt": "Please type **'online'** or **'offline'** to continue."
+      }
+    },
+    {
+      "agentId": "payment_agent",
+      "title": "Payment Agent",
+      "description": "Handles payment processing - two-stage process",
+      "status": "pending",
+      "action": "Waiting for payment method selection...",
+      "inputRequired": true,
+      "output": {
+        "stage_1_show_options": {
+          "message": "💳 **Payment for Your Cart**",
+          "cart_summary": {
+            "total_items": "{count}",
+            "total_amount": "{total}"
+          },
+          "payment_methods": [
+            {
+              "method": "upi",
+              "icon": "📱",
+              "title": "UPI",
+              "description": "Pay using any UPI app (Google Pay, PhonePe, Paytm, etc.)"
+            },
+            {
+              "method": "credit card",
+              "icon": "💳",
+              "title": "Credit Card",
+              "description": "Visa, Mastercard, American Express, etc."
+            },
+            {
+              "method": "debit card",
+              "icon": "💳",
+              "title": "Debit Card",
+              "description": "All major banks supported"
+            },
+            {
+              "method": "net banking",
+              "icon": "🏦",
+              "title": "Net Banking",
+              "description": "Direct bank transfer"
+            }
+          ],
+          "prompt": "Which payment method would you like to use?"
+        },
+        "stage_2_process_payment": {
+          "status": "processing",
+          "message": "💳 **Processing Payment...**",
+          "transaction": {
+            "order_id": "{order_id}",
+            "total_items": "{count}",
+            "amount": "{total}",
+            "method": "{payment_method}",
+            "payment_id": "{payment_id}"
+          },
+          "success": {
+            "status": "completed",
+            "message": "✅ **Payment Successful!**",
+            "next_action": "Your order is being processed..."
+          }
+        }
+      }
+    },
+    {
+      "agentId": "fulfillment_agent",
+      "title": "Fulfillment Agent",
+      "description": "Handles order fulfillment for online delivery or offline store pickup",
+      "status": "pending",
+      "action": "Scheduling delivery...",
+      "output": {
+        "online_delivery": {
+          "message": "📦 **Order Confirmed!**",
+          "order_details": {
+            "order_id": "{order_id}",
+            "total_items": "{count}",
+            "total_amount": "{total}",
+            "delivery_type": "Home Delivery",
+            "expected_delivery": "3-5 business days"
+          },
+          "tracking": {
+            "enabled": true,
+            "message": "You can track your order with the Order ID."
+          }
+        },
+        "offline_store_pickup": {
+          "message": "🏪 **In-Store Pickup Confirmed!**",
+          "order_details": {
+            "order_id": "{order_id}",
+            "total_items": "{count}",
+            "total_amount": "{total}",
+            "pickup_store": "{store_name}",
+            "store_address": "{store_address}",
+            "status": "Ready for pickup in 2 hours"
+          },
+          "items": [
+            {
+              "product_name": "{product_name}",
+              "quantity": "{quantity}"
+            }
+          ],
+          "instructions": {
+            "message": "Please visit the store to complete your purchase.",
+            "note": "💡 Show this Order ID at the store kiosk."
+          },
+          "closing": "Thank you for choosing us! Have a great day! 🛍️"
+        }
+      }
+    },
+    {
+      "agentId": "loyalty_agent",
+      "title": "Loyalty & Offers Agent",
+      "description": "Awards loyalty points based on purchase and generates coupon codes",
+      "status": "pending",
+      "action": "Applying points & coupons...",
+      "note": "ONLINE PURCHASES ONLY - Called automatically after online fulfillment",
+      "output": {
+        "message": "🎉 **Loyalty Rewards Unlocked!**",
+        "order_id": "{order_id}",
+        "points": {
+          "earned": "{points}",
+          "icon": "🌟",
+          "calculation": "Calculated from product loyalty_points × quantity and added to customer's total"
+        },
+        "coupons": [
+          {
+            "code": "{code1}",
+            "discount": "10% off"
+          },
+          {
+            "code": "{code2}",
+            "discount": "₹100 off"
+          },
+          {
+            "code": "{code3}",
+            "discount": "Extra ₹50 off on next order"
+          }
+        ],
+        "message_closing": "Thank you for shopping with us!"
+      }
+    },
+    {
+      "agentId": "post_purchase_agent",
+      "title": "Post Purchase Agent",
+      "description": "Provides post-purchase services like tracking, feedback, and support",
+      "status": "pending",
+      "action": "Asking for feedback...",
+      "note": "ONLINE PURCHASES ONLY - Called automatically after loyalty_agent",
+      "output": {
+        "message": "📝 **Post-Purchase Services**",
+        "order_id": "{order_id}",
+        "services": [
+          {
+            "icon": "📊",
+            "title": "Track Order",
+            "description": "Real-time delivery updates",
+            "link": "https://example.com/track/{order_id}",
+            "status": "Active"
+          },
+          {
+            "icon": "⭐",
+            "title": "Leave Feedback",
+            "description": "Share your experience & earn reward points",
+            "link": "https://example.com/feedback",
+            "status": "Ready"
+          },
+          {
+            "icon": "💬",
+            "title": "Customer Support",
+            "description": "Live chat, email & phone support available",
+            "contact": "support@example.com",
+            "status": "Online"
+          },
+          {
+            "icon": "🔄",
+            "title": "Return/Exchange",
+            "description": "30-day hassle-free return policy",
+            "availability": "Available within 7 days",
+            "status": "Active"
+          }
+        ],
+        "prompt": "We'd love to hear your feedback! Please rate your experience.",
+        "options": ["Give Feedback", "Request Return"]
+      }
     }
   ],
-  "user_inputs": [
+  "usage_examples": [
     {
-      "input": "show me shirts",
-      "agent": "recommendation_agent",
-      "response_key": "recommendation"
+      "step": 1,
+      "title": "Search Products",
+      "user_input": "show me kurti and shorts",
+      "agents_triggered": ["inventory_agent", "recommendation_agent"],
+      "expected_output": "Displays products with images, prices, quantities, and asks to add to cart"
     },
     {
-      "input": "check inventory",
-      "agent": "inventory_agent",
-      "response_key": "default"
+      "step": 2,
+      "title": "Add to Cart",
+      "user_input": "add PRD001 quantity 2 and PRD002 quantity 3",
+      "agents_triggered": ["add_to_cart_agent"],
+      "expected_output": "Confirms both products added with quantities and prices"
     },
     {
-      "input": "payment options",
-      "agent": "payment_agent",
-      "response_key": "payment_methods"
+      "step": 3,
+      "title": "View Cart",
+      "user_input": "view cart",
+      "agents_triggered": ["view_cart_agent"],
+      "expected_output": "Shows all cart items with order IDs, quantities, prices, and total amount"
     },
     {
-      "input": "post purchase support",
-      "agent": "post_purchase_agent",
-      "response_key": "services"
+      "step": 4,
+      "title": "Remove Items",
+      "user_input": "remove CART275679240 and CART532177776",
+      "agents_triggered": ["remove_from_cart_agent"],
+      "expected_output": "Confirms items removed from cart"
+    },
+    {
+      "step": 5,
+      "title": "Choose Channel",
+      "user_input": "proceed",
+      "agents_triggered": ["choose_channel_agent"],
+      "expected_output": "Shows online (home delivery + loyalty) vs offline (store pickup) options"
+    },
+    {
+      "step": "6a",
+      "title": "Online Payment - Show Options",
+      "user_input": "online",
+      "agents_triggered": ["payment_agent"],
+      "expected_output": "Displays 4 payment methods: UPI, Credit Card, Debit Card, Net Banking"
+    },
+    {
+      "step": "6b",
+      "title": "Online Payment - Process",
+      "user_input": "upi",
+      "agents_triggered": ["payment_agent"],
+      "expected_output": "Processes payment and returns Payment Successful with order ID"
+    },
+    {
+      "step": "7a",
+      "title": "Online Fulfillment",
+      "user_input": "[automatic after payment]",
+      "agents_triggered": ["fulfillment_agent", "loyalty_agent", "post_purchase_agent"],
+      "expected_output": "Order confirmation → Loyalty points earned → Post-purchase services"
+    },
+    {
+      "step": "6c",
+      "title": "Offline - Show Stores",
+      "user_input": "offline",
+      "agents_triggered": ["inventory_agent"],
+      "expected_output": "Shows available stores with IDs and distances"
+    },
+    {
+      "step": "7b",
+      "title": "Offline Fulfillment",
+      "user_input": "ABFRL Store South City",
+      "agents_triggered": ["fulfillment_agent"],
+      "expected_output": "In-store pickup confirmation with order ID to show at kiosk. No loyalty/post-purchase."
     }
   ],
-  "fallback": "I'm sorry, I didn't understand that. Can you rephrase?"
+  "flow_comparison": {
+    "online": {
+      "sequence": ["Channel Selection", "Payment Options", "Payment Processing", "Fulfillment", "Loyalty Rewards", "Post-Purchase"],
+      "features": {
+        "loyalty_points": true,
+        "order_tracking": true,
+        "home_delivery": true,
+        "post_purchase_support": true
+      },
+      "delivery_time": "3-5 business days"
+    },
+    "offline": {
+      "sequence": ["Channel Selection", "Store Selection", "Fulfillment"],
+      "features": {
+        "loyalty_points": false,
+        "order_tracking": false,
+        "store_pickup": true,
+        "post_purchase_support": false
+      },
+      "pickup_time": "Ready in 2 hours"
+    }
+  },
+  "fallback": {
+    "message": "I'm sorry, I didn't understand that. Could you please rephrase or choose from:",
+    "suggestions": [
+      "Search products",
+      "Add to cart",
+      "View cart",
+      "Proceed to checkout"
+    ]
+  }
 }
