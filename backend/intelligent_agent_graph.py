@@ -387,22 +387,38 @@ def recommendation_agent(inventory_data: str) -> str:
                 }
             })
 
-        # Build recommendation list
+        # Build recommendation list with discount information
         recommendations = []
         for product in products:
+            original_price = product.get("price", 0)
+            discount = product.get("discount", 0) or 0
+            discount_price = round(
+                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+
             recommendations.append({
                 "product_id": product.get("product_id"),
                 "product_name": product.get("product_name"),
-                "price": product.get("price"),
+                "price": original_price,
+                "discount": discount,
+                "discount_price": discount_price,
                 "category": product.get("category"),
                 "quantity": product.get("quantity"),
                 "description": product.get("description"),
                 "image_reference": product.get("image_reference"),
             })
 
-        # Message with add-to-cart prompt
+        # Message with add-to-cart prompt including discount information
+        first_product = products[0]
+        first_original_price = first_product['price']
+        first_discount = first_product.get('discount', 0) or 0
+        first_discount_price = round(first_original_price * (
+            1 - first_discount / 100), 2) if first_discount > 0 else first_original_price
+
         default_msg = f"🛍️ Here are {len(products)} products I found for you! "
-        default_msg += f"**{products[0]['product_name']}** is ₹{int(products[0]['price']):,} and in stock ({products[0]['quantity']} available). "
+        if first_discount > 0:
+            default_msg += f"**{first_product['product_name']}** is ₹{int(first_discount_price):,} (Original: ₹{int(first_original_price):,}, {int(first_discount)}% off) and in stock ({first_product['quantity']} available). "
+        else:
+            default_msg += f"**{first_product['product_name']}** is ₹{int(first_original_price):,} and in stock ({first_product['quantity']} available). "
         default_msg += "\\n\\nWould you like to **add any of these to your cart** with quantity, or do you want to **browse more products**?"
 
         response_obj = {
@@ -555,6 +571,7 @@ def inventory_agent(search_query: str = None, product_id: str = None) -> str:
                 "category": getattr(p, "category", None),
                 "quantity": p.quantity,
                 "price": p.price,
+                "discount": getattr(p, "discount", 0) or 0,
                 "image_reference": getattr(p, "image_reference", None),
                 "description": getattr(p, "description", None)
             })
@@ -618,11 +635,28 @@ def add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
 
             cart_crud.create(session, cart_data)
 
+            # Calculate discount price
+            original_price = product.price
+            discount = getattr(product, 'discount', 0) or 0
+            discount_price = round(
+                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+
+            total_original = original_price * quantity
+            total_discounted = discount_price * quantity
+            total_savings = total_original - total_discounted
+
             result = f"✅ **Added to Cart!**\\n\\n"
             result += f"Product: {product.product_name} (ID: {product_id})\\n"
             result += f"Quantity: {quantity} units\\n"
-            result += f"Price per unit: ₹{int(product.price):,}\\n"
-            result += f"Total: ₹{int(product.price * quantity):,}\\n\\n"
+
+            if discount > 0:
+                result += f"Price per unit: ₹{int(discount_price):,} (Original: ₹{int(original_price):,}, {int(discount)}% off)\\n"
+                result += f"Subtotal: ₹{int(total_discounted):,}\\n"
+                result += f"💰 You save: ₹{int(total_savings):,}\\n\\n"
+            else:
+                result += f"Price per unit: ₹{int(original_price):,}\\n"
+                result += f"Total: ₹{int(total_original):,}\\n\\n"
+
             result += "Would you like to **add more products** to your cart or **proceed to view your cart**?"
 
             return result
@@ -662,17 +696,33 @@ def view_cart_agent(customer_id: str) -> str:
             result += f"Total Items: {len(cart_items)}\\n\\n"
 
             total_amount = 0
+            total_discount = 0
             cart_details = []
 
             for item in cart_items:
                 product = get_product_by_id(item.product_id)
                 if product:
                     qty = getattr(item, 'quantity', 1)
-                    item_total = product.price * qty
-                    total_amount += item_total
+                    original_price = product.price
+                    discount = getattr(product, 'discount', 0) or 0
+                    discount_price = round(
+                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+
+                    item_total_original = original_price * qty
+                    item_total_discounted = discount_price * qty
+                    total_amount += item_total_discounted
+                    total_discount += (item_total_original -
+                                       item_total_discounted)
 
                     result += f"📦 **{product.product_name}** (ID: {item.product_id})\\n"
-                    result += f"   Quantity: {qty} × ₹{int(product.price):,} = ₹{int(item_total):,}\\n"
+
+                    if discount > 0:
+                        result += f"   Price: ₹{int(discount_price):,} each (Original: ₹{int(original_price):,}, {int(discount)}% off)\\n"
+                        result += f"   Quantity: {qty} × ₹{int(discount_price):,} = ₹{int(item_total_discounted):,}\\n"
+                        result += f"   💰 Saved: ₹{int(item_total_original - item_total_discounted):,}\\n"
+                    else:
+                        result += f"   Quantity: {qty} × ₹{int(original_price):,} = ₹{int(item_total_original):,}\\n"
+
                     result += f"   Order ID: {item.order_id}\\n\\n"
 
                     cart_details.append({
@@ -680,10 +730,15 @@ def view_cart_agent(customer_id: str) -> str:
                         "product_id": item.product_id,
                         "product_name": product.product_name,
                         "quantity": qty,
-                        "price": product.price,
-                        "total": item_total
+                        "price": discount_price,
+                        "original_price": original_price,
+                        "discount": discount,
+                        "total": item_total_discounted
                     })
 
+            result += f"════════════════════════════════\\n"
+            if total_discount > 0:
+                result += f"💚 **Total Savings: ₹{int(total_discount):,}**\\n"
             result += f"💰 **Total Amount: ₹{int(total_amount):,}**\\n\\n"
             result += "**What would you like to do?**\\n"
             result += "- Type 'proceed' to continue to payment\\n"
@@ -763,13 +818,17 @@ def choose_channel_agent(customer_id: str) -> str:
             if not cart_items:
                 return "🛒 Your cart is empty. Please add products first."
 
-            # Calculate total
+            # Calculate total with discount prices
             total_amount = 0
             for item in cart_items:
                 product = get_product_by_id(item.product_id)
                 if product:
                     qty = getattr(item, 'quantity', 1)
-                    total_amount += product.price * qty
+                    original_price = product.price
+                    discount = getattr(product, 'discount', 0) or 0
+                    discount_price = round(
+                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                    total_amount += discount_price * qty
 
             result = f"🛍️ **Choose Your Purchase Channel**\\n\\n"
             result += f"Total Items: {len(cart_items)}\\n"
@@ -826,21 +885,25 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
             if not cart_items:
                 return "🛒 Your cart is empty. Please add products to cart first."
 
-            # Calculate total amount
+            # Calculate total amount with discount prices
             total_amount = 0
             cart_summary = []
             for item in cart_items:
                 product = get_product_by_id(item.product_id)
                 if product:
                     qty = getattr(item, 'quantity', 1)
-                    item_total = product.price * qty
+                    original_price = product.price
+                    discount = getattr(product, 'discount', 0) or 0
+                    discount_price = round(
+                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                    item_total = discount_price * qty
                     total_amount += item_total
                     cart_summary.append({
                         "order_id": item.order_id,
                         "product_id": item.product_id,
                         "product_name": product.product_name,
                         "quantity": qty,
-                        "price": product.price
+                        "price": discount_price
                     })
 
     except Exception as e:
@@ -917,13 +980,13 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
     # Get cart items to show in fulfillment
     try:
         with get_db_session() as session:
-            # For online: get completed cart items with online channel
+            # For online: get paid cart items with online channel (set by payment_agent)
             # For offline: get pending cart items with pending channel (not yet processed)
             if purchase_type.lower() == "online":
                 cart_items = cart_crud.filter(
                     session,
                     filters={"customer_id": customer_id,
-                             "status": "completed",
+                             "status": "paid",
                              "channel": "online"},
                     operators={"customer_id": "==",
                                "status": "==", "channel": "=="},
@@ -947,13 +1010,17 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                 product = get_product_by_id(item.product_id)
                 if product:
                     qty = getattr(item, 'quantity', 1)
-                    item_total = product.price * qty
+                    original_price = product.price
+                    discount = getattr(product, 'discount', 0) or 0
+                    discount_price = round(
+                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                    item_total = discount_price * qty
                     total_amount += item_total
                     cart_summary.append({
                         "product_name": product.product_name,
                         "product_id": item.product_id,
                         "quantity": qty,
-                        "price": product.price
+                        "price": discount_price
                     })
     except Exception as e:
         print(f"Warning: Error loading cart items in fulfillment: {e}")
@@ -1051,24 +1118,60 @@ def loyalty_agent(order_id: str, customer_id: str) -> str:
     print("⏳ Calculating your rewards...")
     time.sleep(2.5)
 
-    # Calculate total loyalty points from all order items
+    # Calculate total loyalty points from all order items based on product loyalty_points
     try:
         with get_db_session() as session:
-            order_items = order_history_crud.filter(
+            # Get cart items that were just processed (status="paid", channel="online")
+            cart_items = cart_crud.filter(
                 session,
-                filters={"customer_id": customer_id},
-                operators={"customer_id": "=="},
-                limit=100
+                filters={"customer_id": customer_id,
+                         "status": "paid", "channel": "online"},
+                operators={"customer_id": "==",
+                           "status": "==", "channel": "=="},
+                limit=50
             )
 
-            # Get recent orders for this order_id
+            # Calculate total loyalty points from each product's loyalty_points field
             total_points = 0
-            for item in order_items:
-                if order_id in getattr(item, 'transaction_id', ''):
-                    total_points += getattr(item, 'loyalty_points', 0)
+            for item in cart_items:
+                product = get_product_by_id(item.product_id)
+                if product:
+                    qty = getattr(item, 'quantity', 1)
+                    product_loyalty_points = getattr(
+                        product, 'loyalty_points', 0) or 0
+                    total_points += product_loyalty_points * qty
+                    print(
+                        f"  📍 {product.product_name}: {product_loyalty_points} points × {qty} = {product_loyalty_points * qty} points")
 
+            print(f"  ✅ Total loyalty points earned: {total_points}")
+
+            # Fallback to random if no items found
             if total_points == 0:
                 total_points = random.randint(50, 200)
+
+            # Update customer's loyalty points in the database
+            try:
+                customer = customer_crud.get_by_id(session, customer_id)
+                if customer:
+                    current_points = getattr(
+                        customer, 'loyalty_points', 0) or 0
+                    new_total_points = current_points + total_points
+
+                    # Update the customer's loyalty points
+                    customer_crud.update(
+                        session,
+                        customer_id,
+                        {"loyalty_points": new_total_points}
+                    )
+                    session.commit()
+                    print(
+                        f"  ✅ Updated customer {customer_id} loyalty points: {current_points} + {total_points} = {new_total_points}")
+                else:
+                    print(
+                        f"  ⚠️ Customer {customer_id} not found, loyalty points not updated")
+            except Exception as e:
+                print(f"  ❌ Error updating customer loyalty points: {e}")
+
     except Exception as e:
         print(f"Warning: Error calculating loyalty points: {e}")
         total_points = random.randint(50, 200)
@@ -1301,7 +1404,18 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
 - When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query parameter
-- Then immediately call `recommendation_agent` with the inventory data to display products beautifully
+- **MANDATORY**: IMMEDIATELY call `recommendation_agent` passing the COMPLETE JSON RESPONSE from inventory_agent
+- **CRITICAL RULE**: EVERY `inventory_agent(search_query=X)` call MUST be followed by `recommendation_agent(inventory_data=<FULL_JSON_FROM_INVENTORY_AGENT>)`
+- **PARAMETER FORMAT**: inventory_data must be the EXACT JSON string returned by inventory_agent, NOT just the search query
+  * ✅ CORRECT: recommendation_agent(inventory_data='{{"status":"success","message":"✅ Found 4 products...","products":[...]}}')
+  * ❌ WRONG: recommendation_agent(inventory_data='{{"search_query":"dress"}}')
+  * ❌ WRONG: recommendation_agent(inventory_data='dress')
+- **APPLIES TO**: ALL product searches, even if user requests multiple products in one message (e.g., "add X and show me Y")
+  * Example: User says "Van Heusen Shirt quantity 2 and also show me dress"
+  * Action 1: add_to_cart_agent(product_id="PRD033", quantity=2)
+  * Action 2: inventory_result = inventory_agent(search_query="dress") → Returns: '{{"status":"success","products":[...]}}'
+  * Action 3: recommendation_agent(inventory_data=inventory_result) ← Pass the FULL JSON result from Action 2
+- **NEVER** manually format product recommendations - ALWAYS use recommendation_agent to show discount prices correctly
 - Ask if they want to add any products to cart with quantity
 
 **STEP 2: ADD TO CART - RECOGNIZE PURCHASE INTENT**
@@ -1365,7 +1479,9 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
 - If user types "offline" or selects offline option:
   
   **STAGE 1: Show Available Stores (ONE TIME ONLY)**
-  1. Call `inventory_agent(product_id="PRD056")` ONCE to show stores (PRD056 = first cart item)
+  1. First, call `view_cart_agent` to get the list of cart items and identify the first product_id
+  2. Then call `inventory_agent(product_id=<FIRST_PRODUCT_ID_FROM_CART>)` ONCE to show stores for that product
+     - Example: If cart has PRD023, PRD045, call inventory_agent(product_id="PRD023")
      - Tool shows: "STR016 - South City Mall", "STR011 - ABFRL Store South City"
      - After this call COMPLETES → **WORKFLOW IS NOW IN STAGE 2**
      - Mark in your memory: "Stores have been shown, next message is store selection"
@@ -1490,7 +1606,9 @@ User: "upi"
 
 **OFFLINE FLOW EXAMPLE (EXACT SEQUENCE):**
 User: "Offline"
-→ STAGE 1: inventory_agent(product_id="PRD056")  # Use actual product_id from cart - CALL ONCE
+→ STAGE 1A: view_cart_agent(customer_id="{customer_id}")  # Get cart items to find first product_id
+→ Identifies: Cart has PRD023 (Reebok Sportswear) and PRD045 (Gap Denim Shorts)
+→ STAGE 1B: inventory_agent(product_id="PRD023")  # Use FIRST product_id from cart - CALL ONCE
 → Tool returns: "STR016 - South City Mall", "STR011 - ABFRL Store South City"
 → Agent displays stores to user
 → inventory_agent is NOW DONE - do not call it again
@@ -1503,7 +1621,7 @@ User: "STR011 - ABFRL Store South City"  # User selects a store
 → Tool returns: "In-Store Pickup Confirmed! Show this Order ID at the store kiosk."
 → END conversation
 
-**OFFLINE FLOW SUMMARY**: 2 tool calls total = inventory_agent (show stores) + fulfillment_agent (pickup)
+**OFFLINE FLOW SUMMARY**: 3 tool calls total = view_cart_agent (get cart) + inventory_agent (show stores) + fulfillment_agent (pickup)
 
 **CRITICAL**: When user types "upi", "credit card", "debit card", or "net banking" after seeing payment options, that IS their payment method selection. Call payment_agent immediately with that method. Do NOT ask for confirmation.
 

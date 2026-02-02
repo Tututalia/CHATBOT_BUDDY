@@ -68,9 +68,25 @@ def welcome_node(state: KioskState):
             product = get_product_by_id(order.product_id)
             store = get_store_by_id(order.store_id) if order.store_id else None
             qty = getattr(order, 'quantity', 1)
-            item_total = int(product.price * qty) if product else 0
-            total_amount += item_total
-            product_info = f"Product: {product.product_name if product else order.product_id}\nCategory: {product.category if product else ''}\nPrice: ₹{int(product.price) if product else ''}\nQuantity: {qty}\nItem Total: ₹{item_total}\n"
+
+            # Calculate discount price
+            if product:
+                original_price = product.price
+                discount = getattr(product, 'discount', 0) or 0
+                discount_price = round(
+                    original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                item_total = discount_price * qty
+                total_amount += item_total
+
+                # Format price info with discount
+                if discount > 0:
+                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nOriginal Price: ₹{int(original_price)}\nDiscount: {int(discount)}% off\n**Discounted Price: ₹{discount_price:.2f}**\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
+                else:
+                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nPrice: ₹{int(original_price)}\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
+            else:
+                item_total = 0
+                product_info = f"Product ID: {order.product_id}\nQuantity: {qty}\n"
+
             store_info = f"Store: {store.store_name if store else order.store_id} (ID: {order.store_id})\n" if order.store_id else ""
             msg += f"\n{idx}. Order ID: {order.order_id}\n{product_info}{store_info}"
             order_map[str(idx)] = order
@@ -79,7 +95,7 @@ def welcome_node(state: KioskState):
         for idx, order in enumerate(pending_orders, 1):
             msg += f"\n{idx}. Order ID: {order.order_id}\nProduct ID: {order.product_id}\nStore ID: {order.store_id}\n"
             order_map[str(idx)] = order
-    msg += f"\n{'='*50}\n**Total Amount to Pay: ₹{int(total_amount)}**\n{'='*50}\n\nWould you like to proceed with payment?"
+    msg += f"\n{'='*50}\n**Total Amount to Pay: ₹{total_amount:.2f}**\n{'='*50}\n\nWould you like to proceed with payment?"
     # Save order_map in state for selection
     state["_order_map"] = order_map
     return {"messages": [AIMessage(content=msg)], "order_id": None, "product_id": None, "store_id": None}
@@ -155,10 +171,16 @@ def payment_method_node(state: KioskState):
                                 product = get_product_by_id(order.product_id)
                                 if product:
                                     qty = getattr(order, 'quantity', 1)
-                                    item_total = product.price * qty
+                                    # Calculate discount price
+                                    original_price = product.price
+                                    discount = getattr(
+                                        product, 'discount', 0) or 0
+                                    discount_price = round(
+                                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                                    item_total = discount_price * qty
                                     total_amount += item_total
                                     order_details.append(
-                                        f"- {product.product_name} (x{qty}): ₹{int(item_total)}")
+                                        f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
 
                                     # Update cart status to 'paid'
                                     order.status = 'paid'
@@ -171,7 +193,7 @@ Payment Method: {method.upper()}
 Items Paid:
 {chr(10).join(order_details)}
 
-Total Amount Paid: ₹{int(total_amount)}
+Total Amount Paid: ₹{total_amount:.2f}
 
 Your orders are now ready for pickup. Please proceed to the store counter."""
 
@@ -201,7 +223,12 @@ Your orders are now ready for pickup. Please proceed to the store counter."""
                                 return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
 
                             qty = getattr(cart_item, 'quantity', 1)
-                            total_amount = product.price * qty
+                            # Calculate discount price
+                            original_price = product.price
+                            discount = getattr(product, 'discount', 0) or 0
+                            discount_price = round(
+                                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                            total_amount = discount_price * qty
 
                             # Update cart status to 'paid' but keep channel as 'offline'
                             cart_item.status = 'paid'
@@ -213,7 +240,7 @@ Payment Method: {method.upper()}
 Order ID: {order_id}
 Product: {product.product_name}
 Quantity: {qty}
-Amount Paid: ₹{int(total_amount)}
+Amount Paid: ₹{total_amount:.2f}
 
 Your order is now ready for pickup. Please proceed to the store counter."""
 
@@ -272,7 +299,12 @@ def fulfillment_node(state: KioskState):
                         cart_item = cart_crud.get_by_id(session, curr_order_id)
                         if cart_item:
                             qty = getattr(cart_item, 'quantity', 1)
-                            item_total = product.price * qty
+                            # Calculate discount price
+                            original_price = product.price
+                            discount = getattr(product, 'discount', 0) or 0
+                            discount_price = round(
+                                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                            item_total = discount_price * qty
                             total_amount += item_total
                             item_list.append(
                                 f"- {product.product_name} (x{qty})")
@@ -282,7 +314,7 @@ def fulfillment_node(state: KioskState):
 Items Ready for Pickup:
 {chr(10).join(item_list)}
 
-Total Amount: ₹{int(total_amount)}
+Total Amount: ₹{total_amount:.2f}
 Pickup Store: {store_name or 'Store'}
 Store Address: {store_address or 'N/A'}
 Status: Ready for pickup now
@@ -306,14 +338,19 @@ Thank you for shopping with us! 🛍️"""
                     cart_item = cart_crud.get_by_id(session, order_id)
                     if cart_item:
                         qty = getattr(cart_item, 'quantity', 1)
-                        total_amount = product.price * qty
+                        # Calculate discount price
+                        original_price = product.price
+                        discount = getattr(product, 'discount', 0) or 0
+                        discount_price = round(
+                            original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                        total_amount = discount_price * qty
 
             fulfillment_msg = f"""🏪 **In-Store Pickup Confirmed!**
 
 Order ID: {order_id}
 Product: {product.product_name if product else product_id}
 Quantity: {qty}
-Total Amount: ₹{int(total_amount)}
+Total Amount: ₹{total_amount:.2f}
 Pickup Store: {store_name}
 Store Address: {store_address}
 Status: Ready for pickup now
@@ -368,8 +405,10 @@ def loyalty_node(state: KioskState):
 
                 if product and cart_item:
                     qty = getattr(cart_item, 'quantity', 1)
-                    # Calculate loyalty points (e.g., 1 point per ₹100 spent)
-                    points_earned = int((product.price * qty) / 100)
+                    # Calculate loyalty points from product.loyalty_points field
+                    product_loyalty_points = getattr(
+                        product, 'loyalty_points', 0) or 0
+                    points_earned = product_loyalty_points * qty
                     total_points_earned += points_earned
 
             # Update customer loyalty points
