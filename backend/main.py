@@ -435,11 +435,14 @@ def get_admin_dashboard_data(time_range: str = "1month"):
             offline_percentage = (len(
                 offline_transactions) / total_transactions * 100) if total_transactions > 0 else 0
 
-            # Calculate monthly transaction trends
+            # Calculate monthly transaction trends (respecting time_range filter)
             monthly_online = defaultdict(int)
             monthly_offline = defaultdict(int)
 
-            for tx in all_transactions:
+            # Use filtered transactions for monthly trends
+            filtered_tx_for_trends = online_transactions + offline_transactions
+
+            for tx in filtered_tx_for_trends:
                 # Parse transaction date
                 tx_date = None
                 try:
@@ -475,6 +478,30 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                         "total": monthly_online.get(month, 0) + monthly_offline.get(month, 0)
                     })
 
+            # Format all transactions for the table view
+            all_transactions_list = []
+            for tx in all_transactions:
+                all_transactions_list.append({
+                    "id": tx.id,
+                    "date": tx.date,
+                    "user_name": tx.user_name,
+                    "product": tx.product,
+                    "qty": tx.qty,
+                    "mode": tx.mode,
+                    "store_name": tx.store_name,
+                    "status": tx.status,
+                    "amount": tx.amount,
+                    "address": tx.address,
+                    "phone": tx.phone
+                })
+
+            # Sort transactions by date (most recent first)
+            try:
+                all_transactions_list.sort(key=lambda x: datetime.strptime(
+                    x["date"], "%m/%d/%Y"), reverse=True)
+            except:
+                pass  # If date parsing fails, keep original order
+
             return {
                 "summary": {
                     "total_customers": total_customers,
@@ -501,7 +528,8 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                 "monthly_trends": monthly_trends,
                 "total_online_transactions": sum(monthly_online.values()),
                 "total_offline_transactions": sum(monthly_offline.values()),
-                "offline_purchases_per_store": offline_purchases_per_store
+                "offline_purchases_per_store": offline_purchases_per_store,
+                "transactions": all_transactions_list
             }
 
     except Exception as e:
