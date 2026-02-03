@@ -45,22 +45,16 @@ def clear_cart_table():
 
 
 if __name__ == "__main__":
-    import sys
-    
     print("="*60)
     print("CLEAR CART TABLE")
     print("="*60)
 
-    # Check if --force flag is provided
-    if "--force" in sys.argv or "-f" in sys.argv:
+    confirmation = input(
+        "\n⚠️  This will DELETE ALL entries from the cart table. Continue? (yes/no): ")
+
+    if confirmation.lower() in ['yes', 'y']:
         clear_cart_table()
     else:
-        confirmation = input(
-            "\n⚠️  This will DELETE ALL entries from the cart table. Continue? (yes/no): ")
-
-        if confirmation.lower() in ['yes', 'y']:
-            clear_cart_table()
-        else:
-            print("❌ Operation cancelled")
+        print("❌ Operation cancelled")
 
     print("\n" + "="*60)

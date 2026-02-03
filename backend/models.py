@@ -52,6 +52,7 @@ class Product(SQLModel, table=True):
     season: str
     image_reference: str
     loyalty_points: int = Field(default=0)
+    discount: int = Field(default=0)  # Discount percentage (0-80)
 
     # Relationships
     orders: List["OrderHistory"] = Relationship(back_populates="product")
