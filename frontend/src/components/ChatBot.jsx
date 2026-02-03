@@ -565,6 +565,72 @@ export default function ChatBot({ customerId = "CUST001" }) {
     setIsLoading(false);
   };
 
+  const handleUpdateCartQuantity = async (orderId, productName, currentQuantity, delta) => {
+    const newQuantity = Math.max(1, currentQuantity + delta);
+    
+    try {
+      setIsLoading(true);
+      
+      const response = await fetch("http://localhost:8000/api/cart/update-quantity", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_id: orderId,
+          quantity: newQuantity,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Update the cart items in the existing message
+        setMessages((prevMessages) => {
+          return prevMessages.map((message) => {
+            if (message.type === "cartItems" && message.cartItems) {
+              // Update the specific item in the cart
+              const updatedCartItems = message.cartItems.map((item) => {
+                if (item.order_id === orderId) {
+                  const price = item.price || item.price_per_unit;
+                  return {
+                    ...item,
+                    quantity: newQuantity,
+                    total_amount: price * newQuantity
+                  };
+                }
+                return item;
+              });
+              
+              return {
+                ...message,
+                cartItems: updatedCartItems
+              };
+            }
+            return message;
+          });
+        });
+      } else {
+        const errorMessage = {
+          type: "ai",
+          text: data.error || "Failed to update quantity. Please try again.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error("Error updating cart quantity:", error);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error updating the quantity. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
   const handleViewCart = async () => {
     const userMessage = {
       type: "user",
@@ -1365,7 +1431,22 @@ export default function ChatBot({ customerId = "CUST001" }) {
                                     </p>
                                     <div className="cart-item-details">
                                       <span className="detail-label">Quantity:</span>
-                                      <span className="detail-value">{item.quantity}</span>
+                                      <div className="quantity-controls">
+                                        <button
+                                          className="quantity-btn minus-btn"
+                                          onClick={() => handleUpdateCartQuantity(item.order_id, item.product_name, item.quantity, -1)}
+                                          disabled={item.quantity <= 1}
+                                        >
+                                          −
+                                        </button>
+                                        <span className="quantity-value">{item.quantity}</span>
+                                        <button
+                                          className="quantity-btn plus-btn"
+                                          onClick={() => handleUpdateCartQuantity(item.order_id, item.product_name, item.quantity, 1)}
+                                        >
+                                          +
+                                        </button>
+                                      </div>
                                     </div>
                                     <div className="cart-item-total">
                                       <span className="total-label">Total:</span>

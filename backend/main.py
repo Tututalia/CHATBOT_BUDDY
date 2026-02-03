@@ -1,7 +1,7 @@
 from crud import (
     product_crud, customer_crud, store_crud, order_history_crud,
-    store_keeper_transaction_crud,
-    ProductCRUD, CustomerCRUD
+    store_keeper_transaction_crud, cart_crud,
+    ProductCRUD, CustomerCRUD, CartCRUD
 )
 from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction
 from database import engine, get_db_session
@@ -824,6 +824,56 @@ def create_store_transaction_endpoint(tx: StoreTransactionCreateModel):
             t = StoreKeeperTransaction(**tx.dict())
             created = store_keeper_transaction_crud.create(session, t)
             return {"success": True, "id": created.id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class UpdateCartQuantityModel(BaseModel):
+    order_id: str
+    quantity: int
+
+
+@app.put("/api/cart/update-quantity")
+def update_cart_quantity(update_data: UpdateCartQuantityModel):
+    """Update the quantity of an item in the cart"""
+    try:
+        with get_db_session() as session:
+            # Get the cart item
+            cart_item = cart_crud.get_by_id(session, update_data.order_id)
+            if not cart_item:
+                return {"success": False, "error": "Cart item not found"}
+            
+            # Ensure quantity is at least 1
+            if update_data.quantity < 1:
+                return {"success": False, "error": "Quantity must be at least 1"}
+            
+            # Get the product to calculate total
+            product = product_crud.get_by_id(session, cart_item.product_id)
+            if not product:
+                return {"success": False, "error": "Product not found"}
+            
+            # Update the quantity
+            updated_item = cart_crud.update(
+                session, 
+                update_data.order_id, 
+                {"quantity": update_data.quantity}
+            )
+            
+            if updated_item:
+                total_amount = product.price * update_data.quantity
+                return {
+                    "success": True, 
+                    "message": f"Updated quantity to {update_data.quantity}",
+                    "cart_item": {
+                        "order_id": updated_item.order_id,
+                        "product_name": product.product_name,
+                        "quantity": updated_item.quantity,
+                        "price": product.price,
+                        "total_amount": total_amount
+                    }
+                }
+            else:
+                return {"success": False, "error": "Failed to update quantity"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
