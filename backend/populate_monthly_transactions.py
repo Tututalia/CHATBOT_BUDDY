@@ -49,18 +49,18 @@ PHONES = [
 def generate_transactions_for_month(month_name, month_num, year=2025, min_online=85, min_offline=67):
     """Generate transactions for a specific month"""
     transactions = []
-    
+
     # Generate online transactions
     online_count = random.randint(min_online, min_online + 50)
     for i in range(online_count):
         day = random.randint(1, 28)  # Keep it safe for all months
         date_str = f"{month_num}/{day}/{year}"
-        
+
         product = random.choice(PRODUCTS)
         qty = random.randint(1, 3)
         base_price = random.randint(800, 3500)
         amount = base_price * qty
-        
+
         tx = {
             "date": date_str,
             "user_name": random.choice(CUSTOMERS),
@@ -74,18 +74,18 @@ def generate_transactions_for_month(month_name, month_num, year=2025, min_online
             "phone": random.choice(PHONES)
         }
         transactions.append(tx)
-    
+
     # Generate offline transactions
     offline_count = random.randint(min_offline, min_offline + 40)
     for i in range(offline_count):
         day = random.randint(1, 28)
         date_str = f"{month_num}/{day}/{year}"
-        
+
         product = random.choice(PRODUCTS)
         qty = random.randint(1, 3)
         base_price = random.randint(800, 3500)
         amount = base_price * qty
-        
+
         tx = {
             "date": date_str,
             "user_name": random.choice(CUSTOMERS),
@@ -99,41 +99,44 @@ def generate_transactions_for_month(month_name, month_num, year=2025, min_online
             "phone": random.choice(PHONES)
         }
         transactions.append(tx)
-    
-    print(f"Generated {online_count} online and {offline_count} offline transactions for {month_name}")
+
+    print(
+        f"Generated {online_count} online and {offline_count} offline transactions for {month_name}")
     return transactions
 
 
 def main():
     """Main function to populate monthly transaction data"""
-    
+
     # Month mapping
     months = [
         ("Jan", 1), ("Feb", 2), ("Mar", 3), ("Apr", 4),
         ("May", 5), ("Jun", 6), ("Jul", 7), ("Aug", 8),
         ("Sep", 9), ("Oct", 10), ("Nov", 11), ("Dec", 12)
     ]
-    
+
     with get_db_session() as session:
         # Get current max ID
-        result = session.exec(select(AdminDashboardData).order_by(AdminDashboardData.id.desc()).limit(1)).first()
+        result = session.exec(select(AdminDashboardData).order_by(
+            AdminDashboardData.id.desc()).limit(1)).first()
         current_max_id = result.id if result else 0
-        
+
         print(f"Current max ID in database: {current_max_id}")
         print(f"\nGenerating transactions for all 12 months...")
         print("=" * 60)
-        
+
         all_transactions = []
-        
+
         # Generate transactions for each month
         for month_name, month_num in months:
-            month_transactions = generate_transactions_for_month(month_name, month_num)
+            month_transactions = generate_transactions_for_month(
+                month_name, month_num)
             all_transactions.extend(month_transactions)
-        
+
         print("=" * 60)
         print(f"\nTotal transactions generated: {len(all_transactions)}")
         print(f"\nInserting transactions into database...")
-        
+
         # Insert all transactions
         new_id = current_max_id + 1
         for tx_data in all_transactions:
@@ -152,15 +155,16 @@ def main():
             )
             session.add(tx)
             new_id += 1
-        
+
         session.commit()
-        print(f"\n✅ Successfully inserted {len(all_transactions)} transactions!")
+        print(
+            f"\n✅ Successfully inserted {len(all_transactions)} transactions!")
         print(f"ID range: {current_max_id + 1} to {new_id - 1}")
-        
+
         # Verify the data
         print("\nVerifying monthly distribution...")
         print("=" * 60)
-        
+
         for month_name, month_num in months:
             online_count = session.exec(
                 select(AdminDashboardData).where(
@@ -168,14 +172,14 @@ def main():
                     AdminDashboardData.mode == "Online"
                 )
             ).all()
-            
+
             offline_count = session.exec(
                 select(AdminDashboardData).where(
                     AdminDashboardData.date.like(f"{month_num}/%/2025"),
                     AdminDashboardData.mode == "Offline"
                 )
             ).all()
-            
+
             print(f"{month_name}: Online={len(online_count)}, Offline={len(offline_count)}, Total={len(online_count) + len(offline_count)}")
 
 
