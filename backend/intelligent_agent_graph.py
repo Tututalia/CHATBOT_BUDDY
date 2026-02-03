@@ -733,7 +733,9 @@ def view_cart_agent(customer_id: str) -> str:
                         "price": discount_price,
                         "original_price": original_price,
                         "discount": discount,
-                        "total": item_total_discounted
+                        "total": item_total_discounted,
+                        "image_reference": product.image_reference,
+                        "savings": item_total_original - item_total_discounted if discount > 0 else 0
                     })
 
             result += f"════════════════════════════════\\n"
@@ -745,7 +747,16 @@ def view_cart_agent(customer_id: str) -> str:
             result += "- Type 'add more' to browse more products\\n"
             result += "- To remove an item, provide the Order ID\\n"
 
-            return result
+            # Return structured JSON with both text and cart items array
+            import json
+            return json.dumps({
+                "id": "view_cart_agent",
+                "response": result,
+                "cart_items": cart_details,
+                "total_amount": total_amount,
+                "total_savings": total_discount,
+                "total_items": len(cart_items)
+            })
 
     except Exception as e:
         print(f"Error viewing cart: {e}")

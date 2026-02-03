@@ -554,6 +554,201 @@ def get_admin_dashboard_data(time_range: str = "1month"):
         }
 
 
+@app.get("/api/admin/ai-insights")
+def get_admin_ai_insights(time_range: str = "1month"):
+    """
+    Get AI-powered insights and recommendations for the admin dashboard.
+    Uses LLM to analyze transaction data and provide actionable intelligence.
+
+    Args:
+        time_range: Filter by time range - '7days', '1month', or 'all' (default: '1month')
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        with get_db_session() as session:
+            # Get all dashboard data
+            all_transactions = admin_dashboard_data_crud.get_all(
+                session, skip=0, limit=100000)
+
+            # Determine date threshold
+            now = datetime.now()
+            date_threshold = None
+            time_period_label = "All Time"
+
+            if time_range == "7days":
+                date_threshold = now - timedelta(days=7)
+                time_period_label = "Last 7 Days"
+            elif time_range == "1month":
+                date_threshold = now - timedelta(days=30)
+                time_period_label = "Last 1 Month"
+
+            # Filter and analyze transactions
+            filtered_transactions = []
+            online_count = 0
+            offline_count = 0
+            online_revenue = 0
+            offline_revenue = 0
+            store_performance = defaultdict(lambda: {"count": 0, "revenue": 0})
+            product_performance = defaultdict(
+                lambda: {"count": 0, "revenue": 0})
+            customer_frequency = defaultdict(int)
+
+            for tx in all_transactions:
+                # Parse date
+                tx_date = None
+                try:
+                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
+                except:
+                    try:
+                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
+                    except:
+                        try:
+                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
+                        except:
+                            continue
+
+                # Filter by date threshold
+                if date_threshold is None or tx_date >= date_threshold:
+                    filtered_transactions.append(tx)
+
+                    if tx.mode.lower() == "online":
+                        online_count += 1
+                        online_revenue += tx.amount
+                    else:
+                        offline_count += 1
+                        offline_revenue += tx.amount
+                        store_performance[tx.store_name]["count"] += 1
+                        store_performance[tx.store_name]["revenue"] += tx.amount
+
+                    product_performance[tx.product]["count"] += tx.qty
+                    product_performance[tx.product]["revenue"] += tx.amount
+                    customer_frequency[tx.user_name] += 1
+
+            # Calculate insights
+            total_transactions = len(filtered_transactions)
+            total_revenue = online_revenue + offline_revenue
+            avg_transaction = total_revenue / \
+                total_transactions if total_transactions > 0 else 0
+            online_percentage = (
+                online_count / total_transactions * 100) if total_transactions > 0 else 0
+
+            # Get top performing products
+            top_products = sorted(product_performance.items(
+            ), key=lambda x: x[1]["revenue"], reverse=True)[:3]
+
+            # Get top stores
+            top_stores = sorted(store_performance.items(),
+                                key=lambda x: x[1]["revenue"], reverse=True)[:3]
+
+            # Get top customers
+            top_customers = sorted(
+                customer_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+
+            # Prepare data summary for LLM
+            data_summary = f"""
+Analyze the following retail dashboard data for {time_period_label}:
+
+OVERALL METRICS:
+- Total Transactions: {total_transactions:,}
+- Total Revenue: ₹{total_revenue:,.2f}
+- Average Transaction Value: ₹{avg_transaction:,.2f}
+- Online Sales: {online_count:,} transactions (₹{online_revenue:,.2f})
+- Offline Sales: {offline_count:,} transactions (₹{offline_revenue:,.2f})
+- Online Percentage: {online_percentage:.1f}%
+
+TOP PERFORMING PRODUCTS:
+{chr(10).join([f"- {prod}: {data['count']} units sold, ₹{data['revenue']:,.2f} revenue" for prod, data in top_products[:3]])}
+
+TOP PERFORMING STORES (Offline):
+{chr(10).join([f"- {store}: {data['count']} transactions, ₹{data['revenue']:,.2f} revenue" for store, data in top_stores[:3]])}
+
+TOP CUSTOMERS (by frequency):
+{chr(10).join([f"- {customer}: {count} purchases" for customer, count in top_customers[:5]])}
+
+Provide insights in the following JSON format:
+{{
+  "overview": "Brief performance summary in 2-3 sentences",
+  "key_insights": ["insight 1", "insight 2", "insight 3"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+  "opportunities": [
+    {{"area": "area name", "suggestion": "specific suggestion", "potential_savings": "estimated impact"}}
+  ]
+}}
+
+Focus on actionable insights about:
+1. Revenue trends and transaction patterns
+2. Product performance and inventory optimization
+3. Store performance differences
+4. Customer behavior and retention strategies
+5. Channel optimization (online vs offline)
+"""
+
+            # Initialize LLM
+            llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0.7,
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+
+            # Get AI insights
+            response = llm.invoke(data_summary)
+
+            # Parse LLM response
+            try:
+                # Extract JSON from response
+                response_text = response.content
+
+                # Find JSON in the response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+
+                if json_match:
+                    insights_data = json.loads(json_match.group())
+                else:
+                    # Fallback if JSON not found
+                    insights_data = {
+                        "overview": response_text[:200],
+                        "key_insights": ["Unable to parse structured insights"],
+                        "recommendations": ["Please refresh to try again"],
+                        "opportunities": []
+                    }
+            except Exception as parse_error:
+                print(f"Error parsing LLM response: {parse_error}")
+                insights_data = {
+                    "overview": "Analysis completed but unable to format insights properly.",
+                    "key_insights": ["Data has been analyzed successfully"],
+                    "recommendations": ["Refresh to generate new insights"],
+                    "opportunities": []
+                }
+
+            return {
+                "insights": insights_data,
+                "time_period": time_period_label,
+                "data_summary": {
+                    "total_transactions": total_transactions,
+                    "total_revenue": round(total_revenue, 2),
+                    "avg_transaction_value": round(avg_transaction, 2),
+                    "online_percentage": round(online_percentage, 1)
+                }
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": f"Error generating AI insights: {str(e)}",
+            "insights": {
+                "overview": "Unable to generate insights at this time.",
+                "key_insights": [],
+                "recommendations": [],
+                "opportunities": []
+            }
+        }
+
+
 @app.get("/api/store/{store_id}/transactions")
 def get_store_transactions(store_id: str, time_range: str = "all"):
     """
