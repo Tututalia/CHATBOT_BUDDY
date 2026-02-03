@@ -1,9 +1,9 @@
 from crud import (
     product_crud, customer_crud, store_crud, order_history_crud,
-    store_keeper_transaction_crud, cart_crud,
+    store_keeper_transaction_crud, cart_crud, admin_dashboard_data_crud,
     ProductCRUD, CustomerCRUD, CartCRUD
 )
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
@@ -12,10 +12,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import json
 import asyncio
-from sqlmodel import Session
+from sqlmodel import Session, select, func
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -313,6 +313,219 @@ def get_multiple_products(product_ids: str):
     }
 
 
+@app.get("/api/admin/dashboard")
+def get_admin_dashboard_data(time_range: str = "1month"):
+    """
+    Get comprehensive admin dashboard analytics including:
+    - Total customers count
+    - Total products sold
+    - Total retail stores
+    - Online vs Offline transactions (based on time_range)
+    - Offline purchases per store
+
+    Args:
+        time_range: Filter by time range - '7days', '1month', or 'all' (default: '1month')
+    """
+    try:
+        with get_db_session() as session:
+            from datetime import datetime, timedelta
+            from collections import defaultdict
+
+            # Get total customers count
+            total_customers = session.exec(
+                select(func.count(Customer.customer_id))
+            ).one()
+
+            # Get total retail stores count
+            total_stores = session.exec(
+                select(func.count(Store.store_id))
+            ).one()
+
+            # Get admin dashboard data (all transactions)
+            all_transactions = admin_dashboard_data_crud.get_all(
+                session, skip=0, limit=100000)
+
+            # Calculate total products sold (sum of quantities from all transactions)
+            total_products_sold = sum(tx.qty for tx in all_transactions)
+
+            # Determine date threshold based on time_range
+            now = datetime.now()
+            date_threshold = None
+            time_period_label = "All Time"
+
+            if time_range == "7days":
+                date_threshold = now - timedelta(days=7)
+                time_period_label = "Last 7 Days"
+            elif time_range == "1month":
+                date_threshold = now - timedelta(days=30)
+                time_period_label = "Last 1 Month"
+            # else: time_range == "all", no date threshold
+
+            # Analyze transactions based on time range
+            online_transactions = []
+            offline_transactions = []
+            store_purchases = defaultdict(int)
+            total_revenue = 0
+            online_revenue = 0
+            offline_revenue = 0
+
+            for tx in all_transactions:
+                # Parse transaction date with multiple format attempts
+                tx_date = None
+                try:
+                    # Try M/D/YYYY format (e.g., "1/15/2026")
+                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
+                except:
+                    try:
+                        # Try YYYY-MM-DD format
+                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
+                    except:
+                        try:
+                            # Try DD-MM-YYYY format
+                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
+                        except:
+                            try:
+                                # Try MM/DD/YYYY format with zero padding
+                                tx_date = datetime.strptime(
+                                    tx.date.strip(), "%m/%d/%Y")
+                            except:
+                                # Skip transactions with unparseable dates
+                                print(f"Could not parse date: {tx.date}")
+                                continue
+
+                # Filter by date threshold (if set) or include all
+                if date_threshold is None or tx_date >= date_threshold:
+                    if tx.mode.lower() == "online":
+                        online_transactions.append(tx)
+                        online_revenue += tx.amount
+                    else:
+                        offline_transactions.append(tx)
+                        offline_revenue += tx.amount
+                        # Count purchases per store for offline only
+                        store_purchases[tx.store_name] += tx.qty
+
+                # Total revenue from all transactions (regardless of time filter)
+                if date_threshold is None or tx_date >= date_threshold:
+                    total_revenue += tx.amount
+
+            # Calculate total transactions for the selected period
+            total_transactions = len(
+                online_transactions) + len(offline_transactions)
+
+            # Calculate average transaction value for the selected period
+            avg_transaction_value = total_revenue / \
+                total_transactions if total_transactions > 0 else 0
+
+            # Format offline purchases per store (sorted by purchase count)
+            offline_purchases_per_store = [
+                {
+                    "store_name": store_name,
+                    "purchases_count": count
+                }
+                for store_name, count in sorted(
+                    store_purchases.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+            ]
+
+            # Calculate online vs offline percentages
+            online_percentage = (len(
+                online_transactions) / total_transactions * 100) if total_transactions > 0 else 0
+            offline_percentage = (len(
+                offline_transactions) / total_transactions * 100) if total_transactions > 0 else 0
+
+            # Calculate monthly transaction trends
+            monthly_online = defaultdict(int)
+            monthly_offline = defaultdict(int)
+
+            for tx in all_transactions:
+                # Parse transaction date
+                tx_date = None
+                try:
+                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
+                except:
+                    try:
+                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
+                    except:
+                        try:
+                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
+                        except:
+                            continue
+
+                # Get month-year key
+                month_key = tx_date.strftime("%b")  # e.g., "Jan", "Feb"
+
+                # Count by mode
+                if tx.mode.lower() == "online":
+                    monthly_online[month_key] += 1
+                else:
+                    monthly_offline[month_key] += 1
+
+            # Create monthly trends list with proper month ordering
+            month_order = ["Jan", "Feb", "Mar", "Apr", "May",
+                           "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            monthly_trends = []
+            for month in month_order:
+                if month in monthly_online or month in monthly_offline:
+                    monthly_trends.append({
+                        "month": month,
+                        "online": monthly_online.get(month, 0),
+                        "offline": monthly_offline.get(month, 0),
+                        "total": monthly_online.get(month, 0) + monthly_offline.get(month, 0)
+                    })
+
+            return {
+                "summary": {
+                    "total_customers": total_customers,
+                    "total_products_sold": total_products_sold,
+                    "total_retail_stores": total_stores,
+                    "total_transactions": total_transactions,
+                    "total_revenue": round(total_revenue, 2),
+                    "avg_transaction_value": round(avg_transaction_value, 2)
+                },
+                "transactions_overview": {
+                    "time_period": time_period_label,
+                    "time_range": time_range,
+                    "online": {
+                        "count": len(online_transactions),
+                        "percentage": round(online_percentage, 1),
+                        "revenue": round(online_revenue, 2)
+                    },
+                    "offline": {
+                        "count": len(offline_transactions),
+                        "percentage": round(offline_percentage, 1),
+                        "revenue": round(offline_revenue, 2)
+                    }
+                },
+                "monthly_trends": monthly_trends,
+                "total_online_transactions": sum(monthly_online.values()),
+                "total_offline_transactions": sum(monthly_offline.values()),
+                "offline_purchases_per_store": offline_purchases_per_store
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": f"Error fetching admin dashboard data: {str(e)}",
+            "summary": {
+                "total_customers": 0,
+                "total_products_sold": 0,
+                "total_retail_stores": 0,
+                "total_transactions_past_month": 0,
+                "total_revenue": 0,
+                "avg_transaction_value": 0
+            },
+            "transactions_overview": {
+                "time_period": "Past 1 Month",
+                "online": {"count": 0, "percentage": 0, "revenue": 0},
+                "offline": {"count": 0, "percentage": 0, "revenue": 0}
+            },
+            "offline_purchases_per_store": []
+        }
+
+
 @app.get("/api/store/{store_id}/transactions")
 def get_store_transactions(store_id: str, time_range: str = "all"):
     """
@@ -498,7 +711,8 @@ def get_store_daily_orders(store_id: str, time_range: str = "weekly"):
                             tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
                         except:
                             try:
-                                tx_date = datetime.fromisoformat(tx.date.replace('Z', '+00:00'))
+                                tx_date = datetime.fromisoformat(
+                                    tx.date.replace('Z', '+00:00'))
                             except:
                                 pass
 
@@ -512,7 +726,8 @@ def get_store_daily_orders(store_id: str, time_range: str = "weekly"):
             # Format daily orders with percentages
             daily_orders = []
             for date_str, count in sorted(daily_counts.items()):
-                percentage = (count / total_orders * 100) if total_orders > 0 else 0
+                percentage = (count / total_orders *
+                              100) if total_orders > 0 else 0
                 daily_orders.append({
                     "date": date_str,
                     "count": count,
@@ -520,7 +735,8 @@ def get_store_daily_orders(store_id: str, time_range: str = "weekly"):
                 })
 
             # Calculate peak day and average
-            peak_day = max(daily_counts.items(), key=lambda x: x[1]) if daily_counts else (None, 0)
+            peak_day = max(daily_counts.items(),
+                           key=lambda x: x[1]) if daily_counts else (None, 0)
             avg_daily = total_orders / len(daily_counts) if daily_counts else 0
 
             return {
@@ -720,12 +936,11 @@ Important: Return ONLY the JSON object, no additional text or markdown formattin
 # ============ Chatbot Endpoints ============
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")  # Allow extra fields
+
     customer_id: str
     message: str
     conversation_history: List[Dict[str, str]] = []
-
-    class Config:
-        extra = "allow"  # Allow extra fields
 
 
 class ChatResponse(BaseModel):
@@ -842,27 +1057,27 @@ def update_cart_quantity(update_data: UpdateCartQuantityModel):
             cart_item = cart_crud.get_by_id(session, update_data.order_id)
             if not cart_item:
                 return {"success": False, "error": "Cart item not found"}
-            
+
             # Ensure quantity is at least 1
             if update_data.quantity < 1:
                 return {"success": False, "error": "Quantity must be at least 1"}
-            
+
             # Get the product to calculate total
             product = product_crud.get_by_id(session, cart_item.product_id)
             if not product:
                 return {"success": False, "error": "Product not found"}
-            
+
             # Update the quantity
             updated_item = cart_crud.update(
-                session, 
-                update_data.order_id, 
+                session,
+                update_data.order_id,
                 {"quantity": update_data.quantity}
             )
-            
+
             if updated_item:
                 total_amount = product.price * update_data.quantity
                 return {
-                    "success": True, 
+                    "success": True,
                     "message": f"Updated quantity to {update_data.quantity}",
                     "cart_item": {
                         "order_id": updated_item.order_id,
@@ -934,7 +1149,7 @@ async def chat_with_agent(chat_message: ChatMessage):
         # Extract timeline messages from all agent tool calls
         timeline_messages = []
         from langchain_core.messages import ToolMessage, AIMessage as LangChainAIMessage
-        
+
         # Map tool names to agent names for timeline display
         tool_to_agent_map = {
             "search_products": "Inventory Agent",
@@ -948,17 +1163,17 @@ async def chat_with_agent(chat_message: ChatMessage):
             "get_customer_info": "Customer Info Agent",
             "post_purchase_support": "Post-Purchase Agent"
         }
-        
+
         # Track which agents have been called
         seen_agents = set()
-        
+
         for message in result["messages"]:
             # Check for tool calls in AIMessage
             if isinstance(message, LangChainAIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
                 for tool_call in message.tool_calls:
                     tool_name = tool_call.get("name", "")
                     agent_name = tool_to_agent_map.get(tool_name, tool_name)
-                    
+
                     # Only add each agent once to timeline
                     if agent_name not in seen_agents:
                         seen_agents.add(agent_name)
