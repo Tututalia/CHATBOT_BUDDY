@@ -444,15 +444,22 @@ def recommendation_agent(inventory_data: str) -> str:
 
 
 @tool
-def inventory_agent(search_query: str = None, product_id: str = None) -> str:
+def inventory_agent(search_query: str = None, product_id: str = None, customer_id: str = None) -> str:
     """
     Searches and fetches products from database based on user query or checks specific product availability.
+    Uses customer tier to personalize product recommendations.
     This is the FIRST tool to call when user asks for products.
     Returns product details (name, category, quantity, price, image) in JSON format.
+
+    CUSTOMER TIER-BASED PRODUCT FILTERING:
+    - tier_1 (Premium): Products >₹4000 with <20% discount, with fallbacks for >₹3000
+    - tier_3 (Budget): Products <₹2000 with >40% discount, with fallbacks for high discounts (>30%) or low prices (<₹2500)
+    - tier_2 (Middle): No filtering - shows all products
 
     Args:
         search_query: User's product search query (e.g., "hoodies", "winter wear")
         product_id: Specific product ID to check (optional, use when checking specific product)
+        customer_id: Customer ID to personalize recommendations based on their tier
 
     Returns:
         JSON string with product details or availability status
@@ -545,6 +552,56 @@ def inventory_agent(search_query: str = None, product_id: str = None) -> str:
         # Filter products to only show items with quantity > 0 (in stock)
         products = [p for p in products if p.quantity > 0]
 
+        # Apply tier-based filtering if customer_id is provided
+        if customer_id:
+            customer = get_customer_by_id(customer_id)
+            if customer and customer.customer_type:
+                customer_tier = customer.customer_type
+                print(f"[DEBUG] Customer {customer_id} tier: {customer_tier}")
+
+                # tier_1 (Premium): Products >₹4000 with <20% discount, fallback >₹3000
+                if customer_tier == "tier_1":
+                    filtered_products = [
+                        p for p in products
+                        if p.price > 4000 and (getattr(p, 'discount', 0) or 0) < 20
+                    ]
+                    if not filtered_products:
+                        # Fallback: Products >₹3000
+                        filtered_products = [
+                            p for p in products if p.price > 3000]
+
+                    if filtered_products:
+                        products = filtered_products
+                        print(
+                            f"[DEBUG] Filtered {len(products)} premium products for tier_1 customer")
+
+                # tier_3 (Budget): Products <₹2000 with >40% discount, fallbacks for >30% discount or <₹2500
+                elif customer_tier == "tier_3":
+                    filtered_products = [
+                        p for p in products
+                        if p.price < 2000 and (getattr(p, 'discount', 0) or 0) > 40
+                    ]
+                    if not filtered_products:
+                        # Fallback 1: Products with >30% discount
+                        filtered_products = [
+                            p for p in products
+                            if (getattr(p, 'discount', 0) or 0) > 30
+                        ]
+                    if not filtered_products:
+                        # Fallback 2: Products <₹2500
+                        filtered_products = [
+                            p for p in products if p.price < 2500]
+
+                    if filtered_products:
+                        products = filtered_products
+                        print(
+                            f"[DEBUG] Filtered {len(products)} budget products for tier_3 customer")
+
+                # tier_2 (Middle): No filtering - shows all products
+                elif customer_tier == "tier_2":
+                    print(
+                        f"[DEBUG] tier_2 customer - showing all {len(products)} products (no filtering)")
+
         if not products:
             # If no matches, get random sample of available products
             all_products = load_products_from_db()
@@ -562,7 +619,7 @@ def inventory_agent(search_query: str = None, product_id: str = None) -> str:
         # Limit to 4 products
         products = products[:4]
 
-        # Format products as JSON
+        # Format products as JSON with customer tier info
         product_list = []
         for p in products:
             product_list.append({
@@ -576,11 +633,19 @@ def inventory_agent(search_query: str = None, product_id: str = None) -> str:
                 "description": getattr(p, "description", None)
             })
 
-        return json.dumps({
+        # Include customer tier in response if available
+        response_data = {
             "status": "success",
             "message": f"✅ Found {len(products)} products matching your search",
             "products": product_list
-        })
+        }
+
+        if customer_id:
+            customer = get_customer_by_id(customer_id)
+            if customer and customer.customer_type:
+                response_data["customer_tier"] = customer.customer_type
+
+        return json.dumps(response_data)
 
     # If neither product_id nor search_query provided, return error
     return "❌ Please provide either a search_query or product_id to check inventory."
@@ -1346,6 +1411,35 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
         print(f"[ERROR] Post-purchase DB operations failed: {e}")
         traceback.print_exc()
 
+    # Clear the payload for this customer after successful purchase
+    try:
+        import sqlite3
+        import os
+
+        # Get absolute path to chat_history.db
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        db_path = os.path.join(backend_dir, "chat_history.db")
+
+        print(f"[DEBUG] Clearing payload from: {db_path}")
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Set payload to NULL for this customer
+        cursor.execute(
+            "UPDATE payload SET payload = NULL WHERE customer_id = ?", (customer_id,))
+        rows_affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        print(
+            f"[DEBUG] Payload cleared for customer {customer_id} - Rows affected: {rows_affected}")
+    except Exception as e:
+        import traceback
+        print(
+            f"[ERROR] Failed to clear payload for customer {customer_id}: {e}")
+        traceback.print_exc()
+
     result = f"📝 **Post-Purchase Services**\n\n"
     result += f"Order ID: {order_id}\n\n"
     result += "**Available Services:**\n"
@@ -1414,7 +1508,7 @@ Before choosing which tool to call, CHECK the conversation history:
 CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
-- When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query parameter
+- When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query AND customer_id parameters
 - **MANDATORY**: IMMEDIATELY call `recommendation_agent` passing the COMPLETE JSON RESPONSE from inventory_agent
 - **CRITICAL RULE**: EVERY `inventory_agent(search_query=X)` call MUST be followed by `recommendation_agent(inventory_data=<FULL_JSON_FROM_INVENTORY_AGENT>)`
 - **PARAMETER FORMAT**: inventory_data must be the EXACT JSON string returned by inventory_agent, NOT just the search query

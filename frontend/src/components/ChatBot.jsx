@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, StrictMode } from "react";
 import "./ChatBot.css";
 import chatbotConfig from "../../data/chatbotAgents.json";
 import chatbotSchema from "../../data/chatbot.json";
 
-export default function ChatBot({ customerId = "CUST001" }) {
+export default function ChatBot({ customerId }) {
   const [isOpen, setIsOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [messages, setMessages] = useState([]);
@@ -13,10 +13,149 @@ export default function ChatBot({ customerId = "CUST001" }) {
   const [welcomeMessage, setWelcomeMessage] = useState("");
   const [lastRecommendations, setLastRecommendations] = useState([]);
   const [productQuantities, setProductQuantities] = useState({});
+  const [conversationLog, setConversationLog] = useState([]);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
+  const [WelcomebackMessage, setWelcomebackMessage] = useState("");
+  const render = (response) => {
+    // Handle timeline from backend
+    if (response.timeline && Array.isArray(response.timeline)) {
+      const newTimelineEntries = response.timeline.map((entry) => ({
+        action: entry.agent,
+        timestamp: new Date().toLocaleTimeString(),
+        status: "completed",
+      }));
+      setAgentTimeline((prev) => [...prev, ...newTimelineEntries]);
+    }
 
+    // Handle cart items from view_cart_agent
+    if (response.cart_items && Array.isArray(response.cart_items)) {
+      setAgentTimeline((prev) => [
+        ...prev,
+        {
+          action: "View Cart Agent",
+          timestamp: new Date().toLocaleTimeString(),
+          status: "completed",
+        },
+      ]);
+
+      // Display cart items as product cards
+      if (response.cart_items.length > 0) {
+        const cartCardsMessage = {
+          type: "cartItems",
+          cartItems: response.cart_items,
+          total_amount: response.total_amount,
+          total_savings: response.total_savings,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, cartCardsMessage]);
+      } else {
+        const aiMessage = {
+          type: "ai",
+          text: "Your cart is currently empty.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMessage]);
+      }
+    }
+    // Handle purchase method selection from choose_channel_agent
+    else if (
+      response.agent_calls &&
+      response.agent_calls.includes("choose_channel_agent")
+    ) {
+      const purchaseMethodsMessage = {
+        type: "purchaseMethods",
+        text: response.response,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, purchaseMethodsMessage]);
+    }
+    // Handle payment method selection from payment_agent (only when it's the sole agent)
+    else if (
+      response.agent_calls &&
+      response.agent_calls.includes("payment_agent") &&
+      response.agent_calls.length === 1 // Only show payment methods when payment_agent is the only agent called
+    ) {
+      // Check if the last message is already a paymentMethods to avoid duplicates
+      setMessages((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        // Don't add payment methods again if already showing or if user just selected a method
+        if (lastMessage?.type === "paymentMethods") {
+          return prev;
+        }
+
+        const paymentMethodsMessage = {
+          type: "paymentMethods",
+          text: response.response,
+          timestamp: new Date(),
+        };
+        return [...prev, paymentMethodsMessage];
+      });
+    }
+    // Handle product cards from recommendation agent
+    else if (
+      response.responses &&
+      response.responses.recommendation &&
+      Array.isArray(response.responses.recommendation)
+    ) {
+      // Track last recommendations for downstream UI (e.g., add-to-cart confirmation)
+      setLastRecommendations(response.responses.recommendation);
+      const productCardsMessage = {
+        type: "productCards",
+        productCards: response.responses.recommendation,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, productCardsMessage]);
+    } else {
+      // Fallback for text-only responses
+      console.log("fallback");
+      const aiMessage = {
+        type: "ai",
+        text: response.response,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // If backend confirmed add-to-cart in plain text, also render a structured confirmation card
+      if (/Added to Cart/i.test(response.response)) {
+        const qtyMatch = userMessage.text.match(/\b(\d+)\b/);
+        const quantity = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+        const product =
+          lastRecommendations && lastRecommendations.length > 0
+            ? lastRecommendations[0]
+            : null;
+        if (product) {
+          const total = (product.price || 0) * quantity;
+          const cartConfirmMessage = {
+            type: "cartConfirmation",
+            data: {
+              message: "✅ Added to Cart!",
+              product: {
+                product_id: product.product_id,
+                product_name: product.product_name,
+                quantity,
+                price_per_unit: product.price,
+                total,
+              },
+              prompt:
+                "Would you like to add more products or proceed to view your cart?",
+            },
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, cartConfirmMessage]);
+          setAgentTimeline((prev) => [
+            ...prev,
+            {
+              action: "Add to Cart Agent",
+              timestamp: new Date().toLocaleTimeString(),
+              status: "completed",
+            },
+          ]);
+        }
+      }
+    }
+  };
   // Load welcome message from imported config
   useEffect(() => {
     setWelcomeMessage(
@@ -59,6 +198,55 @@ export default function ChatBot({ customerId = "CUST001" }) {
     scrollTimelineToBottom();
   }, [agentTimeline]);
 
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const { gethistory } = await import("../services/chatApi.js");
+      const response = await gethistory(customerId);
+      console.log(response);
+
+      // Check if there's chat history to restore
+      if (response?.payload && response.payload.length > 0) {
+        // Restore all previous messages first
+        response.payload.forEach((item) => {
+          console.log(item);
+          const userMessage = {
+            type: "user",
+            text: item.payload.message,
+            timestamp: new Date(),
+          };
+
+          setMessages((prev) => [...prev, userMessage]);
+          render(item.response);
+        });
+
+        // Show welcome back message at the bottom after restoring history
+        const welcomeBackMsg = {
+          type: "ai",
+          text: "Welcome back! 👋 We've restored your previous conversation. Please continue with your shopping journey with our AI powered Agentic chatbot.",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, welcomeBackMsg]);
+
+        // Scroll to bottom after all messages are loaded
+        setTimeout(() => {
+          scrollToBottom();
+        }, 1000);
+      }
+    };
+    fetchHistory();
+  }, [customerId]);
+
+  // Log conversation history whenever it updates
+  useEffect(() => {
+    if (conversationLog.length > 0) {
+      console.log("=== Conversation Log ===");
+      console.log("Total exchanges:", conversationLog.length);
+      console.log("Full log:", conversationLog);
+      console.log("Latest entry:", conversationLog[conversationLog.length - 1]);
+      console.log("========================");
+    }
+  }, [conversationLog]);
+
   const toggleChatbot = () => {
     setIsOpen(!isOpen);
   };
@@ -90,6 +278,60 @@ export default function ChatBot({ customerId = "CUST001" }) {
     try {
       const { chatWithAgent } = await import("../services/chatApi.js");
       const response = await chatWithAgent(customerId, userMessage.text, []);
+
+      // Track raw payload and response for this turn
+      const newLogEntry = {
+        payload: {
+          customer_id: customerId,
+          message: userMessage.text,
+        },
+        response,
+      };
+
+      // Build updated conversation log with the new entry
+      const updatedConversationLog = [...conversationLog, newLogEntry];
+      setConversationLog(updatedConversationLog);
+
+      // Check if post_purchase_agent was called - if yes, don't save (backend already cleared it)
+      const isPostPurchase =
+        response.agent_calls &&
+        response.agent_calls.includes("post_purchase_agent");
+
+      // Save entire conversation log to database (skip if post-purchase to avoid overwriting the cleared payload)
+      if (!isPostPurchase) {
+        try {
+          console.log("Saving full conversation log to database...", {
+            customer_id: customerId,
+            entries: updatedConversationLog.length,
+          });
+          const saveResponse = await fetch(
+            "http://localhost:8000/api/payload/save",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                customer_id: customerId,
+                payload: updatedConversationLog,
+              }),
+            },
+          );
+          const saveResult = await saveResponse.json();
+          console.log("Payload save result:", saveResult);
+          if (!saveResult.success) {
+            console.error("Failed to save payload:", saveResult.error);
+          }
+        } catch (error) {
+          console.error("Error saving payload to database:", error);
+        }
+      } else {
+        console.log(
+          "Post-purchase detected - skipping payload save (backend cleared it)",
+        );
+        // Clear local conversationLog since purchase is complete
+        // setConversationLog([]);
+      }
 
       console.log("Backend response:", response);
 
@@ -881,7 +1123,7 @@ export default function ChatBot({ customerId = "CUST001" }) {
     if (!silent) {
       const userMessage = {
         type: "user",
-        text: "View my cart",
+        text: "please show my items in the cart",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMessage]);
@@ -904,7 +1146,7 @@ export default function ChatBot({ customerId = "CUST001" }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: "view cart",
+          message: "please show my items in the cart",
           customer_id: customerId,
         }),
       });
@@ -2367,6 +2609,216 @@ export default function ChatBot({ customerId = "CUST001" }) {
                   </div>
                 )}
                 <div ref={messagesEndRef} />
+
+                {/* Display Conversation Log Responses */}
+                {/* {conversationLog.length > 0 && (
+                  <div className="conversation-log-display">
+                    <div className="log-display-header">
+                      <span className="log-header-icon">📊</span>
+                      <h3>Response History</h3>
+                      <span className="log-badge">{conversationLog.length}</span>
+                    </div>
+                    
+                    {conversationLog.map((logEntry, logIdx) => {
+                      const resp = logEntry.response;
+                      
+                      return (
+                        <div key={logIdx} className="log-response-section">
+                          <div className="log-response-header">
+                            <div className="log-query-label">
+                              <span className="query-icon">❓</span>
+                              Query: "{logEntry.payload.message}"
+                            </div>
+                          </div>
+
+                          {/* Display product cards from recommendation response *\/}
+                          {resp.responses?.recommendation && resp.responses.recommendation.length > 0 && (
+                            <div className="product-cards-container log-products">
+                              {resp.responses.recommendation.slice(0, 3).map((product) => (
+                                <div key={product.product_id} className="product-card">
+                                  <div className="product-image-wrapper">
+                                    <img
+                                      src={product.image_reference || "/images/placeholder.png"}
+                                      alt={product.product_name}
+                                      className="product-image"
+                                      onError={(e) => {
+                                        e.target.src = "/images/placeholder.png";
+                                      }}
+                                    />
+                                    {product.quantity > 0 && product.quantity < 10 && (
+                                      <span className="product-badge trending">Low Stock</span>
+                                    )}
+                                  </div>
+                                  <div className="product-info">
+                                    <h4 className="product-name">{product.product_name}</h4>
+                                    <div className="product-pricing">
+                                      {product.discount && product.discount > 0 ? (
+                                        <>
+                                          <span className="original-price">
+                                            ₹{product.price.toLocaleString()}
+                                          </span>
+                                          <span className="discount-price">
+                                            ₹{product.discount_price.toLocaleString()}
+                                          </span>
+                                          <span className="discount-badge">
+                                            ({product.discount}% off)
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <p className="product-price">
+                                          ₹{product.price.toLocaleString()}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="quantity-controls">
+                                      <button
+                                        className="qty-btn"
+                                        onClick={() => handleQuantityChange(product.product_id, -1)}
+                                      >
+                                        −
+                                      </button>
+                                      <span className="qty-value">
+                                        {productQuantities[product.product_id] || 1}
+                                      </span>
+                                      <button
+                                        className="qty-btn"
+                                        onClick={() => handleQuantityChange(product.product_id, 1)}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                    <button
+                                      className="add-to-cart-btn"
+                                      onClick={() => handleAddToCart(product)}
+                                    >
+                                      Add to Cart
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Display cart items *\/}
+                          {resp.cart_items && resp.cart_items.length > 0 && (
+                            <div className="cart-items-container">
+                              <div className="cart-header-section">
+                                <span className="cart-icon">🛒</span>
+                                <h4>Cart ({resp.cart_items.length} items)</h4>
+                              </div>
+                              <div className="product-cards-container">
+                                {resp.cart_items.map((item) => {
+                                  const originalPrice = item.original_price || item.price;
+                                  const discountedPrice = item.price_per_unit || item.price;
+                                  const hasDiscount = item.discount && item.discount > 0;
+                                  const totalAmount = item.total_amount || (discountedPrice * item.quantity);
+
+                                  return (
+                                    <div key={item.order_id} className="cart-product-card">
+                                      <div className="product-image-wrapper">
+                                        <img
+                                          src={item.image_reference || "/images/placeholder.png"}
+                                          alt={item.product_name}
+                                          className="product-image"
+                                          onError={(e) => {
+                                            e.target.src = "/images/placeholder.png";
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="cart-product-info">
+                                        <h4 className="product-name">{item.product_name}</h4>
+                                        <div className="product-pricing">
+                                          {hasDiscount ? (
+                                            <>
+                                              <span className="original-price">
+                                                ₹{originalPrice.toLocaleString()}
+                                              </span>
+                                              <span className="discount-price">
+                                                ₹{discountedPrice.toLocaleString()}
+                                              </span>
+                                              <span className="discount-badge">
+                                                ({item.discount}% off)
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <p className="product-price">
+                                              ₹{discountedPrice.toLocaleString()}
+                                            </p>
+                                          )}
+                                        </div>
+                                        <div className="cart-quantity-section">
+                                          <div className="quantity-controls cart-qty">
+                                            <button
+                                              className="qty-btn"
+                                              onClick={() =>
+                                                handleUpdateCartQuantity(
+                                                  item.order_id,
+                                                  item.product_name,
+                                                  item.quantity,
+                                                  -1
+                                                )
+                                              }
+                                            >
+                                              −
+                                            </button>
+                                            <span className="qty-value">{item.quantity}</span>
+                                            <button
+                                              className="qty-btn"
+                                              onClick={() =>
+                                                handleUpdateCartQuantity(
+                                                  item.order_id,
+                                                  item.product_name,
+                                                  item.quantity,
+                                                  1
+                                                )
+                                              }
+                                            >
+                                              +
+                                            </button>
+                                          </div>
+                                          <div className="item-total">
+                                            Total: ₹{totalAmount.toLocaleString()}
+                                          </div>
+                                        </div>
+                                        <button
+                                          className="remove-from-cart-btn"
+                                          onClick={() =>
+                                            handleRemoveFromCart(item.order_id, item.product_name)
+                                          }
+                                        >
+                                          🗑️ Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {resp.total_amount && (
+                                <div className="cart-summary">
+                                  <div className="summary-row total">
+                                    <span>Total Amount:</span>
+                                    <span className="total-value">
+                                      ₹{resp.total_amount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Display text response if no special content *\/}
+                          {resp.response && !resp.responses?.recommendation && !resp.cart_items && (
+                            <div className="log-text-response">
+                              <div className="response-bubble">
+                                {resp.response}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )} */}
               </div>
 
               <div className="chat-input-container">

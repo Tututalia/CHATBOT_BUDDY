@@ -2383,3 +2383,118 @@
   border-radius: 8px;
   border: 1px solid #e2e8f0;
 }
+/* ===== CONVERSATION LOG DISPLAY STYLES ===== */
+
+.conversation-log-display {
+  margin-top: 30px;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
+  border-radius: 16px;
+  border: 2px solid #dbeafe;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.1);
+}
+
+.log-display-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #bfdbfe;
+}
+
+.log-header-icon {
+  font-size: 28px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.log-display-header h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #1e40af;
+  flex: 1;
+}
+
+.log-badge {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.log-response-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid #e0e7ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.log-response-section:hover {
+  border-color: #818cf8;
+  box-shadow: 0 4px 16px rgba(129, 140, 248, 0.15);
+  transform: translateY(-2px);
+}
+
+.log-response-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed #e0e7ff;
+}
+
+.log-query-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4338ca;
+  background: #eef2ff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.query-icon {
+  font-size: 16px;
+}
+
+.log-timestamp {
+  font-size: 12px;
+  color: #6366f1;
+  font-weight: 600;
+  background: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #e0e7ff;
+  white-space: nowrap;
+}
+
+.log-products {
+  margin-top: 12px;
+}
+
+.log-text-response {
+  margin-top: 12px;
+}
+
+.response-bubble {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  font-size: 14px;
+  line-height: 1.6;
+  box-shadow: 0 2px 6px rgba(251, 191, 36, 0.15);
+}

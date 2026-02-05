@@ -37,10 +37,13 @@ export default function Pages() {
 
     try {
       // Determine role_id: 1 for customer, 2 for storekeeper, 3 for admin
-      const roleId = loginType === "admin" ? "3" : loginType === "storekeeper" ? "2" : "1";
-      
+      const roleId =
+        loginType === "admin" ? "3" : loginType === "storekeeper" ? "2" : "1";
+
       // Call backend API to authenticate
-      const response = await fetch(`http://localhost:8000/api/customer/${trimmedCustomerId}/${roleId}`);
+      const response = await fetch(
+        `http://localhost:8000/api/customer/${trimmedCustomerId}/${roleId}`,
+      );
       const data = await response.json();
 
       if (data.error) {
@@ -56,7 +59,7 @@ export default function Pages() {
       } else {
         localStorage.setItem("loggedInCustomerId", trimmedCustomerId);
         localStorage.setItem("userRole", roleId);
-        
+
         if (loginType === "storekeeper") {
           // Store the store keeper data for use in the StoreKeeper page
           localStorage.setItem("storeKeeperData", JSON.stringify(data));
@@ -66,7 +69,7 @@ export default function Pages() {
       setShowLoginModal(false);
       setCustomerId("");
       setPassword("");
-      
+
       // Redirect based on login type
       if (loginType === "admin") {
         navigate("/admin");
@@ -195,7 +198,9 @@ export default function Pages() {
 
             {/* Modal Header */}
             <div className="text-center mb-6">
-              <div className={`w-16 h-16 bg-gradient-to-br ${loginType === "admin" ? "from-red-800 to-red-900" : loginType === "storekeeper" ? "from-yellow-500 to-yellow-600" : "from-red-600 to-orange-600"} rounded-full flex items-center justify-center mx-auto mb-4`}>
+              <div
+                className={`w-16 h-16 bg-gradient-to-br ${loginType === "admin" ? "from-red-800 to-red-900" : loginType === "storekeeper" ? "from-yellow-500 to-yellow-600" : "from-red-600 to-orange-600"} rounded-full flex items-center justify-center mx-auto mb-4`}
+              >
                 <svg
                   className="w-8 h-8 text-white"
                   fill="currentColor"
@@ -223,14 +228,18 @@ export default function Pages() {
                 </svg>
               </div>
               <h2 className="text-2xl font-bold text-gray-800">
-                {loginType === "admin" ? "Admin Login" : loginType === "storekeeper" ? "Store Keeper Login" : "Customer Login"}
+                {loginType === "admin"
+                  ? "Admin Login"
+                  : loginType === "storekeeper"
+                    ? "Store Keeper Login"
+                    : "Customer Login"}
               </h2>
               <p className="text-gray-600 mt-2">
-                {loginType === "admin" 
+                {loginType === "admin"
                   ? "Enter your admin ID and password"
-                  : loginType === "storekeeper" 
-                  ? "Enter your store keeper ID and password"
-                  : "Enter your customer ID and password"}
+                  : loginType === "storekeeper"
+                    ? "Enter your store keeper ID and password"
+                    : "Enter your customer ID and password"}
               </p>
             </div>
 
@@ -238,13 +247,23 @@ export default function Pages() {
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  {loginType === "admin" ? "Admin ID" : loginType === "storekeeper" ? "Store Keeper ID" : "Customer ID"}
+                  {loginType === "admin"
+                    ? "Admin ID"
+                    : loginType === "storekeeper"
+                      ? "Store Keeper ID"
+                      : "Customer ID"}
                 </label>
                 <input
                   type="text"
                   value={customerId}
                   onChange={(e) => setCustomerId(e.target.value)}
-                  placeholder={loginType === "admin" ? "e.g., ADMIN001" : loginType === "storekeeper" ? "e.g., SK001" : "e.g., CUST001"}
+                  placeholder={
+                    loginType === "admin"
+                      ? "e.g., ADMIN001"
+                      : loginType === "storekeeper"
+                        ? "e.g., SK001"
+                        : "e.g., CUST001"
+                  }
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
                   required
                 />
@@ -287,7 +306,11 @@ export default function Pages() {
             {/* Sample IDs */}
             <div className="mt-6 pt-4 border-t border-gray-200">
               <p className="text-xs font-semibold text-gray-600 mb-2">
-                {loginType === "admin" ? "Sample Admin IDs:" : loginType === "storekeeper" ? "Sample Store Keeper IDs:" : "Sample Customer IDs:"}
+                {loginType === "admin"
+                  ? "Sample Admin IDs:"
+                  : loginType === "storekeeper"
+                    ? "Sample Store Keeper IDs:"
+                    : "Sample Customer IDs:"}
               </p>
               <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
                 {loginType === "admin" ? (
@@ -324,10 +347,14 @@ export default function Pages() {
         <Routes>
           <Route
             path="/"
-            element={<Home onLoginClick={(type = "customer") => {
-              setLoginType(type);
-              setShowLoginModal(true);
-            }} />}
+            element={
+              <Home
+                onLoginClick={(type = "customer") => {
+                  setLoginType(type);
+                  setShowLoginModal(true);
+                }}
+              />
+            }
           />
           <Route path="/user" element={<UserJourney />} />
           <Route path="/store" element={<StoreKeeper />} />
