@@ -11,10 +11,11 @@ import UserJourney from "./pages/UserJourney";
 import StoreKeeper from "./pages/StoreKeeper";
 import Admin from "./pages/Admin";
 import ChatBot from "./src/components/ChatBot";
+import Chatbot_Kiosk from "./src/components/Chatbot_Kiosk";
 
 export default function Pages() {
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginType, setLoginType] = useState("customer"); // "customer", "storekeeper", or "admin"
+  const [loginType, setLoginType] = useState("customer"); // "customer", "storekeeper", "admin", or "kiosk"
   const [customerId, setCustomerId] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
@@ -75,6 +76,8 @@ export default function Pages() {
         navigate("/admin");
       } else if (loginType === "storekeeper") {
         navigate("/store");
+      } else if (loginType === "kiosk") {
+        navigate("/kiosk");
       } else {
         navigate("/user");
       }
@@ -359,11 +362,17 @@ export default function Pages() {
           <Route path="/user" element={<UserJourney />} />
           <Route path="/store" element={<StoreKeeper />} />
           <Route path="/admin" element={<Admin />} />
+          <Route
+            path="/kiosk"
+            element={<Chatbot_Kiosk customerId={isLoggedIn || "GUEST"} />}
+          />
         </Routes>
       </main>
 
       {/* Chatbot - Available on all pages */}
-      <ChatBot customerId={isLoggedIn || "GUEST"} />
+      {location.pathname !== "/kiosk" && (
+        <ChatBot customerId={isLoggedIn || "GUEST"} />
+      )}
     </div>
   );
 }

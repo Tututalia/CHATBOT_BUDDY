@@ -509,40 +509,45 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
             return result
 
         # Product is available - show details
+        if offline_available:
+            # Show only the top 3 nearest stores for this customer from the distance table (do not use products table)
+            from database import get_db_session
+            from models import Distance
+            from sqlmodel import select
+
+            session = get_db_session()
+            query = select(Distance).where(Distance.customer_id == customer_id)
+            distances = session.exec(query).all()
+            distances = sorted(
+                [d for d in distances if d.distance is not None], key=lambda d: d.distance)
+            nearest = distances[:3]
+            stores_list = []
+            for d in nearest:
+                stores_list.append({
+                    "store_name": d.store_name,
+                    "distance": d.distance,
+                    "map_url": d.map_url,
+                    "availability": "Available"
+                })
+            session.close()
+            return json.dumps({
+                "tool": "inventory_agent",
+                "type": "store_selection",
+                "storeSelection": {
+                    "title": "Select a store for pickup",
+                    "stores": stores_list
+                }
+            })
+
+        # If only online available, fallback to original string
         result = f"✅ **Product {product_id} is IN STOCK!**\n\n"
         result += f"**{product.product_name}** - ₹{int(product.price):,}\n"
         result += f"**Available Quantity:** {product.quantity} units\n\n"
         result += "📦 **Purchase Options:**\n\n"
-
         if online_available:
             result += "1. 🌐 **Online** - Get it delivered to your home\n\n"
-
-        if offline_available:
-            result += "2. 🏪 **Offline** - Pick up from nearest store\n\n"
-            result += "📍 **Available Stores for Pickup:**\n\n"
-
-            # Get stores from database based on product's store_ids
-            if product.store_ids:
-                store_ids = [s.strip() for s in product.store_ids.split(';')]
-                for i, store_id in enumerate(store_ids[:4], 1):
-                    store = get_store_by_id(store_id)
-                    if store:
-                        result += f"   • **{store.store_name}** (ID: {store.store_id})\n"
-                        result += f"     {store.address} - {random.uniform(2.0, 8.0):.1f} km away\n\n"
-                    else:
-                        result += f"   • **Store {store_id}** - {random.uniform(2.0, 8.0):.1f} km away\n\n"
-            elif product.offline_stores:
-                # Fallback to offline_stores string if store_ids not available
-                stores = [store.strip()
-                          for store in product.offline_stores.split(';')]
-                for i, store_name in enumerate(stores[:4], 1):
-                    result += f"   • **{store_name}** (ID: S{i:03d})\n"
-                    result += f"     {random.choice(['123 Main St', '456 West Ave', '789 Airport Rd', '321 Center Blvd'])} - {random.uniform(2.0, 8.0):.1f} km away\n\n"
-
         result += "\n**How would you like to proceed?**\n"
         result += "- Type 'online' to buy online with home delivery\n"
-        if offline_available:
-            result += "- To pick up from a store, reply with the store ID (e.g., STR016) or type 'offline'\n"
         return result
 
     # If search_query is provided, search products from database
@@ -946,17 +951,23 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
     """
     try:
         with get_db_session() as session:
-            # Get only fresh cart items (channel still "pending", not yet processed)
-            # This excludes old offline items (channel="offline", status="pending")
+            # Fetch cart items with status 'pending' and channel is NULL or empty (not set)
             cart_items = cart_crud.filter(
                 session,
-                filters={"customer_id": customer_id,
-                         "status": "pending",
-                         "channel": "pending"},
-                operators={"customer_id": "==",
-                           "status": "==", "channel": "=="},
+                filters={"customer_id": customer_id, "status": "pending"},
+                operators={"customer_id": "==", "status": "=="},
                 limit=50
             )
+            # Only include items where channel is None or empty string (not set yet)
+            # cart_items = [item for item in cart_items if not getattr(
+            #     item, 'channel', None)]
+            # Include items that are pending and not yet paid
+            cart_items = [
+                item for item in cart_items
+                if item.status == "pending"
+            ]
+
+            print(customer_id)
 
             if not cart_items:
                 return "🛒 Your cart is empty. Please add products to cart first."
@@ -1035,7 +1046,7 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
 
 
 @tool
-def fulfillment_agent(purchase_type: str = "online", store_name: str = "", customer_id: str = None, order_id: str = None) -> str:
+def fulfillment_agent(purchase_type: str = "online", store_name: str = "", customer_id: str | None = None, order_id: str | None = None) -> str:
     """
     Handles order fulfillment for cart items - delivery for online, store pickup for offline.
     For ONLINE: Call this after payment is complete. Will automatically trigger loyalty_agent and post_purchase_agent.
@@ -1045,19 +1056,22 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         purchase_type: Either 'online' or 'offline'
         store_name: Name of the selected store (REQUIRED for offline, leave empty for online)
         customer_id: The customer ID
-        order_id: The order ID from payment (required)
+        order_id: The order ID from payment (required for online; optional for offline)
 
     Returns:
         Fulfillment details and order tracking info with auto-call instructions for online
     """
+    response_payload = {
+        "id": "fulfillment_agent",
+        "type": "fulfillment",
+        "response": ""
+    }
     if not order_id:
         order_id = f"ORD{random.randint(100000, 999999)}"
 
     # Get cart items to show in fulfillment
     try:
         with get_db_session() as session:
-            # For online: get paid cart items with online channel (set by payment_agent)
-            # For offline: get pending cart items with pending channel (not yet processed)
             if purchase_type.lower() == "online":
                 cart_items = cart_crud.filter(
                     session,
@@ -1069,14 +1083,13 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                     limit=50
                 )
             else:
-                # Only get items that haven't been processed yet (channel still "pending")
+                # For offline, show cart items with status 'pending' and channel 'offline' or 'pending'
                 cart_items = cart_crud.filter(
                     session,
                     filters={"customer_id": customer_id,
-                             "status": "pending",
-                             "channel": "pending"},
+                             "status": "pending"},
                     operators={"customer_id": "==",
-                               "status": "==", "channel": "=="},
+                               "status": "=="},
                     limit=50
                 )
 
@@ -1103,47 +1116,39 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         cart_summary = []
         total_amount = 0
 
+    # Always return the fulfillment agent message in a dict with 'response' key for frontend
     if purchase_type.lower() == "online":
-        # Add delay for online purchases
         print("⏳ Confirming your order...")
         time.sleep(2.5)
-
         delivery_date = "3-5 business days"
-        result = f"📦 **Order Confirmed!**\\n\\n"
-        result += f"Order ID: {order_id}\\n"
-        result += f"Total Items: {len(cart_summary)}\\n"
-        result += f"Total Amount: ₹{int(total_amount):,}\\n"
-        result += f"Delivery Type: Home Delivery\\n"
-        result += f"Expected Delivery: {delivery_date}\\n\\n"
-
+        result = f"📦 **Order Confirmed!**\n\n"
+        result += f"Order ID: {order_id}\n"
+        result += f"Total Items: {len(cart_summary)}\n"
+        result += f"Total Amount: ₹{int(total_amount):,}\n"
+        result += f"Delivery Type: Home Delivery\n"
+        result += f"Expected Delivery: {delivery_date}\n\n"
         if cart_summary:
-            result += "**Your Items:**\\n"
+            result += "**Your Items:**\n"
             for item in cart_summary:
-                result += f"- {item['product_name']} × {item['quantity']} = ₹{int(item['price'] * item['quantity']):,}\\n"
-            result += "\\n"
-
-        result += "You can track your order with the Order ID.\\n\\n"
-
-        # Auto-call loyalty agent and post-purchase agent for online orders
-        result += f"[SYSTEM: AUTOMATICALLY call loyalty_agent with order_id='{order_id}' and customer_id='{customer_id}']\\n"
+                result += f"- {item['product_name']} × {item['quantity']} = ₹{int(item['price'] * item['quantity']):,}\n"
+            result += "\n"
+        result += "You can track your order with the Order ID.\n\n"
+        result += f"[SYSTEM: AUTOMATICALLY call loyalty_agent with order_id='{order_id}' and customer_id='{customer_id}']\n"
         result += f"[SYSTEM: After loyalty_agent completes, AUTOMATICALLY call post_purchase_agent with order_id='{order_id}' and customer_id='{customer_id}']"
-    else:
-        # Offline purchase
-        if not store_name or store_name == "Store":
-            return "⚠️ Please select a specific store from the available options for pickup. Which store would you like to visit?"
+        response_payload["response"] = result
+        return response_payload
 
-        # Get store details
+    else:
+        if not store_name or store_name == "Store":
+            return {"response": "⚠️ Please select a specific store from the available options for pickup. Which store would you like to visit?"}
         store_details = None
         all_stores = get_all_stores()
         for store in all_stores:
             if store_name.lower() in store.store_name.lower() or store_name == store.store_id:
                 store_details = store
                 break
-
         store_display_name = store_details.store_name if store_details else store_name
         store_address = store_details.address if store_details else "Please check store location"
-
-        # Update cart items to offline with store info
         try:
             with get_db_session() as session:
                 for item in cart_items:
@@ -1153,27 +1158,24 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                     })
         except Exception as e:
             print(f"Warning: failed to update cart for offline: {e}")
-
-        result = f"🏪 **In-Store Pickup Confirmed!**\\n\\n"
-        result += f"Order ID: {order_id}\\n"
-        result += f"Total Items: {len(cart_summary)}\\n"
-        result += f"Total Amount: ₹{int(total_amount):,}\\n"
-        result += f"Pickup Store: {store_display_name}\\n"
-        result += f"Store Address: {store_address}\\n"
-        result += f"Status: Ready for pickup in 2 hours\\n\\n"
-
+        result = f"🏪 **In-Store Pickup Confirmed!**\n\n"
+        result += f"Order ID: {order_id}\n"
+        result += f"Total Items: {len(cart_summary)}\n"
+        result += f"Total Amount: ₹{int(total_amount):,}\n"
+        result += f"Pickup Store: {store_display_name}\n"
+        result += f"Store Address: {store_address}\n"
+        result += f"Status: Ready for pickup in 2 hours\n\n"
         if cart_summary:
-            result += "**Your Items:**\\n"
+            result += "**Your Items:**\n"
             for item in cart_summary:
-                result += f"- {item['product_name']} × {item['quantity']}\\n"
-            result += "\\n"
-
-        result += "Please visit the store to complete your purchase.\\n"
-        result += "💡 Show this Order ID at the store kiosk.\\n\\n"
-        result += "Thank you for choosing us! Have a great day! 🛍️\\n\\n"
+                result += f"- {item['product_name']} × {item['quantity']}\n"
+            result += "\n"
+        result += "Please visit the store to complete your purchase.\n"
+        result += "💡 Show this Order ID at the store kiosk.\n\n"
+        result += "Thank you for choosing us! Have a great day! 🛍️\n\n"
         result += "[SYSTEM: CONVERSATION_COMPLETE - Offline store pickup. Transfer to in-store kiosk. END conversation.]"
-
-    return result
+        response_payload["response"] = result
+    return response_payload
 
 
 @tool
@@ -1569,19 +1571,19 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
 - After adding, ask if they want to add more products or view their cart
 
 **STEP 3: VIEW CART & CONFIRMATION**
-- When user says "view cart" or "show cart", call `view_cart_agent` with customer_id
+- When user says "view cart" or "show cart" or "please show my items in the cart", call `view_cart_agent` with customer_id
 - Show all cart items with quantities and total amount
 - Ask if they want to remove any items, add more products, or proceed to payment
 - If they want to remove, use `remove_from_cart_agent` with order_id
 
 **STEP 4: PROCEED TO CHECKOUT (CHOOSE CHANNEL)**
-- When user says "proceed", "checkout", "continue", "buy", "purchase", "pay", or confirms they want to checkout, call `choose_channel_agent` with customer_id
+- When user says "proceed", "checkout", "continue", "buy", "purchase", "pay", "proceed with payment", or confirms they want to checkout, call `choose_channel_agent` with customer_id
 - DO NOT call view_cart_agent again when user says proceed
 - `choose_channel_agent` displays ONLINE (home delivery with loyalty rewards) vs OFFLINE (store pickup) options
 - After channel selection, IMMEDIATELY move to the appropriate flow below (do NOT call choose_channel_agent again)
 
 **STEP 5A: OFFLINE FLOW - STORE SELECTION**
-- If user types "offline" or selects offline option:
+- If user types "offline" or selects offline option or wants to pick up from store:
   
   **STAGE 1: Show Available Stores (ONE TIME ONLY)**
   1. First, call `view_cart_agent` to get the list of cart items and identify the first product_id
@@ -1618,6 +1620,7 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
 - If user types "online" or confirms online purchase:
   1. IMMEDIATELY call `payment_agent` with customer_id (no payment_method parameter) to show 4 payment options: UPI, Credit Card, Debit Card, Net Banking
   2. DO NOT ask to view cart again, DO NOT call choose_channel_agent again
+  3. DO NOT call view_cart_agent again (cart already known)
 **STEP 5B: ONLINE FLOW - TWO-STAGE PAYMENT PROCESS**
 - If user types "online" or confirms online purchase:
   
@@ -1632,7 +1635,9 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
      - IMMEDIATELY call `payment_agent(payment_method="<method>", customer_id="{customer_id}")`
      - Examples: User says "upi" → call payment_agent(payment_method="upi", customer_id="{customer_id}")
      - DO NOT ask for confirmation, DO NOT call view_cart_agent, DO NOT call payment_agent a third time
-     - This SECOND call to payment_agent processes the payment and returns success
+     - This SECOND call to payment_agent processes the payment and returns success always
+     - Payment_agent returns "Payment Successful!" always and No other messages
+     - NEVER return "It seems your cart is empty. Please add some products to your cart before proceeding with the payment. Would you like to search for products now?" at this stage - cart is already known to have items. ONLY return payment success message.
   
   **STAGE 3: After Payment Success**
   3. After payment_agent returns "Payment Successful", IMMEDIATELY call `fulfillment_agent(purchase_type="online", customer_id="{customer_id}")`

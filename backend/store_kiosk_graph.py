@@ -114,7 +114,7 @@ def payment_prompt_node(state: KioskState):
         if "proceed" in content_lower or "pay" in content_lower or "yes" in content_lower:
             # User confirmed - proceed with all items in cart
             return {
-                "messages": [AIMessage(content="Great! Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "messages": [AIMessage(content="Great! Please type your payment method (UPI, Credit Card, Debit Card, Cash on Delivery) to proceed.")],
                 "pay_all": True  # Flag to indicate paying for all items
             }
 
@@ -125,7 +125,7 @@ def payment_prompt_node(state: KioskState):
             print(
                 f"[DEBUG] Selected order: {selected_order.order_id}, product: {selected_order.product_id}, store: {selected_order.store_id}")
             return {
-                "messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit Card, Debit Card, Cash on Delivery) to proceed.")],
                 "order_id": selected_order.order_id,
                 "product_id": selected_order.product_id,
                 "store_id": selected_order.store_id,
@@ -149,47 +149,55 @@ def payment_method_node(state: KioskState):
     last_msg = state["messages"][-1] if state["messages"] else None
     if last_msg and isinstance(last_msg, HumanMessage):
         content = last_msg.content.lower()
-        for method in ["upi", "credit", "debit", "net banking"]:
-            if method in content:
-                customer_id = state["customer_id"]
+        method_selected = None
+        if "cash on delivery" in content or content.strip() == "cod" or " cod" in content:
+            method_selected = "cash on delivery"
+        else:
+            for method in ["upi", "credit", "debit", "net banking"]:
+                if method in content:
+                    method_selected = method
+                    break
 
-                try:
-                    from intelligent_agent_graph import get_product_by_id
-                    with get_db_session() as session:
-                        if pay_all:
-                            # Process all items in cart
-                            pending_orders = get_pending_offline_orders(
-                                customer_id)
-                            if not pending_orders:
-                                return {"messages": [AIMessage(content="❌ No items found in cart.")]}
+        if method_selected:
+            customer_id = state["customer_id"]
 
-                            total_amount = 0
-                            order_details = []
+            try:
+                from intelligent_agent_graph import get_product_by_id
+                with get_db_session() as session:
+                    if pay_all:
+                        # Process all items in cart
+                        pending_orders = get_pending_offline_orders(
+                            customer_id)
+                        if not pending_orders:
+                            return {"messages": [AIMessage(content="❌ No items found in cart.")]}
 
-                            for order in pending_orders:
-                                # Get product details
-                                product = get_product_by_id(order.product_id)
-                                if product:
-                                    qty = getattr(order, 'quantity', 1)
-                                    # Calculate discount price
-                                    original_price = product.price
-                                    discount = getattr(
-                                        product, 'discount', 0) or 0
-                                    discount_price = round(
-                                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
-                                    item_total = discount_price * qty
-                                    total_amount += item_total
-                                    order_details.append(
-                                        f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
+                        total_amount = 0
+                        order_details = []
 
-                                    # Update cart status to 'paid'
-                                    order.status = 'paid'
+                        for order in pending_orders:
+                            # Get product details
+                            product = get_product_by_id(order.product_id)
+                            if product:
+                                qty = getattr(order, 'quantity', 1)
+                                # Calculate discount price
+                                original_price = product.price
+                                discount = getattr(
+                                    product, 'discount', 0) or 0
+                                discount_price = round(
+                                    original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                                item_total = discount_price * qty
+                                total_amount += item_total
+                                order_details.append(
+                                    f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
 
-                            session.commit()
+                                # Update cart status to 'paid'
+                                order.status = 'paid'
 
-                            payment_msg = f"""✅ **Payment Successful!**
+                        session.commit()
 
-Payment Method: {method.upper()}
+                        payment_msg = f"""✅ **Payment Successful!**
+
+Payment Method: {method_selected.upper()}
 Items Paid:
 {chr(10).join(order_details)}
 
@@ -197,46 +205,46 @@ Total Amount Paid: ₹{total_amount:.2f}
 
 Your orders are now ready for pickup. Please proceed to the store counter."""
 
-                            # Store first order details for subsequent nodes
-                            first_order = pending_orders[0]
-                            return {
-                                "messages": [AIMessage(content=payment_msg)],
-                                "payment_completed": True,
-                                "order_id": first_order.order_id,
-                                "product_id": first_order.product_id,
-                                "store_id": first_order.store_id,
-                                "all_orders": [{"order_id": o.order_id, "product_id": o.product_id, "store_id": o.store_id} for o in pending_orders]
-                            }
-                        else:
-                            # Process single item
-                            product_id = state["product_id"]
-                            order_id = state["order_id"]
+                        # Store first order details for subsequent nodes
+                        first_order = pending_orders[0]
+                        return {
+                            "messages": [AIMessage(content=payment_msg)],
+                            "payment_completed": True,
+                            "order_id": first_order.order_id,
+                            "product_id": first_order.product_id,
+                            "store_id": first_order.store_id,
+                            "all_orders": [{"order_id": o.order_id, "product_id": o.product_id, "store_id": o.store_id} for o in pending_orders]
+                        }
+                    else:
+                        # Process single item
+                        product_id = state["product_id"]
+                        order_id = state["order_id"]
 
-                            # Get cart item
-                            cart_item = cart_crud.get_by_id(session, order_id)
-                            if not cart_item:
-                                return {"messages": [AIMessage(content="❌ Order not found. Please try again.")]}
+                        # Get cart item
+                        cart_item = cart_crud.get_by_id(session, order_id)
+                        if not cart_item:
+                            return {"messages": [AIMessage(content="❌ Order not found. Please try again.")]}
 
-                            # Get product details
-                            product = get_product_by_id(product_id)
-                            if not product:
-                                return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
+                        # Get product details
+                        product = get_product_by_id(product_id)
+                        if not product:
+                            return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
 
-                            qty = getattr(cart_item, 'quantity', 1)
-                            # Calculate discount price
-                            original_price = product.price
-                            discount = getattr(product, 'discount', 0) or 0
-                            discount_price = round(
-                                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
-                            total_amount = discount_price * qty
+                        qty = getattr(cart_item, 'quantity', 1)
+                        # Calculate discount price
+                        original_price = product.price
+                        discount = getattr(product, 'discount', 0) or 0
+                        discount_price = round(
+                            original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                        total_amount = discount_price * qty
 
-                            # Update cart status to 'paid' but keep channel as 'offline'
-                            cart_item.status = 'paid'
-                            session.commit()
+                        # Update cart status to 'paid' but keep channel as 'offline'
+                        cart_item.status = 'paid'
+                        session.commit()
 
-                            payment_msg = f"""✅ **Payment Successful!**
+                        payment_msg = f"""✅ **Payment Successful!**
 
-Payment Method: {method.upper()}
+Payment Method: {method_selected.upper()}
 Order ID: {order_id}
 Product: {product.product_name}
 Quantity: {qty}
@@ -244,15 +252,15 @@ Amount Paid: ₹{total_amount:.2f}
 
 Your order is now ready for pickup. Please proceed to the store counter."""
 
-                            return {"messages": [AIMessage(content=payment_msg)], "payment_completed": True}
+                        return {"messages": [AIMessage(content=payment_msg)], "payment_completed": True}
 
-                except Exception as e:
-                    print(f"Error processing payment: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    return {"messages": [AIMessage(content=f"❌ Payment processing failed: {str(e)}. Please try again.")]}
+            except Exception as e:
+                print(f"Error processing payment: {e}")
+                import traceback
+                traceback.print_exc()
+                return {"messages": [AIMessage(content=f"❌ Payment processing failed: {str(e)}. Please try again.")]}
 
-        return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, or Net Banking.")]}
+        return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, Cash on Delivery, or Net Banking.")]}
     return {"messages": []}
 
 # ============ Node 3: Fulfillment Agent ============

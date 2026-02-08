@@ -13,7 +13,6 @@
 //   return response.data;
 // };
 
-
 import axios from "axios";
 
 export const chatWithAgent = async (
@@ -29,10 +28,16 @@ export const chatWithAgent = async (
   return response.data;
 };
 
-export const gethistory = async (
-  customerId,
-  
-) => {
-  const response = await axios.get(`http://localhost:8000/api/payload/${customerId}`);
+export const gethistory = async (customerId) => {
+  const response = await axios.get(
+    `http://localhost:8000/api/payload/${customerId}`,
+  );
+  return response.data;
+};
+
+export const getCustomerProfile = async (customerId, roleId = "1") => {
+  const response = await axios.get(
+    `http://localhost:8000/api/customer/${customerId}/${roleId}`,
+  );
   return response.data;
 };

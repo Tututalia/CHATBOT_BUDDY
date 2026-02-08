@@ -185,3 +185,4 @@ class Distance(SQLModel, table=True):
     store_name: str
     store_address: str
     distance: float  # Distance in kilometers
+    map_url: Optional[str] = None  # URL to Google Maps directions

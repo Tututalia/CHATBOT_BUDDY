@@ -1,0 +1,23 @@
+from database import get_db_session
+from models import Distance
+from sqlmodel import select
+from sqlalchemy import text
+
+
+def update_distance_table():
+    session = get_db_session()
+    # Set all distance values to 0 (since NULL is not allowed)
+    session.execute(text("UPDATE distance SET distance = 0"))
+    # Add new column map_url if not exists
+    try:
+        session.execute(text("ALTER TABLE distance ADD COLUMN map_url TEXT"))
+    except Exception as e:
+        # Ignore error if column already exists
+        print("map_url column may already exist.")
+    session.commit()
+    session.close()
+    print("All distance values set to 0 and map_url column added.")
+
+
+if __name__ == "__main__":
+    update_distance_table()
