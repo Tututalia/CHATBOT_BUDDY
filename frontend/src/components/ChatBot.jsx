@@ -1933,7 +1933,15 @@ export default function ChatBot({ customerId }) {
             >
               <div className="timeline-header">
                 <span className="timeline-icon">⚡</span>
-                <h3>Agent Timeline</h3>
+                <div className="timeline-header-actions">
+                  <span className="web-badge">Web</span>
+                  <span className="status-badge">
+                    <span className="status-label">Status: </span>
+                    <span className="status-value">
+                      {isLoading ? "Processing" : "Active"}
+                    </span>
+                  </span>
+                </div>
                 <button
                   className="timeline-close-btn"
                   onClick={() => setIsTimelineOpen(false)}
@@ -2044,18 +2052,46 @@ export default function ChatBot({ customerId }) {
                     <span className="bot-icon">🤖</span>
                   </div>
                   <div className="header-text">
-                    <h3>AI Orchestrator</h3>
+                    <h3>RetailBuddy</h3>
                     <p>In-store multi-agent automation</p>
                   </div>
                 </div>
                 <div className="header-actions">
-                  <span className="web-badge">Web</span>
-                  <span className="status-badge">
-                    <span className="status-label">Status: </span>
-                    <span className="status-value">
-                      {isLoading ? "Processing" : "Active"}
-                    </span>
-                  </span>
+                  <div className="action-tools">
+                    <span className="action-tools-label">Action Tools</span>
+                    <div className="action-tools-buttons">
+                      <button
+                        className="action-tool-btn"
+                        onClick={() => {
+                          setInputValue("proceed");
+                          setTimeout(() => sendMessage(), 0);
+                        }}
+                        disabled={isLoading}
+                        title="Go For Payment"
+                      >
+                        Go For Payment
+                      </button>
+                      <button
+                        className="action-tool-btn"
+                        onClick={() => handleViewCart(false)}
+                        disabled={isLoading}
+                        title="View Cart"
+                      >
+                        View Cart
+                      </button>
+                      <button
+                        className="action-tool-btn"
+                        onClick={() => {
+                          setInputValue("post purchase support");
+                          setTimeout(() => sendMessage(), 0);
+                        }}
+                        disabled={isLoading}
+                        title="Post Purchase Support"
+                      >
+                        Post Purchase Support
+                      </button>
+                    </div>
+                  </div>
                   <button className="close-btn" onClick={toggleChatbot}>
                     ✕
                   </button>

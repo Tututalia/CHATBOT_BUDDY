@@ -28,7 +28,7 @@ import asyncio
 import re
 from sqlmodel import Session, select, func
 from dotenv import load_dotenv
-from whatsapp import send_message
+from whatsapp import send_message, get_text_message_input
 from security import signature_required
 from fastapi.responses import JSONResponse, PlainTextResponse
 from datetime import datetime
@@ -2313,6 +2313,76 @@ async def webhook_post(request: Request):
     # Get body from request state (stored by decorator)
     import json
     # import pdb; pdb.set_trace()
-    body = json.loads(request.state.body)
-    print(body)
-    return await handle_message(body)
+
+    try:
+        body = json.loads(request.state.body)
+        print(body)
+        wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
+        name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
+        contact_number = body["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
+
+        message = body["entry"][0]["changes"][0]["value"]["messages"][0]
+        message_body = message["text"]["body"]
+        wp_data = ChatMessage(customer_id="CUST001",
+                              message=message_body, conversation_history=[])
+        res_data = await chat_with_agent(wp_data)
+
+        async def _intent_20_words_from_json(res_json) -> str:
+            """Use gpt-4o-mini to digest res_data JSON and return its intent in <=20 words."""
+            try:
+                import os
+                from langchain_openai import ChatOpenAI
+
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    return ""
+
+                try:
+                    payload_text = json.dumps(res_json, ensure_ascii=False)
+                except Exception:
+                    payload_text = str(res_json)
+
+                llm = ChatOpenAI(model="gpt-4o-mini",
+                                 temperature=0.2, api_key=api_key)
+                prompt = (
+                    "You will receive a JSON object that represents an agent response. "
+                    "Write the intent of the JSON for an end-user in 120 words or fewer. "
+                    "If user is looking for a product,you should return the product name and price also include atleast 3 products. "
+                    "Plain text only. No emojis. No markdown. Output ONLY the sentence.\n\n"
+                    f"JSON:\n{payload_text}"
+                )
+
+                resp = await llm.ainvoke(prompt)
+                text = getattr(resp, "content", resp)
+                text = (text or "").strip()
+            except Exception:
+                return ""
+
+            # Enforce <=120 words even if the model overshoots.
+            words = text.split()
+            if len(words) > 120:
+                text = " ".join(words[:120])
+            return text
+
+        bot_response = await _intent_20_words_from_json(res_data)
+        if not bot_response:
+            # Fallback to existing fields if LLM/key fails
+            bot_response = (
+                res_data.get("responses", {}).get("default")
+                if isinstance(res_data, dict)
+                else ""
+            )
+        if not bot_response:
+            bot_response = "OK."
+        print(bot_response)
+        print("********")
+        print(res_data)
+        print("********")
+        print(contact_number)
+
+        wp_payload = get_text_message_input(contact_number, bot_response)
+        send_message(wp_payload)
+
+        return True
+    except Exception as e:
+        pass

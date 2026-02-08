@@ -38,6 +38,10 @@ export default function Chatbot_Kiosk({ customerId }) {
   const [agentTimeline, setAgentTimeline] = useState([]);
   const seenTimelineToolsRef = useRef(new Set());
 
+  const [barcodePanelOpen, setBarcodePanelOpen] = useState(false);
+  const [barcodeItemCode, setBarcodeItemCode] = useState("");
+  const [barcodeQty, setBarcodeQty] = useState(1);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -569,6 +573,82 @@ export default function Chatbot_Kiosk({ customerId }) {
     }
   };
 
+  const triggerPaymentFlow = async () => {
+    if (isLoading) return;
+    await sendToBackend("proceed to payment");
+  };
+
+  const handleBarcodeQtyChange = (delta) => {
+    setBarcodeQty((prev) => Math.max(1, Number(prev || 1) + delta));
+  };
+
+  const submitBarcodeAddToCart = async (event) => {
+    event?.preventDefault?.();
+    const itemCode = (barcodeItemCode || "").trim();
+    const qty = Math.max(1, Number(barcodeQty || 1));
+    if (!customerId || !itemCode || isLoading) return;
+
+    setIsLoading(true);
+    pushTimelineEntry({
+      action: "add_to_cart_agent",
+      tool: "add_to_cart_agent",
+      status: "in-progress",
+      logs: [
+        {
+          time: formatLocalTime(),
+          text: `system → add_to_cart_agent: product_id=${itemCode}, quantity=${qty}`,
+          variant: "system",
+        },
+      ],
+    });
+
+    try {
+      const res = await fetch(CHAT_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `add to cart product id ${itemCode} quantity ${qty}`,
+          customer_id: customerId,
+        }),
+      });
+      const data = await res.json();
+      const responseText =
+        typeof data === "string" ? data : data.response || data.message || "";
+
+      if (responseText) {
+        addMessage({
+          type: "ai",
+          text: responseText,
+          timestamp: new Date(),
+        });
+      }
+
+      await refreshCartSilently();
+
+      setBarcodePanelOpen(false);
+      setBarcodeItemCode("");
+      setBarcodeQty(1);
+      pushTimelineEntry({
+        action: "add_to_cart_agent",
+        tool: "add_to_cart_agent",
+        status: "completed",
+      });
+    } catch {
+      addMessage({
+        type: "ai",
+        text: "Sorry, I couldn't add that item. Please try again.",
+        timestamp: new Date(),
+      });
+      pushTimelineEntry({
+        action: "add_to_cart_agent",
+        tool: "add_to_cart_agent",
+        status: "error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleRemoveFromCart = async (orderId, productName) => {
     if (!customerId || !orderId) return;
     setIsLoading(true);
@@ -1057,7 +1137,15 @@ export default function Chatbot_Kiosk({ customerId }) {
         >
           <div className="kiosk-timeline-header">
             <span className="kiosk-timeline-icon">⚡</span>
-            <h3>Agent Timeline</h3>
+            <div className="kiosk-timeline-header-badges">
+              <span className="kiosk-web-badge">Kiosk</span>
+              <span className="kiosk-status-badge">
+                <span className="kiosk-status-label">Status: </span>
+                <span className="kiosk-status-value">
+                  {isLoading ? "Processing" : "Active"}
+                </span>
+              </span>
+            </div>
             <button
               className="kiosk-timeline-close-btn"
               onClick={() => setIsTimelineOpen(false)}
@@ -1158,13 +1246,79 @@ export default function Chatbot_Kiosk({ customerId }) {
               </div>
             </div>
             <div className="kiosk-header-actions">
-              <span className="kiosk-web-badge">Kiosk</span>
-              <span className="kiosk-status-badge">
-                <span className="kiosk-status-label">Status: </span>
-                <span className="kiosk-status-value">
-                  {isLoading ? "Processing" : "Active"}
-                </span>
-              </span>
+              <div className="kiosk-action-tools">
+                <span className="kiosk-action-tools-label">Action Tools</span>
+                <button
+                  className="kiosk-action-tools-btn primary"
+                  onClick={triggerPaymentFlow}
+                  disabled={isLoading}
+                  type="button"
+                >
+                  Go For Payment
+                </button>
+                <button
+                  className="kiosk-action-tools-btn"
+                  onClick={() => setBarcodePanelOpen((prev) => !prev)}
+                  disabled={isLoading}
+                  type="button"
+                >
+                  Bar Code ID
+                </button>
+
+                {barcodePanelOpen && (
+                  <form
+                    className="kiosk-barcode-panel"
+                    onSubmit={submitBarcodeAddToCart}
+                  >
+                    <div className="kiosk-barcode-field">
+                      <label className="kiosk-barcode-label">Item Code</label>
+                      <input
+                        className="kiosk-barcode-input"
+                        type="text"
+                        value={barcodeItemCode}
+                        onChange={(e) => setBarcodeItemCode(e.target.value)}
+                        placeholder="e.g. PRD033"
+                        disabled={isLoading}
+                      />
+                    </div>
+
+                    <div className="kiosk-barcode-field">
+                      <label className="kiosk-barcode-label">Quantity</label>
+                      <div className="kiosk-barcode-qty-controls">
+                        <button
+                          type="button"
+                          className="kiosk-barcode-qty-btn"
+                          onClick={() => handleBarcodeQtyChange(-1)}
+                          disabled={isLoading || barcodeQty <= 1}
+                        >
+                          −
+                        </button>
+                        <span className="kiosk-barcode-qty-value">
+                          {barcodeQty}
+                        </span>
+                        <button
+                          type="button"
+                          className="kiosk-barcode-qty-btn"
+                          onClick={() => handleBarcodeQtyChange(1)}
+                          disabled={isLoading}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="kiosk-barcode-actions">
+                      <button
+                        type="submit"
+                        className="kiosk-barcode-submit"
+                        disabled={isLoading || !barcodeItemCode.trim()}
+                      >
+                        Add To Cart
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
               <button
                 className="kiosk-close-btn"
                 onClick={() => setIsOpen(false)}
