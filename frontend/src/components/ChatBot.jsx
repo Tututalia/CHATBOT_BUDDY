@@ -42,11 +42,19 @@ export default function ChatBot({ customerId }) {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [agentTimeline, setAgentTimeline] = useState([]);
   const [welcomeMessage, setWelcomeMessage] = useState("");
   const [lastRecommendations, setLastRecommendations] = useState([]);
+  const [productReviews, setProductReviews] = useState({});
   const [productQuantities, setProductQuantities] = useState({});
   const [conversationLog, setConversationLog] = useState([]);
+  const [isRefundLoading, setIsRefundLoading] = useState(false);
+  const [refundModal, setRefundModal] = useState({
+    open: false,
+    message: "",
+  });
+  const [isRefundGuidelinesOpen, setIsRefundGuidelinesOpen] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
@@ -228,6 +236,45 @@ export default function ChatBot({ customerId }) {
     );
   }, []);
 
+  const fetchReviewsByProductIds = async (productIds) => {
+    try {
+      const ids = Array.from(
+        new Set(
+          (productIds || [])
+            .filter((id) => typeof id === "string" && id.trim().length > 0)
+            .map((id) => id.trim()),
+        ),
+      );
+      if (ids.length === 0) return;
+
+      // Only request the IDs we don't already have.
+      const missing = ids.filter(
+        (id) => typeof productReviews?.[id] !== "number",
+      );
+      if (missing.length === 0) return;
+
+      const idsParam = encodeURIComponent(missing.join("|"));
+      const res = await fetch(
+        `http://localhost:8000/api/feedback/multiple/${idsParam}`,
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || typeof data !== "object" || !data.reviews) return;
+
+      setProductReviews((prev) => ({
+        ...prev,
+        ...data.reviews,
+      }));
+    } catch (e) {
+      // Silent fail: reviews are optional UI enhancement
+    }
+  };
+
+  useEffect(() => {
+    if (!lastRecommendations || lastRecommendations.length === 0) return;
+    fetchReviewsByProductIds(lastRecommendations.map((p) => p?.product_id));
+  }, [lastRecommendations]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -243,6 +290,10 @@ export default function ChatBot({ customerId }) {
   useEffect(() => {
     scrollTimelineToBottom();
   }, [agentTimeline]);
+
+  useEffect(() => {
+    if (!isOpen) setIsQuickActionsOpen(false);
+  }, [isOpen]);
 
   // Auto-scroll to bottom when chatbot is opened and history is restored
   useEffect(() => {
@@ -885,6 +936,92 @@ export default function ChatBot({ customerId }) {
     setIsLoading(false);
   };
 
+  const formatOrderDate = (rawDate) => {
+    if (!rawDate) return "";
+    try {
+      const parsed = new Date(rawDate);
+      if (Number.isNaN(parsed.getTime())) return String(rawDate);
+      return parsed.toLocaleString();
+    } catch {
+      return String(rawDate);
+    }
+  };
+
+  const handleRefundQuickAction = async () => {
+    if (isLoading || isRefundLoading) return;
+    setIsRefundLoading(true);
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/customer/${customerId}/orders/recent?days=7`,
+      );
+      const data = await res.json();
+      const orders = Array.isArray(data?.order_history)
+        ? data.order_history
+        : [];
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "refundOrders",
+          orders,
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "ai",
+          text: "Sorry, I couldn't fetch your last 7 days orders right now.",
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsRefundLoading(false);
+    }
+  };
+
+  const openRefundModal = (order) => {
+    const productName = order?.product_name ? String(order.product_name) : null;
+    const transactionId = order?.transaction_id
+      ? String(order.transaction_id)
+      : null;
+    const purchaseDate = order?.purchase_date
+      ? formatOrderDate(order.purchase_date)
+      : null;
+
+    const orderLineParts = [
+      productName ? `Product: ${productName}` : null,
+      transactionId ? `Order ID: ${transactionId}` : null,
+      purchaseDate ? `Purchased: ${purchaseDate}` : null,
+    ].filter(Boolean);
+
+    const orderLine =
+      orderLineParts.length > 0 ? `${orderLineParts.join("  •  ")}` : "";
+
+    const message = [
+      "Your refund request has been initiated successfully.",
+      orderLine,
+      "",
+      "What happens next:",
+      "• Our pickup partner will collect the item within 2–3 business days.",
+      "• After pickup and verification, the refund will be processed to your original payment method.",
+      "",
+      "Please keep the product packed and ready (tags/invoice if available).",
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+
+    setRefundModal({
+      open: true,
+      message,
+    });
+  };
+
+  const closeRefundModal = () => {
+    setRefundModal((prev) => ({ ...prev, open: false }));
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -919,9 +1056,15 @@ export default function ChatBot({ customerId }) {
   const parseStructuredResponse = (text) => {
     const sections = {
       orderConfirmation: null,
+      storePickupConfirmation: null,
       loyaltyRewards: null,
       postPurchaseSupport: null,
     };
+
+    const cleanedText = (text || "")
+      .replace(/\[SYSTEM:[^\]]*\]/gi, "")
+      .replace(/\r\n/g, "\n")
+      .trim();
 
     // Parse Order Confirmation section
     const orderMatch = text.match(
@@ -983,6 +1126,56 @@ export default function ChatBot({ customerId }) {
         },
         items: items,
         confirmation_message: "Order confirmed and will be dispatched soon",
+      };
+    }
+
+    // Parse In-Store Pickup Confirmation section (fulfillment agent - offline flow)
+    // Expected (example): "🏬 **In-Store Pickup Confirmed!**\n\nOrder ID: ..."
+    const hasPickupConfirmation = /in-store\s+pickup\s+confirmed/i.test(
+      cleanedText,
+    );
+    if (hasPickupConfirmation) {
+      const pickupOrderIdMatch = cleanedText.match(
+        /Order\s*ID\s*:\s*([A-Za-z0-9_-]+)/i,
+      );
+      const pickupTotalItemsMatch = cleanedText.match(
+        /Total\s*Items\s*:\s*(\d+)/i,
+      );
+      const pickupTotalAmountMatch = cleanedText.match(
+        /Total\s*Amount\s*:\s*₹?\s*([\d,]+)/i,
+      );
+      const pickupStoreMatch = cleanedText.match(
+        /Pickup\s*Store\s*:\s*([^\n]+)/i,
+      );
+      const pickupAddressMatch = cleanedText.match(
+        /Store\s*Address\s*:\s*([^\n]+)/i,
+      );
+      const pickupStatusMatch = cleanedText.match(/Status\s*:\s*([^\n]+)/i);
+
+      const itemsSectionMatch = cleanedText.match(
+        /\*\*?Your\s*Items\*\*?:?\s*([\s\S]*?)(?=\n\s*\n|Please\s+visit|Thank\s+you|$)/i,
+      );
+
+      const items = (itemsSectionMatch ? itemsSectionMatch[1] : "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith("-"))
+        .map((l) => l.replace(/^[-\s]+/, "").trim())
+        .filter(Boolean);
+
+      sections.storePickupConfirmation = {
+        title: "In-Store Pickup Confirmed!",
+        order_id: pickupOrderIdMatch ? pickupOrderIdMatch[1] : "N/A",
+        total_items: pickupTotalItemsMatch
+          ? parseInt(pickupTotalItemsMatch[1], 10)
+          : null,
+        total_amount: pickupTotalAmountMatch
+          ? parseInt(pickupTotalAmountMatch[1].replace(/,/g, ""), 10)
+          : null,
+        pickup_store: pickupStoreMatch ? pickupStoreMatch[1].trim() : "",
+        store_address: pickupAddressMatch ? pickupAddressMatch[1].trim() : "",
+        status: pickupStatusMatch ? pickupStatusMatch[1].trim() : "",
+        items,
       };
     }
 
@@ -1754,6 +1947,7 @@ export default function ChatBot({ customerId }) {
         Array.isArray(data.cart_items) &&
         data.cart_items.length > 0
       ) {
+        fetchReviewsByProductIds(data.cart_items.map((i) => i?.product_id));
         const cartCardsMessage = {
           type: "cartItems",
           cartItems: data.cart_items,
@@ -1916,6 +2110,43 @@ export default function ChatBot({ customerId }) {
       {isOpen && (
         <div className="chatbot-window">
           <div className="chatbot-container">
+            {refundModal.open && (
+              <div
+                className="refund-modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Refund confirmation"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) closeRefundModal();
+                }}
+              >
+                <div className="refund-modal">
+                  <div className="refund-modal-header">
+                    <div className="refund-modal-title">Refund Initiated</div>
+                    <button
+                      type="button"
+                      className="refund-modal-close"
+                      onClick={closeRefundModal}
+                      aria-label="Close"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="refund-modal-body">{refundModal.message}</div>
+                  <div className="refund-modal-actions">
+                    <button
+                      type="button"
+                      className="refund-modal-ok"
+                      onClick={closeRefundModal}
+                      autoFocus
+                    >
+                      OK
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Hamburger Menu Button */}
             <button
               className={`timeline-hamburger ${isTimelineOpen ? "open" : ""}`}
@@ -2058,39 +2289,76 @@ export default function ChatBot({ customerId }) {
                 </div>
                 <div className="header-actions">
                   <div className="action-tools">
-                    <span className="action-tools-label">Action Tools</span>
-                    <div className="action-tools-buttons">
-                      <button
-                        className="action-tool-btn"
-                        onClick={() => {
-                          setInputValue("proceed");
-                          setTimeout(() => sendMessage(), 0);
-                        }}
-                        disabled={isLoading}
-                        title="Go For Payment"
-                      >
-                        Go For Payment
-                      </button>
-                      <button
-                        className="action-tool-btn"
-                        onClick={() => handleViewCart(false)}
-                        disabled={isLoading}
-                        title="View Cart"
-                      >
-                        View Cart
-                      </button>
-                      <button
-                        className="action-tool-btn"
-                        onClick={() => {
-                          setInputValue("post purchase support");
-                          setTimeout(() => sendMessage(), 0);
-                        }}
-                        disabled={isLoading}
-                        title="Post Purchase Support"
-                      >
-                        Post Purchase Support
-                      </button>
-                    </div>
+                    <button
+                      className="action-tool-btn quick-actions-toggle"
+                      onClick={() => setIsQuickActionsOpen((prev) => !prev)}
+                      disabled={isLoading}
+                      title="Quick Action Tools"
+                      aria-haspopup="menu"
+                      aria-expanded={isQuickActionsOpen}
+                    >
+                      Quick Action Tools
+                    </button>
+
+                    {isQuickActionsOpen && (
+                      <div className="quick-actions-menu" role="menu">
+                        <button
+                          className="action-tool-btn quick-action-cart"
+                          onClick={() => {
+                            setIsQuickActionsOpen(false);
+                            handleViewCart(false);
+                          }}
+                          disabled={isLoading}
+                          title="View Cart"
+                          role="menuitem"
+                        >
+                          🛒 View Cart
+                        </button>
+                        <span
+                          className="quick-actions-separator"
+                          aria-hidden="true"
+                        >
+                          →
+                        </span>
+                        <button
+                          className="action-tool-btn quick-action-payment"
+                          onClick={() => {
+                            setIsQuickActionsOpen(false);
+                            setInputValue("proceed");
+                            setTimeout(() => sendMessage(), 0);
+                          }}
+                          disabled={isLoading}
+                          title="Go For Payment"
+                          role="menuitem"
+                        >
+                          💳 Go For Payment
+                        </button>
+                        <span
+                          className="quick-actions-separator"
+                          aria-hidden="true"
+                        >
+                          →
+                        </span>
+                        <button
+                          className="action-tool-btn quick-action-support"
+                          onClick={() => {
+                            setIsQuickActionsOpen(false);
+                            setMessages((prev) => [
+                              ...prev,
+                              {
+                                type: "postPurchaseActions",
+                                timestamp: new Date(),
+                              },
+                            ]);
+                          }}
+                          disabled={isLoading}
+                          title="Post Purchase Support"
+                          role="menuitem"
+                        >
+                          🎧 Post Purchase Support
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button className="close-btn" onClick={toggleChatbot}>
                     ✕
@@ -2111,6 +2379,7 @@ export default function ChatBot({ customerId }) {
                       ? parseStructuredResponse(message.text)
                       : {
                           orderConfirmation: null,
+                          storePickupConfirmation: null,
                           loyaltyRewards: null,
                           postPurchaseSupport: null,
                         };
@@ -2121,7 +2390,7 @@ export default function ChatBot({ customerId }) {
                   return (
                     <div
                       key={index}
-                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""}`}
+                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""} ${message.type === "postPurchaseActions" || message.type === "refundOrders" ? "wide-message" : ""}`}
                     >
                       {isWelcomeMessage ? (
                         <div className="welcome-gradient-card">
@@ -2153,6 +2422,222 @@ export default function ChatBot({ customerId }) {
                         </div>
                       ) : (
                         <div className="message-content">
+                          {message.type === "refundOrders" && (
+                            <div className="refund-orders-card">
+                              <div className="refund-orders-header">
+                                <div className="refund-orders-title">
+                                  <span
+                                    className="refund-orders-icon"
+                                    aria-hidden="true"
+                                  >
+                                    🧾
+                                  </span>
+                                  <div className="refund-orders-title-text">
+                                    <h4>Orders eligible for refund</h4>
+                                    <p>Select an order to initiate refund</p>
+                                  </div>
+                                </div>
+
+                                <div className="refund-orders-header-actions">
+                                  <button
+                                    type="button"
+                                    className="refund-guidelines-btn"
+                                    aria-label={
+                                      isRefundGuidelinesOpen
+                                        ? "Hide refund guidelines"
+                                        : "Show refund guidelines"
+                                    }
+                                    title={
+                                      isRefundGuidelinesOpen
+                                        ? "Hide refund guidelines"
+                                        : "Refund guidelines"
+                                    }
+                                    onClick={() =>
+                                      setIsRefundGuidelinesOpen((prev) => !prev)
+                                    }
+                                  >
+                                    📋
+                                  </button>
+                                </div>
+                              </div>
+
+                              {isRefundGuidelinesOpen && (
+                                <div
+                                  className="refund-guidelines-panel"
+                                  role="note"
+                                >
+                                  <div className="refund-guidelines-title">
+                                    REFUND POLICY
+                                  </div>
+                                  <ul className="refund-guidelines-list">
+                                    <li>
+                                      Refunds are eligible for purchases made
+                                      within the last 7 days.
+                                    </li>
+                                    <li>
+                                      Items should be unused, in original
+                                      condition, and include all original
+                                      packaging/tags.
+                                    </li>
+                                    <li>
+                                      Keep your invoice / order ID ready for
+                                      verification.
+                                    </li>
+                                    <li>
+                                      Once approved, refunds are processed to
+                                      the original payment method (timing may
+                                      vary by bank/UPI/card).
+                                    </li>
+                                    <li>
+                                      If the product is damaged/incorrect,
+                                      select the order and start a
+                                      refund—support may ask for photos.
+                                    </li>
+                                  </ul>
+                                </div>
+                              )}
+
+                              {Array.isArray(message.orders) &&
+                              message.orders.length > 0 ? (
+                                <div className="refund-orders-list">
+                                  {message.orders.map((order, idx) => (
+                                    <div
+                                      key={order?.transaction_id || idx}
+                                      className="refund-order-item"
+                                    >
+                                      <div className="refund-order-thumb">
+                                        <img
+                                          src={
+                                            order?.image_reference ||
+                                            "/images/placeholder.png"
+                                          }
+                                          alt={order?.product_name || "Product"}
+                                          className="refund-order-thumb-img"
+                                          onError={(e) => {
+                                            e.target.src =
+                                              "/images/placeholder.png";
+                                          }}
+                                        />
+                                      </div>
+                                      <div className="refund-order-info">
+                                        <div className="refund-order-name">
+                                          {order?.product_name || "Product"}
+                                        </div>
+                                        <div className="refund-order-meta">
+                                          <span>
+                                            Qty: {order?.quantity ?? "-"}
+                                          </span>
+                                          <span>
+                                            Price: ₹{order?.price ?? "-"}
+                                          </span>
+                                          <span>
+                                            Date:{" "}
+                                            {formatOrderDate(
+                                              order?.purchase_date,
+                                            )}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        className="refund-init-btn"
+                                        type="button"
+                                        onClick={() => {
+                                          openRefundModal(order);
+                                        }}
+                                      >
+                                        Refund
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="refund-orders-empty">
+                                  No orders found in the last 7 days.
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {message.type === "postPurchaseActions" && (
+                            <div className="post-purchase-agent-section">
+                              <div className="post-purchase-container post-purchase-actions-card">
+                                <div className="post-purchase-header">
+                                  <span className="post-purchase-icon">🎧</span>
+                                  <div className="post-purchase-header-text">
+                                    <h4>Post Purchase Agent</h4>
+                                    <p>Select an option to continue</p>
+                                  </div>
+                                </div>
+
+                                <div className="quick-actions-grid">
+                                  <button
+                                    className="quick-action-btn return-btn refund-btn"
+                                    onClick={() => {
+                                      handleRefundQuickAction();
+                                    }}
+                                    disabled={isLoading || isRefundLoading}
+                                    type="button"
+                                  >
+                                    <span
+                                      className="action-icon"
+                                      aria-hidden="true"
+                                    >
+                                      💸
+                                    </span>
+                                    <span className="action-text">
+                                      <span className="action-title">
+                                        Refund
+                                      </span>
+                                    </span>
+                                  </button>
+                                  <button
+                                    className="quick-action-btn support-btn"
+                                    onClick={() => {
+                                      setInputValue("customer support");
+                                      setTimeout(() => sendMessage(), 0);
+                                    }}
+                                    disabled={isLoading || isRefundLoading}
+                                    type="button"
+                                  >
+                                    <span
+                                      className="action-icon"
+                                      aria-hidden="true"
+                                    >
+                                      💬
+                                    </span>
+                                    <span className="action-text">
+                                      <span className="action-title">
+                                        Customer support
+                                      </span>
+                                    </span>
+                                  </button>
+                                  <button
+                                    className="quick-action-btn rate-btn feedback-btn"
+                                    onClick={() => {
+                                      setInputValue("feedback");
+                                      setTimeout(() => sendMessage(), 0);
+                                    }}
+                                    disabled={isLoading || isRefundLoading}
+                                    type="button"
+                                  >
+                                    <span
+                                      className="action-icon"
+                                      aria-hidden="true"
+                                    >
+                                      ⭐
+                                    </span>
+                                    <span className="action-text">
+                                      <span className="action-title">
+                                        Feedback
+                                      </span>
+                                    </span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {/* Agent Header */}
                           {message.type === "ai" && message.agent && (
                             <div className="agent-header">
@@ -2243,6 +2728,136 @@ export default function ChatBot({ customerId }) {
                                       .confirmation_message
                                   }
                                 </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Render Store Pickup Confirmation if parsed */}
+                          {structuredData.storePickupConfirmation && (
+                            <div className="fulfillment-agent-section">
+                              <div className="agent-section-title">
+                                Store pickup is confirmed!
+                              </div>
+
+                              <div className="pickup-confirmation-container">
+                                <div className="pickup-header">
+                                  <div className="pickup-header-left">
+                                    <div className="pickup-icon">🏬</div>
+                                    <div className="pickup-header-text">
+                                      <h4>
+                                        {
+                                          structuredData.storePickupConfirmation
+                                            .title
+                                        }
+                                      </h4>
+                                      <p>
+                                        Show the Order ID at the store kiosk to
+                                        collect your items.
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {structuredData.storePickupConfirmation
+                                    .status && (
+                                    <div className="pickup-status-pill">
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .status
+                                      }
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="pickup-details-grid">
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
+                                      Order ID
+                                    </span>
+                                    <span className="detail-value">
+                                      #
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .order_id
+                                      }
+                                    </span>
+                                  </div>
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
+                                      Total Amount
+                                    </span>
+                                    <span className="detail-value amount orange">
+                                      {structuredData.storePickupConfirmation
+                                        .total_amount != null
+                                        ? `₹${structuredData.storePickupConfirmation.total_amount.toLocaleString()}`
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
+                                      Total Items
+                                    </span>
+                                    <span className="detail-value">
+                                      {structuredData.storePickupConfirmation
+                                        .total_items != null
+                                        ? structuredData.storePickupConfirmation
+                                            .total_items
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
+                                      Pickup Store
+                                    </span>
+                                    <span className="detail-value">
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .pickup_store
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {structuredData.storePickupConfirmation
+                                  .store_address && (
+                                  <div className="pickup-address">
+                                    <div className="pickup-address-label">
+                                      Store Address
+                                    </div>
+                                    <div className="pickup-address-value">
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .store_address
+                                      }
+                                    </div>
+                                  </div>
+                                )}
+
+                                {structuredData.storePickupConfirmation.items &&
+                                  structuredData.storePickupConfirmation.items
+                                    .length > 0 && (
+                                    <div className="pickup-items">
+                                      <div className="pickup-items-title">
+                                        Your Items
+                                      </div>
+                                      <div className="pickup-items-list">
+                                        {structuredData.storePickupConfirmation.items.map(
+                                          (item, idx) => (
+                                            <div
+                                              key={idx}
+                                              className="pickup-item-row"
+                                            >
+                                              <span className="pickup-item-dot">
+                                                •
+                                              </span>
+                                              <span className="pickup-item-text">
+                                                {item}
+                                              </span>
+                                            </div>
+                                          ),
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                               </div>
                             </div>
                           )}
@@ -2417,6 +3032,7 @@ export default function ChatBot({ customerId }) {
                           {message.type !== "purchaseMethods" &&
                             message.type !== "paymentMethods" &&
                             !structuredData.orderConfirmation &&
+                            !structuredData.storePickupConfirmation &&
                             !structuredData.loyaltyRewards &&
                             !structuredData.postPurchaseSupport && (
                               <div className="message-text">{displayText}</div>
@@ -3087,26 +3703,41 @@ export default function ChatBot({ customerId }) {
                                     <span className="store-name">
                                       {store.store_name}
                                     </span>
-                                    <span className="store-status">
+                                    <span
+                                      className={`store-status ${
+                                        (store.availability || "")
+                                          .toString()
+                                          .toLowerCase()
+                                          .includes("available")
+                                          ? "available"
+                                          : "unavailable"
+                                      }`}
+                                    >
                                       {store.availability}
                                     </span>
                                   </div>
 
                                   <div className="store-card-actions">
-                                    {/* Distance */}
-                                    <div className="store-action">
+                                    <div
+                                      className="store-action store-distance"
+                                      title="Distance from you"
+                                    >
                                       <span className="action-icon">📍</span>
                                       <span>
-                                        {store.distance.toFixed(2)} km
+                                        {Number.isFinite(store.distance)
+                                          ? store.distance.toFixed(2)
+                                          : store.distance}{" "}
+                                        km
                                       </span>
                                     </div>
 
-                                    {/* View on Map */}
                                     <a
                                       href={store.map_url}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="store-action map-link"
+                                      className="store-action map-btn"
+                                      role="button"
+                                      aria-label={`View ${store.store_name} on map`}
                                     >
                                       <span className="action-icon">🗺️</span>
                                       View on Map
@@ -3176,14 +3807,14 @@ export default function ChatBot({ customerId }) {
                                   </h4>
                                   {(() => {
                                     const selectedCount = message.productCards
-                                      .slice(0, 3)
+                                      .slice(0, 4)
                                       .filter(
                                         (p) =>
                                           productQuantities[p.product_id] &&
                                           productQuantities[p.product_id] > 0,
                                       ).length;
                                     const totalQuantity = message.productCards
-                                      .slice(0, 3)
+                                      .slice(0, 4)
                                       .reduce(
                                         (sum, p) =>
                                           sum +
@@ -3197,7 +3828,7 @@ export default function ChatBot({ customerId }) {
                                         onClick={async () => {
                                           const productsToAdd =
                                             message.productCards
-                                              .slice(0, 3)
+                                              .slice(0, 4)
                                               .filter(
                                                 (p) =>
                                                   productQuantities[
@@ -3293,7 +3924,7 @@ export default function ChatBot({ customerId }) {
                                 </div>
                                 <div className="product-cards-container">
                                   {message.productCards
-                                    .slice(0, 3)
+                                    .slice(0, 4)
                                     .map((product) => {
                                       const quantity =
                                         productQuantities[product.product_id] ||
@@ -3334,8 +3965,22 @@ export default function ChatBot({ customerId }) {
                                             )}
                                           </div>
                                           <div className="product-info">
-                                            <h4 className="product-name">
-                                              {product.product_name}
+                                            <h4 className="product-name product-name-row">
+                                              <span className="product-name-text">
+                                                {product.product_name}
+                                              </span>
+                                              {typeof productReviews?.[
+                                                product.product_id
+                                              ] === "number" && (
+                                                <span className="product-rating">
+                                                  ⭐{" "}
+                                                  {Number(
+                                                    productReviews[
+                                                      product.product_id
+                                                    ],
+                                                  ).toFixed(2)}
+                                                </span>
+                                              )}
                                             </h4>
                                             <div className="product-pricing">
                                               {product.discount &&
@@ -3458,8 +4103,22 @@ export default function ChatBot({ customerId }) {
                                           )}
                                         </div>
                                         <div className="product-info">
-                                          <h4 className="product-name">
-                                            {item.product_name}
+                                          <h4 className="product-name product-name-row">
+                                            <span className="product-name-text">
+                                              {item.product_name}
+                                            </span>
+                                            {typeof productReviews?.[
+                                              item.product_id
+                                            ] === "number" && (
+                                              <span className="product-rating">
+                                                ⭐{" "}
+                                                {Number(
+                                                  productReviews[
+                                                    item.product_id
+                                                  ],
+                                                ).toFixed(2)}
+                                              </span>
+                                            )}
                                           </h4>
                                           <p className="product-id-text">
                                             ID: {item.product_id}

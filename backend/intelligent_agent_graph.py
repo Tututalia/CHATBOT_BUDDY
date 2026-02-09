@@ -24,6 +24,7 @@ import random
 from datetime import datetime
 import os
 import time
+import re
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -84,12 +85,38 @@ def load_products_from_db(
                 filters['season'] = season
                 operators['season'] = 'contains'
 
-            # Get products with filters
-            if filters:
-                products = product_crud.filter(
-                    session, filters, operators, limit=100)
-            else:
-                products = product_crud.get_all(session, limit=100)
+            # NOTE: The products table can contain more than 100 rows.
+            # If we only load the first page, keyword searches can miss matching items.
+            chunk_size = 500
+            max_rows = 5000 if search_query else 1000
+
+            products: List[Product] = []
+            skip = 0
+            while len(products) < max_rows:
+                remaining = max_rows - len(products)
+                limit = min(chunk_size, remaining)
+
+                if filters:
+                    batch = product_crud.filter(
+                        session,
+                        filters,
+                        operators,
+                        skip=skip,
+                        limit=limit,
+                    )
+                else:
+                    batch = product_crud.get_all(
+                        session, skip=skip, limit=limit)
+
+                if not batch:
+                    break
+
+                products.extend(batch)
+                skip += len(batch)
+
+                # If we got fewer than requested, we've reached the end.
+                if len(batch) < limit:
+                    break
 
             # Apply max_price filter if specified
             if max_price is not None:
@@ -132,10 +159,10 @@ def load_products_from_db(
                                     score += 8
                                     matched = True
                                 # Partial matches in other fields
-                                if kw in p.season.lower():
+                                if kw in (getattr(p, 'season', '') or '').lower():
                                     score += 3
                                     matched = True
-                                if kw in p.gender.lower():
+                                if kw in (getattr(p, 'gender', '') or '').lower():
                                     score += 2
                                     matched = True
                                 if p.festival and kw in p.festival.lower():
@@ -236,6 +263,167 @@ def get_customer_orders(customer_id: str) -> List[OrderHistory]:
     except Exception as e:
         print(f"Error getting orders for customer {customer_id}: {e}")
         return []
+
+
+def get_customer_purchased_product_ids(customer_id: str) -> set[str]:
+    """Return a set of product_ids previously purchased by the customer."""
+    if not customer_id:
+        return set()
+    try:
+        orders = get_customer_orders(customer_id)
+        return {o.product_id for o in orders if getattr(o, "product_id", None)}
+    except Exception as e:
+        print(
+            f"Error getting purchased product IDs for customer {customer_id}: {e}")
+        return set()
+
+
+# In-memory memory of what we've already shown per customer+query.
+# Keeps the inventory_agent from recommending the same products again when the customer asks
+# to see more products of the same category/query.
+_SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY: dict[tuple[str, str], set[str]] = {}
+
+
+def _normalize_inventory_query_key(search_query: str) -> str:
+    if not search_query:
+        return ""
+
+    q = "".join(ch.lower() if ch.isalnum() or ch.isspace()
+                else " " for ch in search_query)
+    tokens = [t for t in q.split() if t]
+
+    # Drop generic filler words so: "show me some more kurtis" and "kurti" map to same key.
+    stop = {
+        "show", "me", "find", "search", "get", "want", "looking", "for", "a", "an", "the", "some", "any",
+        "more", "another", "next", "different", "products", "product", "items", "item", "category", "same", "again",
+        "please", "pls", "kindly",
+    }
+    tokens = [t for t in tokens if t not in stop]
+
+    return " ".join(tokens) if tokens else q.strip()
+
+
+def _product_canonical_id(p: Product) -> str | None:
+    return getattr(p, "sku", None) or getattr(p, "product_id", None) or getattr(p, "id", None)
+
+
+def _parse_price_band_from_query(query: str) -> tuple[bool, float | None, float | None, str]:
+    """Parse price-band intent from a natural language query.
+
+    Returns:
+        (is_price_band, min_price, max_price, cleaned_query)
+
+    Examples:
+        "watches above 1000" -> (True, 1000, None, "watches")
+        "kurtis between 1500-2000" -> (True, 1500, 2000, "kurtis")
+        "shirts under 999" -> (True, None, 999, "shirts")
+    """
+    if not query or not query.strip():
+        return (False, None, None, query or "")
+
+    q = query.strip()
+    q_lower = q.lower()
+
+    def _to_number(num_str: str | None, has_k: str | None) -> float | None:
+        if not num_str:
+            return None
+        cleaned = num_str.replace(",", "").replace("₹", "").strip()
+        try:
+            val = float(cleaned)
+        except ValueError:
+            return None
+        if has_k:
+            val *= 1000
+        return val
+
+    # 1) BETWEEN / RANGE patterns
+    between_pat = re.compile(
+        r"\bbetween\b[^0-9₹]*"
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\s*(?:and|to|-)\s*"
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\b",
+        flags=re.IGNORECASE,
+    )
+    m = between_pat.search(q)
+    if m:
+        min_price = _to_number(m.group(2), m.group(3))
+        max_price = _to_number(m.group(5), m.group(6))
+        if min_price is not None and max_price is not None:
+            if max_price < min_price:
+                min_price, max_price = max_price, min_price
+            cleaned_query = (q[: m.span(0)[0]] + " " +
+                             q[m.span(0)[1]:]).strip()
+            cleaned_query = re.sub(
+                r"\b(?:rs|inr|rupees|price)\b", " ", cleaned_query, flags=re.IGNORECASE)
+            cleaned_query = re.sub(r"\s+", " ", cleaned_query).strip()
+            return (True, min_price, max_price, cleaned_query)
+
+    # 2) HYphen range patterns like 1500-2000 (without explicit 'between')
+    hyphen_pat = re.compile(
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\s*-\s*"
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\b",
+        flags=re.IGNORECASE,
+    )
+    m = hyphen_pat.search(q)
+    if m:
+        min_price = _to_number(m.group(2), m.group(3))
+        max_price = _to_number(m.group(5), m.group(6))
+        if min_price is not None and max_price is not None:
+            if max_price < min_price:
+                min_price, max_price = max_price, min_price
+            cleaned_query = (q[: m.span(0)[0]] + " " +
+                             q[m.span(0)[1]:]).strip()
+            cleaned_query = re.sub(
+                r"\b(?:rs|inr|rupees|price)\b", " ", cleaned_query, flags=re.IGNORECASE)
+            cleaned_query = re.sub(r"\s+", " ", cleaned_query).strip()
+            return (True, min_price, max_price, cleaned_query)
+
+    # 3) ABOVE / OVER / MORE THAN patterns
+    above_pat = re.compile(
+        r"\b(?:above|over|more\s+than|greater\s+than|>=)\b[^0-9₹]*"
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\b",
+        flags=re.IGNORECASE,
+    )
+    m = above_pat.search(q)
+    if m:
+        min_price = _to_number(m.group(2), m.group(3))
+        if min_price is not None:
+            cleaned_query = (q[: m.span(0)[0]] + " " +
+                             q[m.span(0)[1]:]).strip()
+            cleaned_query = re.sub(
+                r"\b(?:rs|inr|rupees|price)\b", " ", cleaned_query, flags=re.IGNORECASE)
+            cleaned_query = re.sub(r"\s+", " ", cleaned_query).strip()
+            return (True, min_price, None, cleaned_query)
+
+    # 4) BELOW / UNDER / LESS THAN patterns
+    below_pat = re.compile(
+        r"\b(?:below|under|less\s+than|<=)\b[^0-9₹]*"
+        r"(₹?\s*(\d[\d,]*(?:\.\d+)?))\s*(k)?\b",
+        flags=re.IGNORECASE,
+    )
+    m = below_pat.search(q)
+    if m:
+        max_price = _to_number(m.group(2), m.group(3))
+        if max_price is not None:
+            cleaned_query = (q[: m.span(0)[0]] + " " +
+                             q[m.span(0)[1]:]).strip()
+            cleaned_query = re.sub(
+                r"\b(?:rs|inr|rupees|price)\b", " ", cleaned_query, flags=re.IGNORECASE)
+            cleaned_query = re.sub(r"\s+", " ", cleaned_query).strip()
+            return (True, None, max_price, cleaned_query)
+
+    # Not a price-band query
+    return (False, None, None, q)
+
+
+def _safe_price_value(p: Product) -> float | None:
+    """Best-effort numeric price extraction."""
+    try:
+        val = getattr(p, "price", None)
+        if val is None:
+            return None
+        return float(val)
+    except Exception:
+        return None
 
 
 def format_products_for_recommendation(products: List[Product]) -> str:
@@ -452,8 +640,8 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
     Returns product details (name, category, quantity, price, image) in JSON format.
 
     CUSTOMER TIER-BASED PRODUCT FILTERING:
-    - tier_1 (Premium): Products >₹4000 with <20% discount, with fallbacks for >₹3000
-    - tier_3 (Budget): Products <₹2000 with >40% discount, with fallbacks for high discounts (>30%) or low prices (<₹2500)
+    - tier_1 (Premium): Products >₹1500 with <5% discount, with fallbacks for >₹3000
+    - tier_3 (Budget): Products <₹1000 with >15% discount, with fallbacks for high discounts (>10%) or low prices (<₹1100)
     - tier_2 (Middle): No filtering - shows all products
 
     Args:
@@ -552,13 +740,39 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
 
     # If search_query is provided, search products from database
     if search_query:
-        products = load_products_from_db(search_query=search_query)
+        # Special case: if user asked for a specific price band (above/below/between),
+        # apply that band strictly and SKIP tier-based segmentation for this query.
+        is_price_band, min_price, max_price, cleaned_query = _parse_price_band_from_query(
+            search_query
+        )
+
+        # Strip price tokens from keyword search so "watches above 1000" searches for "watches".
+        # If the cleaned query becomes empty, pass whitespace so we still load a larger page
+        # (but the keyword filter won't run because it produces no keywords).
+        effective_search_query = cleaned_query
+        if is_price_band and not (effective_search_query or "").strip():
+            effective_search_query = " "
+
+        products = load_products_from_db(search_query=effective_search_query)
 
         # Filter products to only show items with quantity > 0 (in stock)
         products = [p for p in products if p.quantity > 0]
 
+        # Apply price band filter (special case). This must happen BEFORE tier segmentation.
+        if is_price_band and (min_price is not None or max_price is not None):
+            if min_price is not None:
+                products = [
+                    p for p in products
+                    if (_safe_price_value(p) is not None and _safe_price_value(p) >= min_price)
+                ]
+            if max_price is not None:
+                products = [
+                    p for p in products
+                    if (_safe_price_value(p) is not None and _safe_price_value(p) <= max_price)
+                ]
+
         # Apply tier-based filtering if customer_id is provided
-        if customer_id:
+        if customer_id and not is_price_band:
             customer = get_customer_by_id(customer_id)
             if customer and customer.customer_type:
                 customer_tier = customer.customer_type
@@ -568,7 +782,7 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                 if customer_tier == "tier_1":
                     filtered_products = [
                         p for p in products
-                        if p.price > 4000 and (getattr(p, 'discount', 0) or 0) < 20
+                        if p.price > 1500 and (getattr(p, 'discount', 0) or 0) < 5
                     ]
                     if not filtered_products:
                         # Fallback: Products >₹3000
@@ -580,22 +794,22 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                         print(
                             f"[DEBUG] Filtered {len(products)} premium products for tier_1 customer")
 
-                # tier_3 (Budget): Products <₹2000 with >40% discount, fallbacks for >30% discount or <₹2500
+                # tier_3 (Budget): Products <₹1000 with >15% discount, fallbacks for >10% discount or <₹1100
                 elif customer_tier == "tier_3":
                     filtered_products = [
                         p for p in products
-                        if p.price < 2000 and (getattr(p, 'discount', 0) or 0) > 40
+                        if p.price < 1000 and (getattr(p, 'discount', 0) or 0) > 15
                     ]
                     if not filtered_products:
-                        # Fallback 1: Products with >30% discount
+                        # Fallback 1: Products with >10% discount
                         filtered_products = [
                             p for p in products
-                            if (getattr(p, 'discount', 0) or 0) > 30
+                            if (getattr(p, 'discount', 0) or 0) > 10
                         ]
                     if not filtered_products:
-                        # Fallback 2: Products <₹2500
+                        # Fallback 2: Products <₹1100
                         filtered_products = [
-                            p for p in products if p.price < 2500]
+                            p for p in products if p.price < 1100]
 
                     if filtered_products:
                         products = filtered_products
@@ -607,22 +821,86 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                     print(
                         f"[DEBUG] tier_2 customer - showing all {len(products)} products (no filtering)")
 
+        # Avoid recommending products the customer already purchased.
+        # Recommend previously purchased items ONLY if all matched items were already purchased.
+        if customer_id:
+            purchased_product_ids = get_customer_purchased_product_ids(
+                customer_id)
+            if purchased_product_ids:
+                unpurchased_products = [
+                    p for p in products
+                    if getattr(p, "product_id", None) not in purchased_product_ids
+                ]
+
+                if unpurchased_products:
+                    products = unpurchased_products
+                    print(
+                        f"[DEBUG] Filtered out previously purchased products for {customer_id}. Remaining: {len(products)}")
+                else:
+                    print(
+                        f"[DEBUG] All matched products were already purchased by {customer_id}; allowing repeats")
+
+        # Avoid recommending the same products again for the same customer + query.
+        # If the customer asks for "more" items of the same category/query, this surfaces the next items.
+        if customer_id:
+            # For price-band queries, include band bounds in the key so different bands
+            # don't incorrectly share the same "already shown" set.
+            cache_source_query = search_query
+            if is_price_band:
+                band_bits = []
+                if min_price is not None:
+                    band_bits.append(
+                        f"min{int(min_price) if float(min_price).is_integer() else min_price}")
+                if max_price is not None:
+                    band_bits.append(
+                        f"max{int(max_price) if float(max_price).is_integer() else max_price}")
+                cache_source_query = f"{cleaned_query} {' '.join(band_bits)}".strip(
+                )
+
+            query_key = _normalize_inventory_query_key(cache_source_query)
+            if query_key:
+                cache_key = (customer_id, query_key)
+                already_shown = _SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY.get(
+                    cache_key, set())
+
+                if already_shown:
+                    unseen_products = [
+                        p for p in products
+                        if (_product_canonical_id(p) not in already_shown)
+                    ]
+                    if unseen_products:
+                        products = unseen_products
+                        print(
+                            f"[DEBUG] Removed already-shown products for {customer_id} query='{query_key}'. Remaining: {len(products)}")
+                    else:
+                        # Exhausted: reset this query so browsing can cycle again.
+                        _SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY[cache_key] = set(
+                        )
+                        print(
+                            f"[DEBUG] No unseen products left for {customer_id} query='{query_key}'. Resetting shown cache for this query")
+
         if not products:
-            # If no matches, get random sample of available products
-            all_products = load_products_from_db()
-            all_products = [p for p in all_products if p.quantity > 0]
-            if all_products:
-                products = random.sample(
-                    all_products, min(4, len(all_products)))
-            else:
-                return json.dumps({
-                    "status": "no_products",
-                    "message": "❌ No products found in stock. Please try again later.",
-                    "products": []
-                })
+            # No matches for the user's query (do not recommend random products)
+            return json.dumps({
+                "status": "no_products",
+                "message": f"❌ No products found matching '{search_query}'. Try a different keyword or category.",
+                "products": []
+            })
 
         # Limit to 4 products
         products = products[:4]
+
+        # Update shown cache AFTER selecting the 4 items.
+        if customer_id:
+            query_key = _normalize_inventory_query_key(search_query)
+            if query_key:
+                cache_key = (customer_id, query_key)
+                shown = _SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY.setdefault(
+                    cache_key, set())
+                for p in products:
+                    pid = _product_canonical_id(p)
+                    if pid:
+                        shown.add(pid)
 
         # Format products as JSON with customer tier info
         product_list = []

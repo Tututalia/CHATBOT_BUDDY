@@ -5,7 +5,11 @@ Store Kiosk Chatbot Workflow (Linear LangGraph)
 - LLM prompts for payment, then processes payment, fulfillment, loyalty, and post-purchase in a linear flow
 """
 
-from crud import cart_crud
+import random
+import time
+from datetime import datetime
+
+from crud import cart_crud, product_crud
 from models import Cart
 from database import get_db_session
 from typing import TypedDict, Annotated, List, Dict, Any
@@ -14,6 +18,132 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_core.tools import tool
 from intelligent_agent_graph import payment_agent, fulfillment_agent, loyalty_agent, post_purchase_agent
+
+
+def _get_offline_store_id_for_customer(customer_id: str) -> str | None:
+    """Resolve the customer's current offline store context from the cart table."""
+    if not customer_id:
+        return None
+    try:
+        with get_db_session() as session:
+            recent = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "channel": "offline"},
+                operators={"customer_id": "==", "channel": "=="},
+                order_by="created_at",
+                order_desc=True,
+                limit=50,
+            )
+
+        for item in recent or []:
+            store_id = getattr(item, "store_id", None)
+            if store_id:
+                return store_id
+        return None
+    except Exception as e:
+        print(f"Error resolving offline store_id for {customer_id}: {e}")
+        return None
+
+
+@tool
+def kiosk_add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
+    """Kiosk-only add-to-cart.
+
+    Requirements:
+    - MUST set channel='offline'
+    - MUST set store_id based on the customer's existing offline cart context
+    - MUST NOT call intelligent_agent_graph.add_to_cart_agent
+    """
+    product_id = (product_id or "").strip()
+    if not product_id:
+        return "❌ Please provide a valid product ID."
+
+    try:
+        quantity = int(quantity)
+    except Exception:
+        quantity = 1
+
+    if quantity <= 0:
+        return "❌ Please specify a valid quantity (greater than 0)."
+
+    if not customer_id:
+        return "❌ Missing customer_id."
+
+    store_id = _get_offline_store_id_for_customer(customer_id)
+    if not store_id:
+        return (
+            "❌ I couldn't determine your pickup store for this offline session. "
+            "Please ask staff for assistance or restart the offline pickup flow."
+        )
+
+    try:
+        with get_db_session() as session:
+            product = product_crud.get_by_id(session, product_id)
+            if not product:
+                return f"❌ Product {product_id} not found."
+
+            if getattr(product, "quantity", 0) < quantity:
+                return (
+                    f"❌ Sorry, only {getattr(product, 'quantity', 0)} units of {product.product_name} "
+                    "are available in stock."
+                )
+
+            # If the same product is already in the offline cart for the same store, increment quantity.
+            existing = cart_crud.filter(
+                session,
+                filters={
+                    "customer_id": customer_id,
+                    "product_id": product_id,
+                    "store_id": store_id,
+                    "channel": "offline",
+                    "status": "pending",
+                },
+                operators={
+                    "customer_id": "==",
+                    "product_id": "==",
+                    "store_id": "==",
+                    "channel": "==",
+                    "status": "==",
+                },
+                limit=1,
+            )
+            if existing:
+                cart_item = existing[0]
+                new_qty = int(getattr(cart_item, "quantity", 1)
+                              or 1) + quantity
+                if getattr(product, "quantity", 0) < new_qty:
+                    return (
+                        f"❌ Sorry, only {getattr(product, 'quantity', 0)} units of {product.product_name} "
+                        "are available in stock."
+                    )
+                cart_crud.update(session, cart_item.order_id,
+                                 {"quantity": new_qty})
+                return (
+                    f"✅ Updated cart: {product.product_name} quantity is now {new_qty} "
+                    f"for pickup store {store_id}."
+                )
+
+            order_id = f"KIOSK{int(time.time() * 1000) % 1000000}{random.randint(100, 999)}"
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cart = Cart(
+                order_id=order_id,
+                customer_id=customer_id,
+                product_id=product_id,
+                store_id=store_id,
+                channel="offline",
+                status="pending",
+                created_at=now,
+                quantity=quantity,
+            )
+            cart_crud.create(session, cart)
+
+            return (
+                f"✅ Added to offline cart for store {store_id}: {product.product_name} "
+                f"(ID: {product_id}) × {quantity}."
+            )
+    except Exception as e:
+        print(f"Error in kiosk_add_to_cart_agent: {e}")
+        return "❌ Error adding product to kiosk cart. Please try again."
 
 # ============ State Definition ============
 

@@ -125,12 +125,40 @@ export default function UserJourney() {
 
   // Calculate product quantities from purchases (for order history)
   const productMap = {};
+  const latestPurchaseDateMap = {};
+
+  const parsePurchaseTime = (rawDate) => {
+    if (!rawDate || typeof rawDate !== "string") return 0;
+    const trimmed = rawDate.trim();
+    if (!trimmed) return 0;
+
+    // Backend often stores as "YYYY-MM-DD HH:MM:SS"; convert to ISO-like for consistent parsing.
+    const normalized =
+      trimmed.length >= 19 && trimmed[10] === " "
+        ? `${trimmed.slice(0, 10)}T${trimmed.slice(11)}`
+        : trimmed;
+
+    const t = new Date(normalized).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+
   if (orderHistory && orderHistory.length > 0) {
     orderHistory.forEach((product) => {
       const pid = product.product_id;
       productMap[pid] = (productMap[pid] || 0) + 1;
+
+      const rawDate = product.purchase_date;
+      const purchaseTime = parsePurchaseTime(rawDate);
+      latestPurchaseDateMap[pid] = Math.max(
+        latestPurchaseDateMap[pid] || 0,
+        purchaseTime,
+      );
     });
   }
+
+  const orderedProductIds = Object.keys(productMap).sort(
+    (a, b) => (latestPurchaseDateMap[b] || 0) - (latestPurchaseDateMap[a] || 0),
+  );
 
   // Get initials for avatar
   const getInitials = (name) => {
@@ -286,8 +314,17 @@ export default function UserJourney() {
           {/* Product Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {orderHistory && orderHistory.length > 0 ? (
-              Object.keys(productMap).map((pid, index) => {
-                const prod = orderHistory.find((p) => p.product_id === pid);
+              orderedProductIds.map((pid, index) => {
+                const prod = orderHistory
+                  .filter((p) => p.product_id === pid)
+                  .reduce((latest, current) => {
+                    if (!latest) return current;
+                    const latestTime = parsePurchaseTime(latest.purchase_date);
+                    const currentTime = parsePurchaseTime(
+                      current.purchase_date,
+                    );
+                    return currentTime >= latestTime ? current : latest;
+                  }, null);
                 if (!prod) return null;
 
                 return (

@@ -162,6 +162,8 @@ class Cart(SQLModel, table=True):
     store: Optional[Store] = Relationship()
 
 # Payload Model - Stores conversation log data
+
+
 class Payload(SQLModel, table=True):
     __tablename__ = "payload"
 
@@ -186,3 +188,15 @@ class Distance(SQLModel, table=True):
     store_address: str
     distance: float  # Distance in kilometers
     map_url: Optional[str] = None  # URL to Google Maps directions
+
+
+# Feedback Model
+class Feedback(SQLModel, table=True):
+    __tablename__ = "feedback"
+
+    product_id: str = Field(
+        primary_key=True,
+        foreign_key="products.product_id",
+        index=True,
+    )
+    review: float = Field(default=0.0)

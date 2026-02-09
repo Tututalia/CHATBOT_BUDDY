@@ -1,0 +1,214 @@
+product_id,product_name,category,gender,price,quantity,online_available,offline_available,offline_stores,store_ids,festival,season,image_reference,loyalty_points,discount
+PRD068,Slim Fit Opaque Casual Shirt,Shirt,Men,431,181,yes,yes,null,null,All Festival,All Season,/images/PRD068.jpg,10,0
+PRD069,Slim Fit Opaque Casual Shirt,Shirt,Men,463,54,yes,yes,null,null,All Festival,All Season,/images/PRD069.jpg,1,0
+PRD070,Regular Fit Casual Shirt,Shirt,Men,503,318,yes,yes,null,null,All Festival,All Season,/images/PRD070.jpg,3,1
+PRD071,Slim Fit Opaque Casual Shirt,Shirt,Men,539,182,yes,yes,null,null,All Festival,All Season,/images/PRD071.jpg,6,15
+PRD072,Slim Fit Opaque Casual Shirt,Shirt,Men,539,153,yes,yes,null,null,All Festival,All Season,/images/PRD072.jpg,1,7
+PRD073,Men Casual Shirt,Shirt,Men,559,0,yes,yes,null,null,All Festival,All Season,/images/PRD073.jpg,2,0
+PRD074,Regular Opaque Casual Shirt,Shirt,Men,559,134,yes,yes,null,null,All Festival,All Season,/images/PRD074.jpg,2,7
+PRD075,Tartan Checked Shirt,Shirt,Men,559,20,yes,yes,null,null,All Festival,All Season,/images/PRD075.jpg,7,9
+PRD076,Men Cotton Casual Shirt,Shirt,Men,589,218,yes,yes,null,null,All Festival,All Season,/images/PRD076.jpg,6,20
+PRD077,Slim Fit Cotton Casual Shirt,Shirt,Men,593,147,yes,yes,null,null,All Festival,All Season,/images/PRD077.jpg,7,13
+PRD078,Slim Fit Cotton Casual Shirt,Shirt,Men,595,24,yes,yes,null,null,All Festival,All Season,/images/PRD078.jpg,3,15
+PRD079,Opaque Cotton Casual Shirt,Shirt,Men,597,73,yes,yes,null,null,All Festival,All Season,/images/PRD079.jpg,10,19
+PRD080,Cotton Linen Casual Shirt,Shirt,Men,598,128,yes,yes,null,null,All Festival,All Season,/images/PRD080.jpg,7,17
+PRD081,Cotton Casual Shirt,Shirt,Men,648,65,yes,yes,null,null,All Festival,All Season,/images/PRD081.jpg,9,0
+PRD082,Washed Casual Shirt,Shirt,Men,649,120,yes,yes,null,null,All Festival,All Season,/images/PRD082.jpg,4,0
+PRD083,Chambray Casual Shirt,Shirt,Men,650,136,yes,yes,null,null,All Festival,All Season,/images/PRD083.jpg,9,0
+PRD084,Pure Cotton Casual Shirt,Shirt,Men,652,87,yes,yes,null,null,All Festival,All Season,/images/PRD084.jpg,8,0
+PRD085,Men Solid Cotton Casual Shirt,Shirt,Men,652,331,yes,yes,null,null,All Festival,All Season,/images/PRD085.jpg,4,16
+PRD086,Spread Collar Formal Shirt,Shirt,Men,652,0,yes,yes,null,null,All Festival,All Season,/images/PRD086.jpg,4,0
+PRD087,Slim Fit Opaque Casual Shirt,Shirt,Men,655,271,yes,yes,null,null,All Festival,All Season,/images/PRD087.jpg,5,8
+PRD088,Men Self Design Casual Shirt,Shirt,Men,655,39,yes,yes,null,null,All Festival,All Season,/images/PRD088.jpg,4,13
+PRD089,Tartan Checked Casual Shirt,Shirt,Men,656,244,yes,yes,null,null,All Festival,All Season,/images/PRD089.jpg,2,10
+PRD090,Men Slim Fit Casual Shirt,Shirt,Men,669,221,yes,yes,null,null,All Festival,All Season,/images/PRD090.jpg,8,0
+PRD091,Men Cotton Casual Shirt,Shirt,Men,689,0,yes,yes,null,null,All Festival,All Season,/images/PRD091.jpg,9,0
+PRD092,Regular Fit Indigo Checks,Shirt,Men,690,306,yes,yes,null,null,All Festival,All Season,/images/PRD092.jpg,1,0
+PRD093,Pure Cotton Casual Shirts,Shirt,Men,694,16,yes,yes,null,null,All Festival,All Season,/images/PRD093.jpg,8,17
+PRD094,Pure Cotton Casual Shirts,Shirt,Men,694,249,yes,yes,null,null,All Festival,All Season,/images/PRD094.jpg,3,16
+PRD095,Pure Cotton Casual Shirt,Shirt,Men,725,187,yes,yes,null,null,All Festival,All Season,/images/PRD095.jpg,9,0
+PRD096,Men Checked Casual Shirt,Shirt,Men,740,253,yes,yes,null,null,All Festival,All Season,/images/PRD096.jpg,4,6
+PRD097,Slim Fit Casual Shirt,Shirt,Men,845,340,yes,yes,null,null,All Festival,All Season,/images/PRD097.jpg,7,18
+PRD098,Relaxed-Fit Regular Trousers,Pants,Men,603,157,yes,yes,null,null,All Festival,All Season,/images/PRD098.jpg,9,16
+PRD099,Relaxed-Fit Regular Trousers,Pants,Men,603,62,yes,yes,null,null,All Festival,All Season,/images/PRD099.jpg,10,16
+PRD100,Relaxed-Fit Regular Trousers,Pants,Men,603,12,yes,yes,null,null,All Festival,All Season,/images/PRD100.jpg,2,4
+PRD101,Men Mid-Rise Trousers,Pants,Men,603,0,yes,yes,null,null,All Festival,All Season,/images/PRD101.jpg,2,8
+PRD102,Men Relaxed Fit Trousers,Pants,Men,650,140,yes,yes,null,null,All Festival,All Season,/images/PRD102.jpg,7,5
+PRD103,Men Mid-Rise Regular Trousers,Pants,Men,967,254,yes,yes,null,null,All Festival,All Season,/images/PRD103.jpg,5,13
+PRD104,Men Cargos Trousers,Pants,Men,1019,125,yes,yes,null,null,All Festival,All Season,/images/PRD104.jpg,9,17
+PRD105,Men Mid-Rise Formal Trousers,Pants,Men,1172,346,yes,yes,null,null,All Festival,All Season,/images/PRD105.jpg,10,0
+PRD106,Straight Fit Korean Pants,Pants,Men,1198,194,yes,yes,null,null,All Festival,All Season,/images/PRD106.jpg,2,18
+PRD107,Men Slim Fit Chinos Trousers,Pants,Men,1221,107,yes,yes,null,null,All Festival,All Season,/images/PRD107.jpg,4,8
+PRD108,Men Slim Fit Chinos Trousers,Pants,Men,1295,309,yes,yes,null,null,All Festival,All Season,/images/PRD108.jpg,6,17
+PRD109,Amica Passport Case Gir Glades,Wallet,Men,349,231,yes,yes,null,null,All Festival,All Season,/images/PRD109.jpg,3,0
+PRD110,Men Wallets,Wallet,Men,500,0,yes,yes,null,null,All Festival,All Season,/images/PRD110.jpg,2,0
+PRD111,Leather Two Fold Wallet,Wallet,Men,599,310,yes,yes,null,null,All Festival,All Season,/images/PRD111.jpg,1,8
+PRD112,Leather Two Fold Wallet,Wallet,Men,696,272,yes,yes,null,null,All Festival,All Season,/images/PRD112.jpg,6,0
+PRD113,Solid Two Fold Leather Wallet,Wallet,Men,989,274,yes,yes,null,null,All Festival,All Season,/images/PRD113.jpg,4,0
+PRD114,Men Leather Two Fold Wallet,Wallet,Men,1078,179,yes,yes,null,null,All Festival,All Season,/images/PRD114.jpg,5,0
+PRD115,Men Leather Belt,Belt,Men,499,302,yes,yes,null,null,All Festival,All Season,/images/PRD115.jpg,5,0
+PRD116,Men Leather Belt,Belt,Men,554,62,yes,yes,null,null,All Festival,All Season,/images/PRD116.jpg,6,7
+PRD117,Solid Leather Belt,Belt,Men,1007,168,yes,yes,null,null,All Festival,All Season,/images/PRD117.jpg,7,0
+PRD118,Reversible Leather Belt,Belt,Men,1099,198,yes,yes,null,null,All Festival,All Season,/images/PRD118.jpg,6,5
+PRD119,Reversible Leather Belt,Belt,Men,1179,178,yes,yes,null,null,All Festival,All Season,/images/PRD119.jpg,2,0
+PRD120,Men Solid Genuine Leather Belt,Belt,Men,1241,226,yes,yes,null,null,All Festival,All Season,/images/PRD120.jpg,7,0
+PRD121,Men Solid Belt,Belt,Men,1310,123,yes,yes,null,null,All Festival,All Season,/images/PRD121.jpg,4,0
+PRD122,Men Textured Leather Belt,Belt,Men,1315,211,yes,yes,null,null,All Festival,All Season,/images/PRD122.jpg,10,3
+PRD123,Men Leather Reversible Belt,Belt,Men,1364,0,yes,yes,null,null,All Festival,All Season,/images/PRD123.jpg,6,0
+PRD124,Men Leather Belt,Belt,Men,1385,0,yes,yes,null,null,All Festival,All Season,/images/PRD124.jpg,10,17
+PRD125,Men Leather Belt,Belt,Men,1400,183,yes,yes,null,null,All Festival,All Season,/images/PRD125.jpg,8,0
+PRD126,Men Round Toe Formal Derbys,Shoes,Men,584,204,yes,yes,null,null,All Festival,All Season,/images/PRD126.jpg,10,0
+PRD127,Men Slip-On Formal Loafers,Shoes,Men,707,148,yes,yes,null,null,All Festival,All Season,/images/PRD127.jpg,8,4
+PRD128,Men Textured Formal Derbys,Shoes,Men,743,63,yes,yes,null,null,All Festival,All Season,/images/PRD128.jpg,1,6
+PRD129,Men Casual Chelsea Boots,Shoes,Men,844,216,yes,yes,null,null,All Festival,All Season,/images/PRD129.jpg,3,0
+PRD130,HRX-235 03 Mesh Running Shoes,Shoes,Men,879,310,yes,yes,null,null,All Festival,All Season,/images/PRD130.jpg,9,0
+PRD131,Men Running Shoes,Shoes,Men,1121,285,yes,yes,null,null,All Festival,All Season,/images/PRD131.jpg,4,0
+PRD132,Men Round Toe Formal Loafers,Shoes,Men,1255,329,yes,yes,null,null,All Festival,All Season,/images/PRD132.jpg,10,1
+PRD133,Men Square Toe Chelsea Boots,Shoes,Men,1299,132,yes,yes,null,null,All Festival,All Season,/images/PRD133.jpg,9,19
+PRD134,Leather Casual Shoes,Shoes,Men,1698,148,yes,yes,null,null,All Festival,All Season,/images/PRD134.jpg,8,9
+PRD135,Men Charged Surge 4 Run Shoes,Shoes,Men,4484,47,yes,yes,null,null,All Festival,All Season,/images/PRD135.jpg,10,0
+PRD136,Men Charged Surge 4 Run Shoes,Shoes,Men,4484,185,yes,yes,null,null,All Festival,All Season,/images/PRD136.jpg,10,1
+PRD137,KIDS MULTI FUNCTION WATCH,Watches,Unisex,305,71,yes,yes,null,null,All Festival,All Season,/images/PRD137.jpg,8,12
+PRD138,Men Brass Dial & Watch,Watches,Unisex,455,329,yes,yes,null,null,All Festival,All Season,/images/PRD138.jpg,10,0
+PRD139,Digital Multi Function Watch,Watches,Unisex,498,276,yes,yes,null,null,All Festival,All Season,/images/PRD139.jpg,4,15
+PRD140,Women Analoge Watch,Watches,Unisex,657,68,yes,yes,null,null,All Festival,All Season,/images/PRD140.jpg,8,1
+PRD141,Poze Women Leather Watch,Watches,Unisex,693,0,yes,yes,null,null,All Festival,All Season,/images/PRD141.jpg,6,0
+PRD142,Men Leather Straps Watch,Watches,Unisex,695,159,yes,yes,null,null,All Festival,All Season,/images/PRD142.jpg,8,0
+PRD143,Poze Women Analogue Watch,Watches,Unisex,795,117,yes,yes,null,null,All Festival,All Season,/images/PRD143.jpg,10,0
+PRD144,Women Watch,Watches,Unisex,799,63,yes,yes,null,null,All Festival,All Season,/images/PRD144.jpg,9,0
+PRD145,Men Analogue Watch TW00ZR583,Watches,Unisex,799,309,yes,yes,null,null,All Festival,All Season,/images/PRD145.jpg,6,8
+PRD146,Poze Women Leather Watch,Watches,Unisex,840,69,yes,yes,null,null,All Festival,All Season,/images/PRD146.jpg,8,14
+PRD147,Watches,Watches,Unisex,897,256,yes,yes,null,null,All Festival,All Season,/images/PRD147.jpg,1,0
+PRD148,Women Bracelet Analogue Watch,Watches,Unisex,1022,197,yes,yes,null,null,All Festival,All Season,/images/PRD148.jpg,10,0
+PRD149,Men Analogue Watch,Watches,Unisex,1051,29,yes,yes,null,null,All Festival,All Season,/images/PRD149.jpg,1,0
+PRD150,Men Analogue Watch,Watches,Unisex,1122,232,yes,yes,null,null,All Festival,All Season,/images/PRD150.jpg,5,8
+PRD151,Men Analogue Watch,Watches,Unisex,1137,84,yes,yes,null,null,All Festival,All Season,/images/PRD151.jpg,7,0
+PRD152,Green Forest Dial Sleek Watch,Watches,Unisex,1149,17,yes,yes,null,null,All Festival,All Season,/images/PRD152.jpg,4,0
+PRD153,Women Brass Dial Watch,Watches,Unisex,1164,314,yes,yes,null,null,All Festival,All Season,/images/PRD153.jpg,4,0
+PRD154,Men Analogue Watch,Watches,Unisex,1246,237,yes,yes,null,null,All Festival,All Season,/images/PRD154.jpg,10,0
+PRD155,Men Analogue Watch,Watches,Unisex,1246,269,yes,yes,null,null,All Festival,All Season,/images/PRD155.jpg,3,14
+PRD156,Women Stainless Steel Watch,Watches,Unisex,1249,136,yes,yes,null,null,All Festival,All Season,/images/PRD156.jpg,1,0
+PRD157,Women Bracelet Style Watch,Watches,Unisex,1249,36,yes,yes,null,null,All Festival,All Season,/images/PRD157.jpg,7,1
+PRD158,Women Watch,Watches,Unisex,1249,17,yes,yes,null,null,All Festival,All Season,/images/PRD158.jpg,2,0
+PRD159,Men Analogue & Digital Watch,Watches,Unisex,1259,308,yes,yes,null,null,All Festival,All Season,/images/PRD159.jpg,1,0
+PRD160,Men Analogue & Digital Watch,Watches,Unisex,1259,345,yes,yes,null,null,All Festival,All Season,/images/PRD160.jpg,6,6
+PRD161,Women Analogue Watch,Watches,Unisex,1347,206,yes,yes,null,null,All Festival,All Season,/images/PRD161.jpg,3,7
+PRD162,Women Analogue Watch,Watches,Unisex,1350,309,yes,yes,null,null,All Festival,All Season,/images/PRD162.jpg,6,0
+PRD163,Women Analogue Watch,Watches,Unisex,1350,124,yes,yes,null,null,All Festival,All Season,/images/PRD163.jpg,1,0
+PRD164,Stainless Steel Straps Watch,Watches,Unisex,1396,279,yes,yes,null,null,All Festival,All Season,/images/PRD164.jpg,8,1
+PRD165,Women Analogue Watch,Watches,Unisex,1473,226,yes,yes,null,null,All Festival,All Season,/images/PRD165.jpg,4,0
+PRD166,Women Analogue Watch,Watches,Unisex,1482,157,yes,yes,null,null,All Festival,All Season,/images/PRD166.jpg,3,10
+PRD167,Men Edge Eau de Parfum,Perfume,Unisex,191,194,yes,yes,null,null,All Festival,All Season,/images/PRD167.jpg,5,14
+PRD168,Men Hustler Perfume - 90ml,Perfume,Unisex,272,211,yes,yes,null,null,All Festival,All Season,/images/PRD168.jpg,4,16
+PRD169,Men Edge EDP 100 ml,Perfume,Unisex,286,147,yes,yes,null,null,All Festival,All Season,/images/PRD169.jpg,2,20
+PRD170,4Pcs Eau de Parfum Gift Set,Perfume,Unisex,399,148,yes,yes,null,null,All Festival,All Season,/images/PRD170.jpg,4,19
+PRD171,Love muse Women EDP 50ml,Perfume,Unisex,499,65,yes,yes,null,null,All Festival,All Season,/images/PRD171.jpg,7,0
+PRD172,Shades of me Women Set 250ml,Perfume,Unisex,599,311,yes,yes,null,null,All Festival,All Season,/images/PRD172.jpg,1,16
+PRD173,Oud of Dubai Men EDP 100ml,Perfume,Unisex,799,253,yes,yes,null,null,All Festival,All Season,/images/PRD173.jpg,2,12
+PRD174,Love muse Women EDP 100ml,Perfume,Unisex,799,339,yes,yes,null,null,All Festival,All Season,/images/PRD174.jpg,1,0
+PRD175,Men Hands Off Eau De Parfum,Perfume,Unisex,1487,296,yes,yes,null,null,All Festival,All Season,/images/PRD175.jpg,3,9
+PRD176,Men Solid Lounge T-shirt,Tshirt,Men,419,78,yes,yes,null,null,All Festival,All Season,/images/PRD176.jpg,3,0
+PRD177,Ombre Effect Cotton T-shirt,Tshirt,Men,480,165,yes,yes,null,null,All Festival,All Season,/images/PRD177.jpg,2,20
+PRD178,Round Neck T-Shirt,Tshirt,Men,497,254,yes,yes,null,null,All Festival,All Season,/images/PRD178.jpg,8,0
+PRD179,Crew Neck Lounge Tshirt,Tshirt,Men,499,116,yes,yes,null,null,All Festival,All Season,/images/PRD179.jpg,5,6
+PRD180,Crew Neck Lounge Tshirt,Tshirt,Men,499,259,yes,yes,null,null,All Festival,All Season,/images/PRD180.jpg,6,0
+PRD181,Solid Lounge T-shirt,Tshirt,Men,545,304,yes,yes,null,null,All Festival,All Season,/images/PRD181.jpg,9,16
+PRD182,Solid Lounge T-shirt,Tshirt,Men,545,290,yes,yes,null,null,All Festival,All Season,/images/PRD182.jpg,8,0
+PRD183,Men Printed Oversized T-shirt,Tshirt,Men,571,83,yes,yes,null,null,All Festival,All Season,/images/PRD183.jpg,1,13
+PRD184,Printed Round Neck Cotton T-shirt,Tshirt,Men,571,344,yes,yes,null,null,All Festival,All Season,/images/PRD184.jpg,2,15
+PRD185,Men Oversized T-shirt,Tshirt,Men,599,291,yes,yes,null,null,All Festival,All Season,/images/PRD185.jpg,1,3
+PRD186,Men Polo Collar Slim Fit T-shirt,Tshirt,Men,734,289,yes,yes,null,null,All Festival,All Season,/images/PRD186.jpg,3,5
+PRD187,Sanganeri Print Sustainable Kurta Set,Kurtis,Women,949,4,yes,yes,null,null,All Festival,All Season,/images/PRD187.jpg,4,11
+PRD188,Women Printed Kurta Set,Kurtis,Women,980,170,yes,yes,null,null,All Festival,All Season,/images/PRD188.jpg,1,4
+PRD189,Women Cotton Kurta Set,Kurtis,Women,999,149,yes,yes,null,null,All Festival,All Season,/images/PRD189.jpg,4,2
+PRD190,Women Embroidered Kurta with Trousers With Dupatta,Kurtis,Women,999,105,yes,yes,null,null,All Festival,All Season,/images/PRD190.jpg,4,0
+PRD191,Women Printed Kurta Set,Kurtis,Women,999,104,yes,yes,null,null,All Festival,All Season,/images/PRD191.jpg,4,18
+PRD192,Kurta With Trousers & Dupatta,Kurtis,Women,1270,265,yes,yes,null,null,All Festival,All Season,/images/PRD192.jpg,3,3
+PRD193,Women Printed Kurti Set,Kurtis,Women,1349,0,yes,yes,null,null,All Festival,All Season,/images/PRD193.jpg,9,3
+PRD194,Floral Embroidered Kurti Set,Kurtis,Women,1403,84,yes,yes,null,null,All Festival,All Season,/images/PRD194.jpg,9,13
+PRD195,Embroidered Kurti Set,Kurtis,Women,1403,114,yes,yes,null,null,All Festival,All Season,/images/PRD195.jpg,8,13
+PRD196,Women's Kurta Set,Kurtis,Women,1683,161,yes,yes,null,null,All Festival,All Season,/images/PRD196.jpg,5,12
+PRD197,Women Embroidered Kurti Set,Kurtis,Women,1799,344,yes,yes,null,null,All Festival,All Season,/images/PRD197.jpg,4,10
+PRD198,Print Maxi Flutter Sleeve Dress,Dresses,Women,691,24,yes,yes,null,null,All Festival,All Season,/images/PRD198.jpg,3,0
+PRD199,Fit & Flare Midi Puff Sleeve Dress,Dresses,Women,699,342,yes,yes,null,null,All Festival,All Season,/images/PRD199.jpg,6,0
+PRD200,Fit & Flare Midi Puff Sleeve Dress,Dresses,Women,699,59,yes,yes,null,null,All Festival,All Season,/images/PRD200.jpg,9,0
+PRD201,Mandarin Collar A-Line Dress,Dresses,Women,746,63,yes,yes,null,null,All Festival,All Season,/images/PRD201.jpg,3,4
+PRD202,Bodycon Midi Dress,Dresses,Women,808,349,yes,yes,null,null,All Festival,All Season,/images/PRD202.jpg,2,0
+PRD203,Striped Kaftan Dress,Dresses,Women,810,292,yes,yes,null,null,All Festival,All Season,/images/PRD203.jpg,6,0
+PRD204,Floral Fit & Flare Dress,Dresses,Women,811,194,yes,yes,null,null,All Festival,All Season,/images/PRD204.jpg,9,8
+PRD205,Persian Red Cocktail Dress,Dresses,Women,1079,288,yes,yes,null,null,All Festival,All Season,/images/PRD205.jpg,3,15
+PRD206,Fit and Flare mini Dress,Dresses,Women,1434,0,yes,yes,null,null,All Festival,All Season,/images/PRD206.jpg,4,20
+PRD207,Shoulder Straps Maxi Dress,Dresses,Women,1519,62,yes,yes,null,null,All Festival,All Season,/images/PRD207.jpg,3,7
+PRD208,Shoulder Straps Maxi Dress,Dresses,Women,1609,41,yes,yes,null,null,All Festival,All Season,/images/PRD208.jpg,4,19
+PRD209,One Shoulder Dress,Kids Dress,Kids,286,42,yes,yes,null,null,All Festival,All Season,/images/PRD209.jpg,2,0
+PRD210,Velvet Fit & Flare Dress,Kids Dress,Kids,288,0,yes,yes,null,null,All Festival,All Season,/images/PRD210.jpg,7,1
+PRD211,Girls Velvet Sheath Dress,Kids Dress,Kids,398,230,yes,yes,null,null,All Festival,All Season,/images/PRD211.jpg,8,5
+PRD212,Girls Printed Ethnic Dresses,Kids Dress,Kids,597,9,yes,yes,null,null,All Festival,All Season,/images/PRD212.jpg,1,19
+PRD213,Girls Onion Colour Dress,Kids Dress,Kids,699,187,yes,yes,null,null,All Festival,All Season,/images/PRD213.jpg,5,0
+PRD214,Kids Girls Frock,Kids Dress,Kids,699,280,yes,yes,null,null,All Festival,All Season,/images/PRD214.jpg,9,0
+PRD215,Embrodered Cotton A-Line Dress,Kids Dress,Kids,699,0,yes,yes,null,null,All Festival,All Season,/images/PRD215.jpg,10,0
+PRD216,Girls Embroidered Dress,Kids Dress,Kids,862,175,yes,yes,null,null,All Festival,All Season,/images/PRD216.jpg,6,0
+PRD217,Girls Maxi Ethnic Dress,Kids Dress,Kids,928,112,yes,yes,null,null,All Festival,All Season,/images/PRD217.jpg,8,6
+PRD218,A-Line Dress,Kids Dress,Kids,1072,12,yes,yes,null,null,All Festival,All Season,/images/PRD218.jpg,7,0
+PRD219,Girls Denim Pinafore Dress,Kids Dress,Kids,1104,33,yes,yes,null,null,All Festival,All Season,/images/PRD219.jpg,6,0
+PRD220,Silver-Plated FingerRing,Costume Jewellery,Women,275,121,yes,yes,null,null,All Festival,All Season,/images/PRD220.jpg,4,17
+PRD221,Men Studs Earrings,Costume Jewellery,Women,344,136,yes,yes,null,null,All Festival,All Season,/images/PRD221.jpg,2,15
+PRD222,Women Necklace With Earrings,Costume Jewellery,Women,544,208,yes,yes,null,null,All Festival,All Season,/images/PRD222.jpg,2,6
+PRD223,Jhumkas Earrings,Costume Jewellery,Women,549,323,yes,yes,null,null,All Festival,All Season,/images/PRD223.jpg,3,6
+PRD224,4 Pcs Artificial Beads Bangle,Costume Jewellery,Women,610,142,yes,yes,null,null,All Festival,All Season,/images/PRD224.jpg,5,12
+PRD225,24K Gold Plated Kamarbandh,Costume Jewellery,Women,650,179,yes,yes,null,null,All Festival,All Season,/images/PRD225.jpg,5,0
+PRD226,Contemporary Drop Earrings,Costume Jewellery,Women,688,61,yes,yes,null,null,All Festival,All Season,/images/PRD226.jpg,3,0
+PRD227,Gold-Plated Jewellery Set,Costume Jewellery,Women,748,13,yes,yes,null,null,All Festival,All Season,/images/PRD227.jpg,9,19
+PRD228,Drop Earrings,Costume Jewellery,Women,749,80,yes,yes,null,null,All Festival,All Season,/images/PRD228.jpg,8,3
+PRD229,Jadau Jewellery Set,Costume Jewellery,Women,759,246,yes,yes,null,null,All Festival,All Season,/images/PRD229.jpg,3,0
+PRD230,Gold Plated Finger Ring,Costume Jewellery,Women,896,327,yes,yes,null,null,All Festival,All Season,/images/PRD230.jpg,10,20
+PRD231,Plus Size Suede Winter Jacket,Jacket,Men,1872,275,yes,yes,null,null,All Festival,All Season,/images/PRD231.jpg,2,8
+PRD232,Washed Denim Jacket,Jacket,Men,1599,11,yes,yes,null,null,All Festival,All Season,/images/PRD232.jpg,10,13
+PRD233,Men Polyester Solid Jacket,Jacket,Men,1576,250,yes,yes,null,null,All Festival,All Season,/images/PRD233.jpg,10,3
+PRD234,Spread Collar Biker Jacket,Jacket,Men,1308,347,yes,yes,null,null,All Festival,All Season,/images/PRD234.jpg,8,0
+PRD235,Denim Jacket,Jacket,Men,1709,50,yes,yes,null,null,All Festival,All Season,/images/PRD235.jpg,6,0
+PRD236,Men Tailored Jacket,Jacket,Men,1655,197,yes,yes,null,null,All Festival,All Season,/images/PRD236.jpg,6,13
+PRD237,Men Plus Size Nehru Jacket,Jacket,Men,1939,139,yes,yes,null,null,All Festival,All Season,/images/PRD237.jpg,9,15
+PRD238,Washed Denim Jacket,Jacket,Men,1399,122,yes,yes,null,null,All Festival,All Season,/images/PRD238.jpg,4,0
+PRD239,Men Non-Hooded Puffer Jacket,Jacket,Men,1249,0,yes,yes,null,null,All Festival,All Season,/images/PRD239.jpg,3,9
+PRD240,Mandarin Collar Nehru Jacket,Jacket,Men,780,0,yes,yes,null,null,All Festival,All Season,/images/PRD240.jpg,9,11
+PRD241,Men Plus Size Denim Jacket,Jacket,Men,1899,151,yes,yes,null,null,All Festival,All Season,/images/PRD241.jpg,4,6
+PRD242,Men Hooded Sweatshirt,Hoodie,Men,1151,268,yes,yes,null,null,All Festival,All Season,/images/PRD242.jpg,7,16
+PRD243,Men Printed Hooded Sweatshirt,Hoodie,Men,1611,68,yes,yes,null,null,All Festival,All Season,/images/PRD243.jpg,4,0
+PRD244,Hooded Sweatshirt,Hoodie,Men,1363,182,yes,yes,null,null,All Festival,All Season,/images/PRD244.jpg,4,8
+PRD245,Hooded Pullover Sweatshirt,Hoodie,Men,756,300,yes,yes,null,null,All Festival,All Season,/images/PRD245.jpg,3,11
+PRD246,Printed Hooded Pullover,Hoodie,Men,1836,82,yes,yes,null,null,All Festival,All Season,/images/PRD246.jpg,8,20
+PRD247,Men Hooded Sweatshirt,Hoodie,Men,1247,277,yes,yes,null,null,All Festival,All Season,/images/PRD247.jpg,4,4
+PRD248,Men Solid Sweatshirt,Hoodie,Men,784,266,yes,yes,null,null,All Festival,All Season,/images/PRD248.jpg,4,13
+PRD249,Brand Logo Hooded Sweatshirt,Hoodie,Men,1484,26,yes,yes,null,null,All Festival,All Season,/images/PRD249.jpg,4,18
+PRD250,Women Solid Crop Top,Top,Women,259,263,yes,yes,null,null,All Festival,All Season,/images/PRD250.jpg,10,20
+PRD251,Indie Floral Printed Vest,Top,Women,264,90,yes,yes,null,null,All Festival,All Season,/images/PRD251.jpg,3,6
+PRD252,Print Top,Top,Women,799,144,yes,yes,null,null,All Festival,All Season,/images/PRD252.jpg,9,0
+PRD253,Sweetheart Neck Cotton Top,Top,Women,430,210,yes,yes,null,null,All Festival,All Season,/images/PRD253.jpg,7,0
+PRD254,Women Embellished Top,Top,Women,859,154,yes,yes,null,null,All Festival,All Season,/images/PRD254.jpg,10,2
+PRD255,Floral Print Mandarin Collar Top,Top,Women,635,171,yes,yes,null,null,All Festival,All Season,/images/PRD255.jpg,1,9
+PRD256,Keyhole Neck Top,Top,Women,702,198,yes,yes,null,null,All Festival,All Season,/images/PRD256.jpg,3,8
+PRD257,Women Polycotton Thermal Slips,Top,Women,406,321,yes,yes,null,null,All Festival,All Season,/images/PRD257.jpg,8,18
+PRD258,Women Round Neck Thermal Vest,Top,Women,403,72,yes,yes,null,null,All Festival,All Season,/images/PRD258.jpg,10,6
+PRD259,Crop Relaxed Fit Co-Ords,Co-ord Set,Women,917,186,yes,yes,null,null,All Festival,All Season,/images/PRD259.jpg,3,14
+PRD260,Wrap Top With Skirt Co-Ords,Co-ord Set,Women,794,169,yes,yes,null,null,All Festival,All Season,/images/PRD260.jpg,6,0
+PRD261,Shirt & Shorts Co-Ords,Co-ord Set,Women,1204,291,yes,yes,null,null,All Festival,All Season,/images/PRD261.jpg,1,9
+PRD262,Relax Fit Hooded Co-Ords,Co-ord Set,Women,1220,99,yes,yes,null,null,All Festival,All Season,/images/PRD262.jpg,2,2
+PRD263,Vertican Embroidery Coord Set,Co-ord Set,Women,798,190,yes,yes,null,null,All Festival,All Season,/images/PRD263.jpg,9,1
+PRD264,Top With Palazzo Co-Ords,Co-ord Set,Women,1299,224,yes,yes,null,null,All Festival,All Season,/images/PRD264.jpg,6,5
+PRD265,Seersucker Floral Co-Ords,Co-ord Set,Women,743,229,yes,yes,null,null,All Festival,All Season,/images/PRD265.jpg,1,0
+PRD266,Printed V-Neck Co-Ords,Co-ord Set,Women,1187,0,yes,yes,null,null,All Festival,All Season,/images/PRD266.jpg,2,7
+PRD267,Floral Tie-Up Back Top Co-Ords,Co-ord Set,Women,967,208,yes,yes,null,null,All Festival,All Season,/images/PRD267.jpg,1,12
+PRD268,Printed Top with Skirt,Co-ord Set,Women,735,305,yes,yes,null,null,All Festival,All Season,/images/PRD268.jpg,3,1
+PRD269,Wrap Top With Skirt Co-Ords,Co-ord Set,Women,837,293,yes,yes,null,null,All Festival,All Season,/images/PRD269.jpg,9,18
+PRD270,Women Formal Parallel Trousers,Trousers,Women,835,51,yes,yes,null,null,All Festival,All Season,/images/PRD270.jpg,6,0
+PRD271,Women High-Rise Trousers,Trousers,Women,699,308,yes,yes,null,null,All Festival,All Season,/images/PRD271.jpg,3,14
+PRD272,Women Flared Regular Trousers,Trousers,Women,1399,0,yes,yes,null,null,All Festival,All Season,/images/PRD272.jpg,7,16
+PRD273,Women High-Rise Trousers,Trousers,Women,713,91,yes,yes,null,null,All Festival,All Season,/images/PRD273.jpg,9,13
+PRD274,Women Casual Trouser,Trousers,Women,583,339,yes,yes,null,null,All Festival,All Season,/images/PRD274.jpg,8,0
+PRD275,Cotton Straight Pants -Tall,Trousers,Women,1399,331,yes,yes,null,null,All Festival,All Season,/images/PRD275.jpg,8,0
+PRD276,Women High-Rise Trousers,Trousers,Women,491,309,yes,yes,null,null,All Festival,All Season,/images/PRD276.jpg,2,0
+PRD277,Women High-Rise Trousers,Trousers,Women,741,15,yes,yes,null,null,All Festival,All Season,/images/PRD277.jpg,5,14
+PRD278,Women Wide Leg Trousers,Trousers,Women,1091,22,yes,yes,null,null,All Festival,All Season,/images/PRD278.jpg,4,16
+PRD279,Women High-Rise Trousers,Trousers,Women,491,139,yes,yes,null,null,All Festival,All Season,/images/PRD279.jpg,3,18
+PRD280,Women Casual Trouser,Trousers,Women,583,239,yes,yes,null,null,All Festival,All Season,/images/PRD280.jpg,7,9

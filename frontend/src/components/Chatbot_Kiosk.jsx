@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "./ChatBot_Kisok.css";
 
 const KIOSK_API_URL = "http://localhost:8000/api/kiosk/chat";
@@ -6,6 +7,7 @@ const CUSTOMER_PROFILE_API_BASE = "http://localhost:8000/api/customer";
 const MULTI_PRODUCTS_API_BASE = "http://localhost:8000/api/products/multiple";
 const CART_UPDATE_QTY_API = "http://localhost:8000/api/cart/update-quantity";
 const CHAT_API_URL = "http://localhost:8000/api/chat";
+const WS_CHAT_URL = "ws://localhost:8000/ws/chat";
 const FALLBACK_IMAGE_SRC = "/images/abfrl-icon.png";
 
 const TRANSFER_MESSAGE =
@@ -14,6 +16,7 @@ const TRANSFER_MESSAGE =
   "Otherwise, feel free to explore more options or let me know how I can assist you today!";
 
 export default function Chatbot_Kiosk({ customerId }) {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(true);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -38,9 +41,34 @@ export default function Chatbot_Kiosk({ customerId }) {
   const [agentTimeline, setAgentTimeline] = useState([]);
   const seenTimelineToolsRef = useRef(new Set());
 
+  const isOpenRef = useRef(true);
+  const wsRef = useRef(null);
+  const wsReadyRef = useRef(false);
+  const wsPendingRef = useRef(new Map());
+  const wsReconnectRef = useRef({ timer: null, attempt: 0 });
+  const wsToolInstanceRef = useRef(new Map());
+  const wsToolCountRef = useRef(new Map());
+
   const [barcodePanelOpen, setBarcodePanelOpen] = useState(false);
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [barcodeItemCode, setBarcodeItemCode] = useState("");
   const [barcodeQty, setBarcodeQty] = useState(1);
+
+  const handleCloseChatbot = () => {
+    setIsOpen(false);
+    navigate("/");
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsQuickActionsOpen(false);
+      setBarcodePanelOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (barcodePanelOpen) setIsQuickActionsOpen(false);
+  }, [barcodePanelOpen]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -57,6 +85,10 @@ export default function Chatbot_Kiosk({ customerId }) {
   useEffect(() => {
     scrollTimelineToBottom();
   }, [agentTimeline]);
+
+  useEffect(() => {
+    isOpenRef.current = Boolean(isOpen);
+  }, [isOpen]);
 
   const formatLocalTime = (date = new Date()) => {
     try {
@@ -84,6 +116,218 @@ export default function Chatbot_Kiosk({ customerId }) {
     if (s === "in_progress" || s === "in-progress" || s === "running")
       return "in-progress";
     return status || "";
+  };
+
+  const parseWsLogLine = (raw) => {
+    const text = (raw || "").toString().trim();
+    if (!text) return { time: formatLocalTime(), text: "" };
+    const maybeTime = text.slice(0, 8);
+    if (/^\d{2}:\d{2}:\d{2}$/.test(maybeTime) && text.length > 9) {
+      return { time: maybeTime, text: text.slice(9) };
+    }
+    return { time: formatLocalTime(), text };
+  };
+
+  const isWsUsable = () => {
+    const ws = wsRef.current;
+    return Boolean(wsReadyRef.current && ws && ws.readyState === 1);
+  };
+
+  const timelineKeyFor = (requestId, tool) => {
+    return `${requestId || "run"}:${tool || "system"}`;
+  };
+
+  const timelineStartFromWs = ({ request_id, tool, agent, status }) => {
+    const toolName = tool || "system";
+    const actionLabel = agent || toolName || "Agent";
+    const baseKey = timelineKeyFor(request_id, toolName);
+    const nextCount = (wsToolCountRef.current.get(baseKey) || 0) + 1;
+    wsToolCountRef.current.set(baseKey, nextCount);
+    const entryKey = `${baseKey}:${nextCount}:${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    wsToolInstanceRef.current.set(baseKey, entryKey);
+
+    setAgentTimeline((prev) => [
+      ...prev,
+      {
+        key: entryKey,
+        action: actionLabel,
+        tool: toolName,
+        status: normalizeTimelineStatus(status || "in-progress"),
+        timestamp: formatLocalTime(),
+        logs: [],
+      },
+    ]);
+  };
+
+  const timelineLogFromWs = ({ request_id, tool, text }) => {
+    const toolName = tool || "system";
+    const baseKey = timelineKeyFor(request_id, toolName);
+    const entryKey = wsToolInstanceRef.current.get(baseKey);
+    if (!entryKey) return;
+    const { time, text: message } = parseWsLogLine(text);
+    if (!message) return;
+
+    setAgentTimeline((prev) =>
+      prev.map((entry) => {
+        if (entry.key !== entryKey) return entry;
+        const nextLogs = Array.isArray(entry.logs) ? [...entry.logs] : [];
+        nextLogs.push({ time, text: message, variant: "system" });
+        return { ...entry, logs: nextLogs };
+      }),
+    );
+  };
+
+  const timelineEndFromWs = ({ request_id, tool, status }) => {
+    const toolName = tool || "system";
+    const baseKey = timelineKeyFor(request_id, toolName);
+    const entryKey = wsToolInstanceRef.current.get(baseKey);
+    if (!entryKey) return;
+
+    setAgentTimeline((prev) =>
+      prev.map((entry) =>
+        entry.key === entryKey
+          ? { ...entry, status: normalizeTimelineStatus(status || "completed") }
+          : entry,
+      ),
+    );
+  };
+
+  const connectWsIfNeeded = () => {
+    const existing = wsRef.current;
+    if (existing && (existing.readyState === 0 || existing.readyState === 1)) {
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(WS_CHAT_URL);
+      wsRef.current = ws;
+      wsReadyRef.current = false;
+
+      ws.onopen = () => {
+        wsReadyRef.current = true;
+        wsReconnectRef.current.attempt = 0;
+      };
+
+      ws.onmessage = (event) => {
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        const type = payload?.type;
+        if (type === "timeline_start") return timelineStartFromWs(payload);
+        if (type === "timeline_log") return timelineLogFromWs(payload);
+        if (type === "timeline_end") return timelineEndFromWs(payload);
+
+        if (type === "final_response") {
+          const requestId = payload?.request_id;
+          const pending = requestId
+            ? wsPendingRef.current.get(requestId)
+            : null;
+          if (!pending) return;
+          wsPendingRef.current.delete(requestId);
+          if (pending.timeoutId) clearTimeout(pending.timeoutId);
+          pending.resolve(payload?.data);
+          return;
+        }
+
+        if (type === "error") {
+          const requestId = payload?.request_id;
+          const pending = requestId
+            ? wsPendingRef.current.get(requestId)
+            : null;
+          if (pending) {
+            wsPendingRef.current.delete(requestId);
+            if (pending.timeoutId) clearTimeout(pending.timeoutId);
+            pending.reject(new Error(payload?.message || "WebSocket error"));
+          }
+        }
+      };
+
+      ws.onclose = () => {
+        wsReadyRef.current = false;
+        if (!isOpenRef.current) return;
+        if (wsReconnectRef.current.timer) return;
+        const attempt = (wsReconnectRef.current.attempt || 0) + 1;
+        wsReconnectRef.current.attempt = attempt;
+        const delay = Math.min(10000, 750 * attempt);
+        wsReconnectRef.current.timer = window.setTimeout(() => {
+          wsReconnectRef.current.timer = null;
+          connectWsIfNeeded();
+        }, delay);
+      };
+    } catch {
+      // ignore (HTTP fallback still works)
+    }
+  };
+
+  const closeWs = () => {
+    try {
+      if (wsReconnectRef.current.timer) {
+        clearTimeout(wsReconnectRef.current.timer);
+        wsReconnectRef.current.timer = null;
+      }
+      wsReconnectRef.current.attempt = 0;
+      wsReadyRef.current = false;
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    } catch {
+      // ignore
+    } finally {
+      wsRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && customerId) {
+      connectWsIfNeeded();
+      return () => closeWs();
+    }
+    closeWs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, customerId]);
+
+  const sendAgentMessage = async (message) => {
+    if (!customerId) return null;
+
+    connectWsIfNeeded();
+    if (isWsUsable()) {
+      const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const ws = wsRef.current;
+      return await new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          const pending = wsPendingRef.current.get(requestId);
+          if (!pending) return;
+          wsPendingRef.current.delete(requestId);
+          reject(new Error("Timed out waiting for response"));
+        }, 30000);
+
+        wsPendingRef.current.set(requestId, { resolve, reject, timeoutId });
+        try {
+          ws.send(
+            JSON.stringify({
+              request_id: requestId,
+              customer_id: customerId,
+              message,
+            }),
+          );
+        } catch (e) {
+          wsPendingRef.current.delete(requestId);
+          clearTimeout(timeoutId);
+          reject(e);
+        }
+      });
+    }
+
+    const res = await fetch(CHAT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, customer_id: customerId }),
+    });
+    return await res.json();
   };
 
   const pushTimelineEntry = ({
@@ -390,20 +634,7 @@ export default function Chatbot_Kiosk({ customerId }) {
         status: "completed",
       });
 
-      pushTimelineEntry({
-        action: "view_cart_agent",
-        tool: "view_cart_agent",
-        status: "in-progress",
-        logs: [
-          {
-            time: formatLocalTime(),
-            text: `system → view_cart_agent: customer_id=${customerId}`,
-            variant: "system",
-          },
-        ],
-      });
-
-      const payload = await fetchAgentCart({ throttleMs: 0, raw: true });
+      const payload = await sendAgentMessage("view cart");
 
       if (payload?.cart_items && Array.isArray(payload.cart_items)) {
         const cart = {
@@ -414,19 +645,6 @@ export default function Chatbot_Kiosk({ customerId }) {
           total_amount: payload.total_amount,
           total_savings: payload.total_savings,
         };
-
-        pushTimelineEntry({
-          action: "view_cart_agent",
-          tool: "view_cart_agent",
-          status: "completed",
-          logs: [
-            {
-              time: formatLocalTime(),
-              text: `view_cart_agent → user: items=${cart.cartItems.length}, total=${formatINR(cart.total_amount || 0)}`,
-              variant: "system",
-            },
-          ],
-        });
 
         // For an explicit user request, append a new cart card so it visibly appears.
         appendCartMessage(cart);
@@ -603,24 +821,17 @@ export default function Chatbot_Kiosk({ customerId }) {
     });
 
     try {
-      const res = await fetch(CHAT_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: `add to cart product id ${itemCode} quantity ${qty}`,
-          customer_id: customerId,
-        }),
-      });
-      const data = await res.json();
-      const responseText =
-        typeof data === "string" ? data : data.response || data.message || "";
+      // Handle barcode add-to-cart internally: update cart UI without showing
+      // the agent's "Added to cart" message in the chat.
+      const responseText = await fetchKioskResponseText(
+        `add to cart product id ${itemCode} quantity ${qty}`,
+      );
 
-      if (responseText) {
-        addMessage({
-          type: "ai",
-          text: responseText,
-          timestamp: new Date(),
-        });
+      if (
+        typeof responseText === "string" &&
+        responseText.trim().startsWith("❌")
+      ) {
+        throw new Error(responseText);
       }
 
       await refreshCartSilently();
@@ -666,14 +877,7 @@ export default function Chatbot_Kiosk({ customerId }) {
     });
 
     try {
-      await fetch(CHAT_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: `Remove item ${orderId} from cart`,
-          customer_id: customerId,
-        }),
-      });
+      await sendAgentMessage(`Remove item ${orderId} from cart`);
       await refreshCartSilently();
     } catch {
       addMessage({
@@ -1247,23 +1451,48 @@ export default function Chatbot_Kiosk({ customerId }) {
             </div>
             <div className="kiosk-header-actions">
               <div className="kiosk-action-tools">
-                <span className="kiosk-action-tools-label">Action Tools</span>
                 <button
-                  className="kiosk-action-tools-btn primary"
-                  onClick={triggerPaymentFlow}
+                  className="kiosk-action-tools-btn primary kiosk-quick-actions-toggle"
+                  onClick={() => {
+                    setBarcodePanelOpen(false);
+                    setIsQuickActionsOpen((prev) => !prev);
+                  }}
                   disabled={isLoading}
                   type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={isQuickActionsOpen}
                 >
-                  Go For Payment
+                  Quick Action Tools
                 </button>
-                <button
-                  className="kiosk-action-tools-btn"
-                  onClick={() => setBarcodePanelOpen((prev) => !prev)}
-                  disabled={isLoading}
-                  type="button"
-                >
-                  Bar Code ID
-                </button>
+
+                {isQuickActionsOpen && (
+                  <div className="kiosk-quick-actions-menu" role="menu">
+                    <button
+                      className="kiosk-action-tools-btn primary"
+                      onClick={() => {
+                        setIsQuickActionsOpen(false);
+                        triggerPaymentFlow();
+                      }}
+                      disabled={isLoading}
+                      type="button"
+                      role="menuitem"
+                    >
+                      Go For Payment
+                    </button>
+                    <button
+                      className="kiosk-action-tools-btn primary"
+                      onClick={() => {
+                        setIsQuickActionsOpen(false);
+                        setBarcodePanelOpen(true);
+                      }}
+                      disabled={isLoading}
+                      type="button"
+                      role="menuitem"
+                    >
+                      Bar Code ID
+                    </button>
+                  </div>
+                )}
 
                 {barcodePanelOpen && (
                   <form
@@ -1319,10 +1548,7 @@ export default function Chatbot_Kiosk({ customerId }) {
                   </form>
                 )}
               </div>
-              <button
-                className="kiosk-close-btn"
-                onClick={() => setIsOpen(false)}
-              >
+              <button className="kiosk-close-btn" onClick={handleCloseChatbot}>
                 ✕
               </button>
             </div>

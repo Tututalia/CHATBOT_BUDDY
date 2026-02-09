@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, create_engine, Session, select
 from sqlalchemy import event
 from typing import Optional, List
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Cart, Distance
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Cart, Distance, Feedback
 
 # Database configuration
 DATABASE_URL = "sqlite:///./retail_agent.db"

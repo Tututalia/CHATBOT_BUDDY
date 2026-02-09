@@ -12,8 +12,9 @@ from store_kiosk_graph import (
     fulfillment_node,
     loyalty_node,
     post_purchase_node,
+    kiosk_add_to_cart_agent,
 )
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Payload
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Payload, Feedback
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
@@ -31,7 +32,7 @@ from dotenv import load_dotenv
 from whatsapp import send_message, get_text_message_input
 from security import signature_required
 from fastapi.responses import JSONResponse, PlainTextResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
@@ -89,7 +90,13 @@ def get_customer_orders_from_db(customer_id: str) -> List[OrderHistory]:
     """Get order history for a customer from database"""
     try:
         with get_db_session() as session:
-            return order_history_crud.filter(session, {'customer_id': customer_id})
+            return order_history_crud.filter(
+                session,
+                {"customer_id": customer_id},
+                order_by="order_dates",
+                order_desc=True,
+                limit=1000,
+            )
     except Exception as e:
         print(f"Error getting orders from database: {e}")
         return []
@@ -289,6 +296,60 @@ def get_customer_orders_endpoint(customer_id: str):
     }
 
 
+@app.get("/api/customer/{customer_id}/orders/recent")
+def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
+    """Get customer's order history for the last N days (default 7).
+
+    Data source: order_history table filtered by customer_id and order_dates.
+    """
+    if days <= 0:
+        raise HTTPException(status_code=400, detail="days must be > 0")
+
+    customer = load_customer_from_db(customer_id)
+    if customer is None:
+        return {"error": f"Customer with ID {customer_id} not found"}
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    orders = get_customer_orders_from_db(customer_id)
+
+    recent_orders: list[tuple[datetime, OrderHistory]] = []
+    for order in orders:
+        raw_date = (order.order_dates or "").strip()
+        if not raw_date:
+            continue
+        try:
+            parsed = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        except Exception:
+            # If legacy/non-ISO formats exist, skip them rather than failing the whole request
+            continue
+        if parsed >= cutoff:
+            recent_orders.append((parsed, order))
+
+    recent_orders.sort(key=lambda x: x[0], reverse=True)
+
+    order_products = []
+    for parsed, order in recent_orders:
+        product = get_product_from_db(order.product_id)
+        if product:
+            order_products.append({
+                "transaction_id": order.transaction_id,
+                "product_id": product.product_id,
+                "product_name": product.product_name,
+                "category": product.category,
+                "price": product.price,
+                "quantity": order.quantity,
+                "purchase_date": order.order_dates,
+                "loyalty_points": order.loyalty_points,
+                "image_reference": product.image_reference,
+            })
+
+    return {
+        "customer_id": customer_id,
+        "days": days,
+        "order_history": order_products,
+    }
+
+
 @app.get("/api/customer/{customer_id}/{role_id}")
 def get_customer_profile(customer_id: str, role_id: str):
     """Get customer or store profile by ID and role ID"""
@@ -372,6 +433,26 @@ def get_multiple_products(product_ids: str):
         "products": products,
         "total_count": len(products)
     }
+
+
+@app.get("/api/feedback/multiple/{product_ids}")
+def get_multiple_feedback_reviews(product_ids: str):
+    """Get product reviews from feedback table by pipe-separated product IDs"""
+    ids_list = [pid.strip() for pid in product_ids.split('|') if pid.strip()]
+    if not ids_list:
+        return {"reviews": {}, "total_count": 0}
+
+    try:
+        with get_db_session() as session:
+            feedback_rows = session.exec(
+                select(Feedback).where(Feedback.product_id.in_(ids_list))
+            ).all()
+
+        reviews = {row.product_id: row.review for row in feedback_rows}
+        return {"reviews": reviews, "total_count": len(reviews)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching feedback reviews: {str(e)}")
 
 
 @app.get("/api/admin/dashboard")
@@ -1431,6 +1512,20 @@ async def chat_with_agent(chat_message: ChatMessage):
         user_query = chat_message.message
         session_id = customer_id  # Use customer_id as session_id
 
+        def _looks_like_price_band_query(text: str) -> bool:
+            if not text or not isinstance(text, str):
+                return False
+            t = text.lower()
+            # Avoid intercepting cart/checkout intents; let the LLM workflow handle those.
+            if re.search(r"\b(add|buy|purchase|checkout|proceed|payment|remove|cart|quantity|qty|online|offline)\b", t):
+                return False
+            # Must mention a price band keyword AND a number, or a numeric range like 1500-2000.
+            if re.search(r"\b(between|above|over|more\s+than|greater\s+than|below|under|less\s+than|>=|<=)\b", t) and re.search(r"\d", t):
+                return True
+            if re.search(r"\b\d[\d,]*\s*-\s*\d[\d,]*\b", t):
+                return True
+            return False
+
         # Save user message to database
         save_message(customer_id, session_id, "user", user_query)
 
@@ -1438,6 +1533,44 @@ async def chat_with_agent(chat_message: ChatMessage):
         history = get_conversation_history(customer_id, session_id, limit=1)
 
         print(f"Retrieved {len(history)} messages from history")
+
+        # ---- Price-band browse fast-path ----
+        # When a user asks for products with an explicit price constraint (above/between/below),
+        # do not rely on the LLM to preserve the numeric band in tool args.
+        # Instead, pass the RAW user query to inventory_agent so it can filter on products.price.
+        if _looks_like_price_band_query(user_query):
+            from intelligent_agent_graph import inventory_agent as _inventory_tool, recommendation_agent as _recommendation_tool
+
+            inv_raw = _inventory_tool.invoke({
+                "search_query": user_query,
+                "customer_id": customer_id,
+            })
+
+            rec_raw = _recommendation_tool.invoke({
+                "inventory_data": inv_raw,
+            })
+
+            # Save the assistant's default message for history continuity.
+            try:
+                rec_obj = json.loads(rec_raw) if isinstance(
+                    rec_raw, str) else rec_raw
+            except Exception:
+                rec_obj = None
+
+            if isinstance(rec_obj, dict):
+                default_text = (rec_obj.get("responses") or {}).get("default")
+                if isinstance(default_text, str) and default_text.strip():
+                    save_message(customer_id, session_id, "assistant", default_text, [
+                                 "inventory_agent", "recommendation_agent"])
+                return rec_obj
+
+            # Fallback: return a legacy payload
+            save_message(customer_id, session_id, "assistant", str(
+                rec_raw), ["inventory_agent", "recommendation_agent"])
+            return {
+                "response": str(rec_raw),
+                "agent_calls": ["inventory_agent", "recommendation_agent"],
+            }
 
         # Create agent graph
         graph = create_agent_graph()
@@ -1776,6 +1909,19 @@ async def ws_chat(websocket: WebSocket):
 
             session_id = customer_id
 
+            def _looks_like_price_band_query(text: str) -> bool:
+                if not text or not isinstance(text, str):
+                    return False
+                t = text.lower()
+                # Avoid intercepting cart/checkout intents; let the LLM workflow handle those.
+                if re.search(r"\b(add|buy|purchase|checkout|proceed|payment|remove|cart|quantity|qty|online|offline)\b", t):
+                    return False
+                if re.search(r"\b(between|above|over|more\s+than|greater\s+than|below|under|less\s+than|>=|<=)\b", t) and re.search(r"\d", t):
+                    return True
+                if re.search(r"\b\d[\d,]*\s*-\s*\d[\d,]*\b", t):
+                    return True
+                return False
+
             await websocket.send_json({
                 "type": "run_start",
                 "request_id": request_id,
@@ -1917,6 +2063,163 @@ async def ws_chat(websocket: WebSocket):
                                      "assistant", assistant_text, agent_calls)
                 except Exception:
                     pass
+
+                await websocket.send_json({
+                    "type": "final_response",
+                    "request_id": request_id,
+                    "data": response_data,
+                })
+                await websocket.send_json({"type": "run_end", "request_id": request_id})
+                continue
+
+            # ---- Price-band browse fast-path ----
+            if _looks_like_price_band_query(user_query):
+                from intelligent_agent_graph import inventory_agent as _inventory_tool, recommendation_agent as _recommendation_tool
+
+                inv_tool_name = "inventory_agent"
+                rec_tool_name = "recommendation_agent"
+                inv_label = tool_to_agent.get(inv_tool_name, "Inventory Agent")
+                rec_label = tool_to_agent.get(
+                    rec_tool_name, "Recommendation Agent")
+
+                agent_calls.extend([inv_tool_name, rec_tool_name])
+
+                # Inventory timeline
+                await websocket.send_json({
+                    "type": "timeline_start",
+                    "request_id": request_id,
+                    "agent": inv_label,
+                    "tool": inv_tool_name,
+                    "timestamp": "now",
+                    "status": "in_progress",
+                })
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": inv_tool_name,
+                    "agent": inv_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"Master Orchestrator → {inv_label}"),
+                })
+                inv_start = _summarize_tool_start(
+                    inv_tool_name, {"search_query": user_query, "customer_id": customer_id})
+                if inv_start:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(inv_start),
+                    })
+
+                inv_ok = True
+                try:
+                    inv_raw = await asyncio.to_thread(_inventory_tool.invoke, {"search_query": user_query, "customer_id": customer_id})
+                except Exception as e:
+                    inv_ok = False
+                    inv_raw = json.dumps(
+                        {"status": "error", "message": f"Inventory tool error: {str(e)}", "products": []})
+
+                inv_summary = _summarize_tool_result(inv_tool_name, inv_raw)
+                if inv_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(inv_summary),
+                    })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": inv_tool_name,
+                    "agent": inv_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"{inv_label} → Master Orchestrator"),
+                })
+                await websocket.send_json({
+                    "type": "timeline_end",
+                    "request_id": request_id,
+                    "agent": inv_label,
+                    "tool": inv_tool_name,
+                    "timestamp": "now",
+                    "status": "completed" if inv_ok else "error",
+                })
+
+                # Recommendation timeline
+                await websocket.send_json({
+                    "type": "timeline_start",
+                    "request_id": request_id,
+                    "agent": rec_label,
+                    "tool": rec_tool_name,
+                    "timestamp": "now",
+                    "status": "in_progress",
+                })
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": rec_tool_name,
+                    "agent": rec_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"Master Orchestrator → {rec_label}"),
+                })
+
+                rec_ok = True
+                try:
+                    rec_raw = await asyncio.to_thread(_recommendation_tool.invoke, {"inventory_data": inv_raw})
+                except Exception as e:
+                    rec_ok = False
+                    rec_raw = json.dumps({
+                        "name": "Recommendation Agent",
+                        "id": "recommendation_agent",
+                        "responses": {"default": f"❌ Error preparing recommendations: {str(e)}", "recommendation": []},
+                    })
+
+                rec_summary = _summarize_tool_result(rec_tool_name, rec_raw)
+                if rec_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": rec_tool_name,
+                        "agent": rec_label,
+                        "timestamp": "now",
+                        "text": _ws_line(rec_summary),
+                    })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": rec_tool_name,
+                    "agent": rec_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"{rec_label} → Master Orchestrator"),
+                })
+                await websocket.send_json({
+                    "type": "timeline_end",
+                    "request_id": request_id,
+                    "agent": rec_label,
+                    "tool": rec_tool_name,
+                    "timestamp": "now",
+                    "status": "completed" if rec_ok else "error",
+                })
+
+                parsed_rec = _try_parse_json(rec_raw)
+                response_data: Dict[str, Any] = parsed_rec if isinstance(parsed_rec, dict) else {
+                    "response": str(parsed_rec) if parsed_rec is not None else "",
+                }
+                response_data.setdefault("agent_calls", agent_calls)
+
+                default_text = (response_data.get(
+                    "responses") or {}).get("default")
+                if isinstance(default_text, str) and default_text.strip():
+                    try:
+                        save_message(customer_id, session_id,
+                                     "assistant", default_text, agent_calls)
+                    except Exception:
+                        pass
 
                 await websocket.send_json({
                     "type": "final_response",
@@ -2120,6 +2423,24 @@ async def chat_with_kiosk(chat_message: ChatMessage):
         except Exception:
             # If cart check fails, keep existing state (do not block kiosk flow).
             pass
+        # Intercept kiosk barcode-style add-to-cart commands.
+        # Frontend sends: "add to cart product id PRD033 quantity 2"
+        q_lower = user_query.lower()
+        if "add to cart" in q_lower:
+            product_match = re.search(
+                r"\b(PRD\d+)\b", user_query, flags=re.IGNORECASE)
+            qty_match = re.search(
+                r"\b(?:qty|quantity)\s*(\d+)\b", user_query, flags=re.IGNORECASE)
+            if product_match:
+                product_id = product_match.group(1).upper()
+                qty = int(qty_match.group(1)) if qty_match else 1
+                tool_result = kiosk_add_to_cart_agent.invoke(
+                    {"product_id": product_id, "quantity": qty,
+                        "customer_id": customer_id}
+                )
+                kiosk_sessions[customer_id] = state
+                return {"response": tool_result or ""}
+
         responses: List[str] = []
 
         if user_query == "__kiosk_start__" or not state.get("welcome_done"):
