@@ -6,6 +6,7 @@ const KIOSK_API_URL = "http://localhost:8000/api/kiosk/chat";
 const CUSTOMER_PROFILE_API_BASE = "http://localhost:8000/api/customer";
 const MULTI_PRODUCTS_API_BASE = "http://localhost:8000/api/products/multiple";
 const CART_UPDATE_QTY_API = "http://localhost:8000/api/cart/update-quantity";
+const CART_UPDATE_SIZE_API = "http://localhost:8000/api/cart/update-size";
 const CHAT_API_URL = "http://localhost:8000/api/chat";
 const WS_CHAT_URL = "ws://localhost:8000/ws/chat";
 const FALLBACK_IMAGE_SRC = "/images/abfrl-icon.png";
@@ -53,6 +54,7 @@ export default function Chatbot_Kiosk({ customerId }) {
   const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
   const [barcodeItemCode, setBarcodeItemCode] = useState("");
   const [barcodeQty, setBarcodeQty] = useState(1);
+  const [barcodeSize, setBarcodeSize] = useState("");
 
   const handleCloseChatbot = () => {
     setIsOpen(false);
@@ -412,6 +414,88 @@ export default function Chatbot_Kiosk({ customerId }) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "—";
     return `₹${Math.round(n).toLocaleString()}`;
+  };
+
+  const getProductCategoryText = (product) => {
+    if (!product) return "";
+    const category =
+      product.category ||
+      product.product_category ||
+      product.productCategory ||
+      product.product?.category ||
+      product.product?.product_category ||
+      "";
+    return String(category).trim();
+  };
+
+  const getProductNameText = (product) => {
+    if (!product) return "";
+    const name =
+      product.product_name ||
+      product.name ||
+      product.title ||
+      product.productName ||
+      "";
+    return String(name).trim();
+  };
+
+  const isAccessories = (product) => {
+    const category = getProductCategoryText(product);
+    const name = getProductNameText(product);
+    const base = category || name;
+    const c = String(base).trim().toLowerCase();
+
+    return (
+      c.includes("accessories") ||
+      c.includes("accessory") ||
+      c.includes("belt") ||
+      c.includes("perfume") ||
+      c.includes("Perfume") ||
+      c.includes("wallet") ||
+      c.includes("jewellery") ||
+      c.includes("jewelry") ||
+      c.includes("earring") ||
+      c.includes("necklace") ||
+      c.includes("bracelet") ||
+      c.includes("bangle") ||
+      c.includes("watch") ||
+      c.includes("watches") ||
+      c.includes("ring") ||
+      c.includes("costume jewellery") ||
+      c.includes("costume jewelry")
+    );
+  };
+
+  const isFootwear = (product) => {
+    const category = getProductCategoryText(product);
+    const name = getProductNameText(product);
+    const base = category || name;
+    const c = String(base).trim().toLowerCase();
+    return (
+      c.includes("footwear") ||
+      c.includes("shoes") ||
+      c.includes("shoe") ||
+      c.includes("derby") ||
+      c.includes("loafer") ||
+      c.includes("sneaker") ||
+      c.includes("boot") ||
+      c.includes("sandal") ||
+      c.includes("slipper") ||
+      c.includes("heels")
+    );
+  };
+
+  const getDefaultSize = (product) => {
+    if (!product || isAccessories(product)) return "";
+    return isFootwear(product) ? "8" : "M";
+  };
+
+  const getSizeOptions = (product) => {
+    if (!product || isAccessories(product)) return [];
+    if (isFootwear(product)) {
+      return Array.from({ length: 9 }, (_, i) => String(i + 4)); // 4..12
+    }
+    return ["S", "M", "L", "XL", "XXL"];
   };
 
   const normalizeImageSrc = (ref) => {
@@ -804,6 +888,7 @@ export default function Chatbot_Kiosk({ customerId }) {
     event?.preventDefault?.();
     const itemCode = (barcodeItemCode || "").trim();
     const qty = Math.max(1, Number(barcodeQty || 1));
+    const size = (barcodeSize || "").trim();
     if (!customerId || !itemCode || isLoading) return;
 
     setIsLoading(true);
@@ -823,8 +908,9 @@ export default function Chatbot_Kiosk({ customerId }) {
     try {
       // Handle barcode add-to-cart internally: update cart UI without showing
       // the agent's "Added to cart" message in the chat.
+      const sizeSuffix = size ? ` size ${size}` : "";
       const responseText = await fetchKioskResponseText(
-        `add to cart product id ${itemCode} quantity ${qty}`,
+        `add to cart product id ${itemCode} quantity ${qty}${sizeSuffix}`,
       );
 
       if (
@@ -839,6 +925,7 @@ export default function Chatbot_Kiosk({ customerId }) {
       setBarcodePanelOpen(false);
       setBarcodeItemCode("");
       setBarcodeQty(1);
+      setBarcodeSize("");
       pushTimelineEntry({
         action: "add_to_cart_agent",
         tool: "add_to_cart_agent",
@@ -853,6 +940,98 @@ export default function Chatbot_Kiosk({ customerId }) {
       pushTimelineEntry({
         action: "add_to_cart_agent",
         tool: "add_to_cart_agent",
+        status: "error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSwitchToOnline = async () => {
+    if (!customerId) {
+      alert("Customer ID is required");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Switch your in-store cart to online? You can pay for these items later from home.",
+    );
+    if (!confirmed) return;
+
+    setIsLoading(true);
+    pushTimelineEntry({
+      action: "Switch Cart to Online",
+      tool: "switch_channel_instore_to_online",
+      status: "in-progress",
+      logs: [
+        {
+          time: formatLocalTime(),
+          text: `system → Switching offline cart to online for customer ${customerId}`,
+          variant: "system",
+        },
+      ],
+    });
+
+    try {
+      const response = await fetch(
+        "http://localhost:8000/api/cart/switch-to-online",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customer_id: customerId }),
+        },
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        const itemCount = data.items_switched || 0;
+        const congratsMessage = `🎉✨ **Congratulations!** ✨🎉
+
+**What a Brilliant Choice!** 🌟
+
+We're absolutely delighted to offer you this incredible flexibility! Now you can browse, explore, and add your favorite products from our entire collection to your cart at your leisure. 
+
+Products successfully moved to your online cart!** 🛒
+
+Feel free to continue shopping from the comfort of your home and complete your payment whenever you're ready. 💳✨
+
+**Happy Shopping!** 🎊`;
+
+        addMessage({
+          type: "ai",
+          text: congratsMessage,
+          timestamp: new Date(),
+        });
+        pushTimelineEntry({
+          action: "Switch Cart to Online",
+          tool: "switch_channel_instore_to_online",
+          status: "completed",
+        });
+        // Refresh to show empty offline cart
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await refreshCartSilently();
+      } else {
+        addMessage({
+          type: "ai",
+          text: data.error || "❌ Failed to switch cart to online.",
+          timestamp: new Date(),
+        });
+        pushTimelineEntry({
+          action: "Switch Cart to Online",
+          tool: "switch_channel_instore_to_online",
+          status: "error",
+        });
+      }
+    } catch (error) {
+      console.error("Switch to online error:", error);
+      addMessage({
+        type: "ai",
+        text: "❌ Error switching cart to online. Please try again.",
+        timestamp: new Date(),
+      });
+      pushTimelineEntry({
+        action: "Switch Cart to Online",
+        tool: "switch_channel_instore_to_online",
         status: "error",
       });
     } finally {
@@ -946,6 +1125,64 @@ export default function Chatbot_Kiosk({ customerId }) {
       addMessage({
         type: "ai",
         text: "Sorry, there was an error updating the quantity. Please try again.",
+        timestamp: new Date(),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateCartSize = async (orderId, productName, newSize) => {
+    if (!orderId) return;
+    const sizeValue = String(newSize || "").trim();
+
+    setIsLoading(true);
+    pushTimelineEntry({
+      action: `Update Size${productName ? `: ${productName}` : ""}`,
+      tool: "view_cart_agent",
+      status: "in-progress",
+      logs: [
+        {
+          time: formatLocalTime(),
+          text: `system → cart/update-size: order_id=${orderId}, size=${sizeValue || "(empty)"}`,
+          variant: "system",
+        },
+      ],
+    });
+
+    // Optimistic UI update
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m?.type !== "cartItems" || !Array.isArray(m.cartItems)) return m;
+        return {
+          ...m,
+          cartItems: m.cartItems.map((it) =>
+            it.order_id === orderId ? { ...it, size: sizeValue } : it,
+          ),
+        };
+      }),
+    );
+
+    try {
+      const res = await fetch(CART_UPDATE_SIZE_API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: orderId, size: sizeValue }),
+      });
+      const data = await res.json();
+      if (!data?.success) {
+        addMessage({
+          type: "ai",
+          text: data?.error || "Failed to update size. Please try again.",
+          timestamp: new Date(),
+        });
+      }
+
+      await refreshCartSilently();
+    } catch {
+      addMessage({
+        type: "ai",
+        text: "Sorry, there was an error updating the size. Please try again.",
         timestamp: new Date(),
       });
     } finally {
@@ -1476,8 +1713,14 @@ export default function Chatbot_Kiosk({ customerId }) {
                       disabled={isLoading}
                       type="button"
                       role="menuitem"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, #ff8c00 0%, #ffa500 100%)",
+                        color: "white",
+                        border: "none",
+                      }}
                     >
-                      Go For Payment
+                      💳 Go For Payment
                     </button>
                     <button
                       className="kiosk-action-tools-btn primary"
@@ -1488,8 +1731,14 @@ export default function Chatbot_Kiosk({ customerId }) {
                       disabled={isLoading}
                       type="button"
                       role="menuitem"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, #ff8c00 0%, #ffa500 100%)",
+                        color: "white",
+                        border: "none",
+                      }}
                     >
-                      Bar Code ID
+                      📱 Scan Product
                     </button>
                   </div>
                 )}
@@ -1534,6 +1783,20 @@ export default function Chatbot_Kiosk({ customerId }) {
                           +
                         </button>
                       </div>
+                    </div>
+
+                    <div className="kiosk-barcode-field">
+                      <label className="kiosk-barcode-label">
+                        Size (optional)
+                      </label>
+                      <input
+                        className="kiosk-barcode-input"
+                        type="text"
+                        value={barcodeSize}
+                        onChange={(e) => setBarcodeSize(e.target.value)}
+                        placeholder="e.g. M or 8"
+                        disabled={isLoading}
+                      />
                     </div>
 
                     <div className="kiosk-barcode-actions">
@@ -1617,6 +1880,19 @@ export default function Chatbot_Kiosk({ customerId }) {
                           const totalAmount =
                             (Number(discountPrice) || 0) * quantity;
 
+                          const accessories = isAccessories(item);
+                          const sizeOptions = getSizeOptions(item);
+                          const rawSize = String(item?.size || "").trim();
+                          const initialSize = getDefaultSize(item);
+                          const showSizeSelect = sizeOptions.length > 0;
+                          const sizeValue = showSizeSelect
+                            ? sizeOptions.includes(rawSize)
+                              ? rawSize
+                              : sizeOptions.includes(initialSize)
+                                ? initialSize
+                                : sizeOptions[0] || ""
+                            : "";
+
                           return (
                             <div
                               key={
@@ -1656,6 +1932,33 @@ export default function Chatbot_Kiosk({ customerId }) {
                                   {item.store_name || item.store_id ? (
                                     <div className="kiosk-cart-item-meta">
                                       Store: {item.store_name || item.store_id}
+                                    </div>
+                                  ) : null}
+
+                                  {showSizeSelect ? (
+                                    <div className="kiosk-cart-size-row">
+                                      <span className="kiosk-cart-size-label">
+                                        Size:
+                                      </span>
+                                      <select
+                                        className="kiosk-cart-size-select"
+                                        value={sizeValue}
+                                        disabled={isLoading}
+                                        aria-label={`Select size for ${item.product_name || "item"}`}
+                                        onChange={(e) =>
+                                          handleUpdateCartSize(
+                                            item.order_id,
+                                            item.product_name,
+                                            e.target.value,
+                                          )
+                                        }
+                                      >
+                                        {sizeOptions.map((s) => (
+                                          <option key={s} value={s}>
+                                            {s}
+                                          </option>
+                                        ))}
+                                      </select>
                                     </div>
                                   ) : null}
 
@@ -1767,14 +2070,14 @@ export default function Chatbot_Kiosk({ customerId }) {
                             }
                             disabled={isLoading}
                           >
-                            Proceed to payment
+                            💳 Proceed to payment
                           </button>
                           <button
-                            className="kiosk-cart-cta"
-                            onClick={() => handleQuickReply("no")}
+                            className="kiosk-cart-cta primary"
+                            onClick={() => handleSwitchToOnline()}
                             disabled={isLoading}
                           >
-                            Not now
+                            🌐 Switch to Online Payment
                           </button>
                         </div>
                       </div>

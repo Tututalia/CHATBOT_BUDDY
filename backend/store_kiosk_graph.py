@@ -12,7 +12,7 @@ from datetime import datetime
 from crud import cart_crud, product_crud
 from models import Cart
 from database import get_db_session
-from typing import TypedDict, Annotated, List, Dict, Any
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -39,14 +39,21 @@ def _get_offline_store_id_for_customer(customer_id: str) -> str | None:
             store_id = getattr(item, "store_id", None)
             if store_id:
                 return store_id
-        return None
+        # return None
+        return "STR011"  # Default store ID if none found
     except Exception as e:
         print(f"Error resolving offline store_id for {customer_id}: {e}")
-        return None
+        # return None
+        return "STR011"
 
 
 @tool
-def kiosk_add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
+def kiosk_add_to_cart_agent(
+    product_id: str,
+    quantity: int,
+    customer_id: str,
+    size: Optional[str] = None,
+) -> str:
     """Kiosk-only add-to-cart.
 
     Requirements:
@@ -68,6 +75,12 @@ def kiosk_add_to_cart_agent(product_id: str, quantity: int, customer_id: str) ->
 
     if not customer_id:
         return "❌ Missing customer_id."
+
+    normalized_size: Optional[str] = None
+    if isinstance(size, str):
+        s = size.strip()
+        if s:
+            normalized_size = s
 
     store_id = _get_offline_store_id_for_customer(customer_id)
     if not store_id:
@@ -134,6 +147,7 @@ def kiosk_add_to_cart_agent(product_id: str, quantity: int, customer_id: str) ->
                 status="pending",
                 created_at=now,
                 quantity=quantity,
+                size=normalized_size,
             )
             cart_crud.create(session, cart)
 
@@ -144,6 +158,54 @@ def kiosk_add_to_cart_agent(product_id: str, quantity: int, customer_id: str) ->
     except Exception as e:
         print(f"Error in kiosk_add_to_cart_agent: {e}")
         return "❌ Error adding product to kiosk cart. Please try again."
+
+
+@tool
+def switch_channel_instore_to_online(customer_id: str) -> str:
+    """Switch customer's offline cart items to pending channel for later payment.
+
+    This allows customers to move their in-store cart to pending so they can pay later.
+    Updates all offline cart items for the customer:
+    - Sets store_id to NULL
+    - Changes channel from 'offline' to 'pending'
+    - Keeps status as 'pending'
+    """
+    if not customer_id:
+        return "❌ Customer ID is required."
+
+    try:
+        with get_db_session() as session:
+            # Find all offline cart items for this customer
+            offline_items = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "channel": "offline"},
+                operators={"customer_id": "==", "channel": "=="},
+                limit=100,
+            )
+
+            if not offline_items:
+                return "❌ No offline cart items found to switch to pending."
+
+            # Update each item
+            updated_count = 0
+            for item in offline_items:
+                cart_crud.update(
+                    session,
+                    item.order_id,
+                    {"store_id": None, "channel": "pending"}
+                )
+                updated_count += 1
+
+            session.commit()
+
+            return (
+                f"✅ Successfully switched {updated_count} item(s) from in-store to pending cart. "
+                f"You can now pay for these items later at your convenience."
+            )
+    except Exception as e:
+        print(f"Error in switch_channel_instore_to_online: {e}")
+        return "❌ Error switching cart to pending. Please try again."
+
 
 # ============ State Definition ============
 
@@ -272,8 +334,8 @@ def payment_method_node(state: KioskState):
     pay_all = state.get("pay_all", False)
 
     # If not paying for all and no specific order selected, return error
-    if not pay_all and not state.get("order_id"):
-        return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
+    # if not pay_all and not state.get("order_id"):
+    #     return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
 
     # Wait for user to select a payment method
     last_msg = state["messages"][-1] if state["messages"] else None
@@ -666,6 +728,7 @@ Have a great day! 🎉"""
                 if product and customer and cart_item:
                     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     qty = getattr(cart_item, 'quantity', 1)
+                    size = getattr(cart_item, 'size', None)
                     total_amount = product.price * qty
 
                     print("[DEBUG] Creating OrderHistory record...")
@@ -676,6 +739,7 @@ Have a great day! 🎉"""
                         product_id=curr_product_id,
                         product_name=product.product_name,
                         quantity=qty,
+                        size=size,
                         order_dates=now,
                         loyalty_points=getattr(customer, 'loyalty_points', 0)
                     )
@@ -690,6 +754,7 @@ Have a great day! 🎉"""
                         user_name=customer.customer_name,
                         product=product.product_name,
                         qty=qty,
+                        size=size,
                         mode="Offline",
                         store_name=store.store_name if store else "",
                         store_id=curr_store_id,

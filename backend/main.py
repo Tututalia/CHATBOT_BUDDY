@@ -18,7 +18,7 @@ from models import Customer, Product, Store, OrderHistory, StoreKeeperTransactio
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
-from intelligent_agent_graph import run_agent, create_agent_graph
+from intelligent_agent_graph import run_agent, create_agent_graph, upsell_agent
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -109,6 +109,7 @@ def _tool_to_agent_map() -> Dict[str, str]:
         "customer_info_agent": "Customer Info Agent",
         "inventory_agent": "Inventory Agent",
         "recommendation_agent": "Recommendation Agent",
+        "upsell_agent": "Upsell Agent",
         "add_to_cart_agent": "Add to Cart Agent",
         "view_cart_agent": "View Cart Agent",
         "remove_from_cart_agent": "Remove from Cart Agent",
@@ -285,6 +286,7 @@ def get_customer_orders_endpoint(customer_id: str):
                 "category": product.category,
                 "price": product.price,
                 "quantity": order.quantity,
+                "size": order.size,
                 "purchase_date": order.order_dates,
                 "loyalty_points": order.loyalty_points,
                 "image_reference": product.image_reference
@@ -338,6 +340,7 @@ def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
                 "category": product.category,
                 "price": product.price,
                 "quantity": order.quantity,
+                "size": order.size,
                 "purchase_date": order.order_dates,
                 "loyalty_points": order.loyalty_points,
                 "image_reference": product.image_reference,
@@ -1450,6 +1453,11 @@ class UpdateCartQuantityModel(BaseModel):
     quantity: int
 
 
+class UpdateCartSizeModel(BaseModel):
+    order_id: str
+    size: Optional[str] = None
+
+
 @app.put("/api/cart/update-quantity")
 def update_cart_quantity(update_data: UpdateCartQuantityModel):
     """Update the quantity of an item in the cart"""
@@ -1491,6 +1499,38 @@ def update_cart_quantity(update_data: UpdateCartQuantityModel):
                 }
             else:
                 return {"success": False, "error": "Failed to update quantity"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.put("/api/cart/update-size")
+def update_cart_size(update_data: UpdateCartSizeModel):
+    """Update the size of an item in the cart"""
+    try:
+        with get_db_session() as session:
+            cart_item = cart_crud.get_by_id(session, update_data.order_id)
+            if not cart_item:
+                return {"success": False, "error": "Cart item not found"}
+
+            size_value = update_data.size
+            if isinstance(size_value, str):
+                size_value = size_value.strip() or None
+
+            updated_item = cart_crud.update(
+                session,
+                update_data.order_id,
+                {"size": size_value},
+            )
+            if updated_item:
+                return {
+                    "success": True,
+                    "message": "Updated size",
+                    "cart_item": {
+                        "order_id": updated_item.order_id,
+                        "size": getattr(updated_item, "size", None),
+                    },
+                }
+            return {"success": False, "error": "Failed to update size"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1772,6 +1812,9 @@ def _summarize_tool_start(tool_name: str, tool_args: Any) -> str:
     if tool_name == "view_cart_agent":
         return "Loading cart items"
 
+    if tool_name == "upsell_agent":
+        return "Finding attractive accessories for you"
+
     if tool_name == "choose_channel_agent":
         channel = args.get("channel")
         return f"Choosing purchase channel: {channel}" if channel else "Choosing purchase channel"
@@ -1898,6 +1941,7 @@ async def ws_chat(websocket: WebSocket):
             request_id = payload.get("request_id") or ""
             customer_id = payload.get("customer_id")
             user_query = payload.get("message")
+            payload_size = payload.get("size")
 
             if not customer_id or not user_query:
                 await websocket.send_json({
@@ -2253,6 +2297,17 @@ async def ws_chat(websocket: WebSocket):
                 for tool_call in tool_calls:
                     tool_name = (tool_call or {}).get("name", "")
                     tool_args = (tool_call or {}).get("args", {})
+
+                    # If the frontend provided size in the websocket payload for an add-to-cart action,
+                    # pass it through as a tool arg so it can be persisted in the cart table.
+                    if tool_name == "add_to_cart_agent" and payload_size:
+                        if not isinstance(tool_args, dict):
+                            tool_args = {}
+                        tool_args.setdefault("size", payload_size)
+                        try:
+                            tool_call["args"] = tool_args
+                        except Exception:
+                            pass
                     agent_label = tool_to_agent.get(tool_name, tool_name)
 
                     if tool_name and tool_name not in agent_calls:
@@ -2379,6 +2434,198 @@ async def ws_chat(websocket: WebSocket):
             except Exception:
                 pass
 
+            # ---- Autonomous Upsell after View Cart ----
+            # If view_cart_agent was called, trigger upsell_agent → inventory_agent → recommendation_agent
+            if "view_cart_agent" in agent_calls and response_data.get("cart_items"):
+                try:
+                    from intelligent_agent_graph import (
+                        upsell_agent as _upsell_tool,
+                        inventory_agent as _inventory_tool,
+                        recommendation_agent as _recommendation_tool,
+                    )
+
+                    # --- Upsell Agent timeline ---
+                    upsell_tool_name = "upsell_agent"
+                    upsell_label = tool_to_agent.get(
+                        upsell_tool_name, "Upsell Agent")
+                    agent_calls.append(upsell_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": upsell_label,
+                        "tool": upsell_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": upsell_tool_name,
+                        "agent": upsell_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"Master Orchestrator → {upsell_label}"),
+                    })
+                    upsell_start = _summarize_tool_start(
+                        upsell_tool_name, {"customer_id": customer_id})
+                    if upsell_start:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": upsell_tool_name,
+                            "agent": upsell_label,
+                            "timestamp": "now",
+                            "text": _ws_line(upsell_start),
+                        })
+
+                    upsell_raw = await asyncio.to_thread(
+                        _upsell_tool.invoke, {"customer_id": customer_id}
+                    )
+                    upsell_data = json.loads(upsell_raw) if isinstance(
+                        upsell_raw, str) else upsell_raw
+                    upsell_query = upsell_data.get(
+                        "search_query", "show me watches")
+
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": upsell_tool_name,
+                        "agent": upsell_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"Upsell category: {upsell_data.get('category', 'accessories')}"),
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": upsell_label,
+                        "tool": upsell_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # --- Inventory Agent timeline (upsell search) ---
+                    inv_tool_name = "inventory_agent"
+                    inv_label = tool_to_agent.get(
+                        inv_tool_name, "Inventory Agent")
+                    agent_calls.append(inv_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": inv_label,
+                        "tool": inv_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"{upsell_label} → {inv_label}"),
+                    })
+                    inv_start = _summarize_tool_start(
+                        inv_tool_name, {"search_query": upsell_query})
+                    if inv_start:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": inv_tool_name,
+                            "agent": inv_label,
+                            "timestamp": "now",
+                            "text": _ws_line(inv_start),
+                        })
+
+                    inv_raw = await asyncio.to_thread(
+                        _inventory_tool.invoke,
+                        {"search_query": upsell_query, "customer_id": customer_id},
+                    )
+
+                    inv_summary = _summarize_tool_result(
+                        inv_tool_name, inv_raw)
+                    if inv_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": inv_tool_name,
+                            "agent": inv_label,
+                            "timestamp": "now",
+                            "text": _ws_line(inv_summary),
+                        })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": inv_label,
+                        "tool": inv_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # --- Recommendation Agent timeline (upsell display) ---
+                    rec_tool_name = "recommendation_agent"
+                    rec_label = tool_to_agent.get(
+                        rec_tool_name, "Recommendation Agent")
+                    agent_calls.append(rec_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": rec_label,
+                        "tool": rec_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": rec_tool_name,
+                        "agent": rec_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"{inv_label} → {rec_label}"),
+                    })
+
+                    rec_raw = await asyncio.to_thread(
+                        _recommendation_tool.invoke, {
+                            "inventory_data": inv_raw}
+                    )
+
+                    rec_summary = _summarize_tool_result(
+                        rec_tool_name, rec_raw)
+                    if rec_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": rec_tool_name,
+                            "agent": rec_label,
+                            "timestamp": "now",
+                            "text": _ws_line(rec_summary),
+                        })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": rec_label,
+                        "tool": rec_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # Parse recommendation result and attach to response_data
+                    rec_parsed = _try_parse_json(rec_raw)
+                    if isinstance(rec_parsed, dict):
+                        recs = (rec_parsed.get("responses") or {}).get(
+                            "recommendation", [])
+                        if recs:
+                            response_data["upsell"] = rec_parsed
+                            response_data["upsell"]["upsell_category"] = upsell_data.get(
+                                "category", "accessories")
+
+                except Exception as upsell_err:
+                    print(
+                        f"[UPSELL] Error during autonomous upsell: {upsell_err}")
+                    import traceback
+                    traceback.print_exc()
+
             await websocket.send_json({
                 "type": "final_response",
                 "request_id": request_id,
@@ -2431,12 +2678,22 @@ async def chat_with_kiosk(chat_message: ChatMessage):
                 r"\b(PRD\d+)\b", user_query, flags=re.IGNORECASE)
             qty_match = re.search(
                 r"\b(?:qty|quantity)\s*(\d+)\b", user_query, flags=re.IGNORECASE)
+            size_match = re.search(
+                r"\bsize\s*[:=]?\s*([A-Za-z]{1,3}|\d{1,2})\b",
+                user_query,
+                flags=re.IGNORECASE,
+            )
             if product_match:
                 product_id = product_match.group(1).upper()
                 qty = int(qty_match.group(1)) if qty_match else 1
+                size = size_match.group(1).strip() if size_match else None
                 tool_result = kiosk_add_to_cart_agent.invoke(
-                    {"product_id": product_id, "quantity": qty,
-                        "customer_id": customer_id}
+                    {
+                        "product_id": product_id,
+                        "quantity": qty,
+                        "customer_id": customer_id,
+                        "size": size,
+                    }
                 )
                 kiosk_sessions[customer_id] = state
                 return {"response": tool_result or ""}
@@ -2475,6 +2732,29 @@ async def chat_with_kiosk(chat_message: ChatMessage):
     except Exception as e:
         print(f"Error in kiosk chat endpoint: {e}")
         return {"response": f"Sorry, I encountered an error: {str(e)}"}
+
+
+@app.post("/api/cart/switch-to-online")
+async def switch_cart_to_online(request: dict):
+    """Switch customer's offline cart items to online channel for later payment"""
+    try:
+        customer_id = request.get("customer_id")
+        if not customer_id:
+            return {"success": False, "error": "Customer ID is required"}
+
+        # Use the tool from store_kiosk_graph
+        from store_kiosk_graph import switch_channel_instore_to_online
+        result = switch_channel_instore_to_online.invoke(
+            {"customer_id": customer_id})
+
+        # Check if operation was successful
+        if "✅" in result:
+            return {"success": True, "message": result}
+        else:
+            return {"success": False, "error": result}
+    except Exception as e:
+        print(f"Error in switch_cart_to_online endpoint: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.delete("/api/chat/history/{customer_id}")

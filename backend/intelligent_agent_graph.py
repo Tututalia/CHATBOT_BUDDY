@@ -935,7 +935,7 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
 
 
 @tool
-def add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
+def add_to_cart_agent(product_id: str, quantity: int, customer_id: str, size: str | None = None) -> str:
     """
     Adds a product to the customer's cart with specified quantity.
     Stores the product in the cart table as 'pending' status.
@@ -978,6 +978,7 @@ def add_to_cart_agent(product_id: str, quantity: int, customer_id: str) -> str:
                 "channel": "pending",  # Mark as pending until user decides online/offline
                 "status": "pending",
                 "quantity": quantity,
+                "size": size,
                 "created_at": datetime.utcnow().isoformat()
             }
 
@@ -1051,6 +1052,7 @@ def view_cart_agent(customer_id: str) -> str:
                 product = get_product_by_id(item.product_id)
                 if product:
                     qty = getattr(item, 'quantity', 1)
+                    size = getattr(item, 'size', None)
                     original_price = product.price
                     discount = getattr(product, 'discount', 0) or 0
                     discount_price = round(
@@ -1078,6 +1080,7 @@ def view_cart_agent(customer_id: str) -> str:
                         "product_id": item.product_id,
                         "product_name": product.product_name,
                         "quantity": qty,
+                        "size": size,
                         "price": discount_price,
                         "original_price": original_price,
                         "discount": discount,
@@ -1603,6 +1606,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
                 product_id = cart_item.product_id
                 item_order_id = cart_item.order_id
                 qty = getattr(cart_item, 'quantity', 1)
+                size = getattr(cart_item, 'size', None)
 
                 # Get product details
                 product = ProductCRUD.get_by_id(session, product_id)
@@ -1630,6 +1634,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
                         product_id=product_id,
                         product_name=product_name,
                         quantity=qty,
+                        size=size,
                         order_dates=now,
                         loyalty_points=loyalty_pts * qty
                     )
@@ -1650,6 +1655,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
                         user_name=customer_name,
                         product=product_name,
                         qty=qty,
+                        size=size,
                         mode="Online",
                         store_name="Online",
                         store_id=None,
@@ -1732,11 +1738,42 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
     return result
 
 
+@tool
+def upsell_agent(customer_id: str) -> str:
+    """
+    Boosts sales by recommending attractive accessory products after the customer views their cart.
+    This agent is triggered AUTONOMOUSLY after view_cart_agent completes.
+    It randomly selects an accessory category (belts, shoes, watches, wallets) and
+    returns a search query for inventory_agent to follow the normal recommendation path.
+
+    Args:
+        customer_id: The customer ID
+
+    Returns:
+        JSON with a random accessory search query for inventory_agent
+    """
+    accessory_categories = ["belts", "shoes", "watches", "wallets"]
+    selected = random.choice(accessory_categories)
+    search_query = f"show me {selected}"
+
+    print(
+        f"[UPSELL] Triggered for customer {customer_id} — recommending: {selected}")
+
+    return json.dumps({
+        "tool": "upsell_agent",
+        "type": "upsell",
+        "search_query": search_query,
+        "category": selected,
+        "customer_id": customer_id
+    })
+
+
 # ============ Agent Tools List ============
 tools = [
     customer_info_agent,
     inventory_agent,
     recommendation_agent,
+    upsell_agent,
     add_to_cart_agent,
     view_cart_agent,
     remove_from_cart_agent,
@@ -1786,6 +1823,8 @@ Before choosing which tool to call, CHECK the conversation history:
 - DO NOT call inventory_agent or view_cart_agent again
 
 CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
+
+**IMPORTANT: DO NOT call `upsell_agent` directly.** It is triggered AUTOMATICALLY by the system after `view_cart_agent` completes. The upsell_agent recommends accessory products (belts, shoes, watches, wallets) to boost sales. You do not need to handle this — it runs autonomously.
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
 - When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query AND customer_id parameters

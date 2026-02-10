@@ -86,6 +86,7 @@ class OrderHistory(SQLModel, table=True):
     product_id: str = Field(foreign_key="products.product_id", index=True)
     product_name: str
     quantity: int
+    size: Optional[str] = Field(default=None)
     order_dates: str  # Date as string
     loyalty_points: int
 
@@ -105,6 +106,7 @@ class StoreKeeperTransaction(SQLModel, table=True):
     user_name: str
     product: str  # Product name
     qty: int
+    size: Optional[str] = Field(default=None)
     mode: str  # Online/Offline
     # store_name is a human-readable name; use `store_id` as the FK to `stores.store_id`
     store_name: str = Field(index=True)
@@ -155,6 +157,7 @@ class Cart(SQLModel, table=True):
     status: Optional[str] = Field(default="pending")
     created_at: Optional[str] = Field(default=None)
     quantity: int = Field(default=1)  # Quantity of product in cart
+    size: Optional[str] = Field(default=None)
 
     # Relationships
     customer: Optional[Customer] = Relationship()

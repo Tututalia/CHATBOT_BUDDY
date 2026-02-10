@@ -48,6 +48,7 @@ export default function ChatBot({ customerId }) {
   const [lastRecommendations, setLastRecommendations] = useState([]);
   const [productReviews, setProductReviews] = useState({});
   const [productQuantities, setProductQuantities] = useState({});
+  const [productSizes, setProductSizes] = useState({});
   const [conversationLog, setConversationLog] = useState([]);
   const [isRefundLoading, setIsRefundLoading] = useState(false);
   const [refundModal, setRefundModal] = useState({
@@ -612,7 +613,7 @@ export default function ChatBot({ customerId }) {
     });
   };
 
-  const chatWithAgentViaWebSocket = (customerId, messageText) => {
+  const chatWithAgentViaWebSocket = (customerId, messageText, extraPayload) => {
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
     const wsUrl = `${scheme}://${window.location.hostname}:8000/ws/chat`;
@@ -638,6 +639,9 @@ export default function ChatBot({ customerId }) {
             request_id: requestId,
             customer_id: customerId,
             message: messageText,
+            ...(extraPayload && typeof extraPayload === "object"
+              ? extraPayload
+              : {}),
           }),
         );
       };
@@ -819,6 +823,38 @@ export default function ChatBot({ customerId }) {
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, cartCardsMessage]);
+
+          // Render autonomous upsell recommendations if present
+          if (
+            response.upsell &&
+            response.upsell.responses &&
+            response.upsell.responses.recommendation &&
+            response.upsell.responses.recommendation.length > 0
+          ) {
+            const upsellCategory =
+              response.upsell.upsell_category || "accessories";
+            setLastRecommendations(response.upsell.responses.recommendation);
+            fetchReviewsByProductIds(
+              response.upsell.responses.recommendation.map(
+                (p) => p?.product_id,
+              ),
+            );
+            setTimeout(() => {
+              const upsellHeaderMessage = {
+                type: "ai",
+                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, upsellHeaderMessage]);
+
+              const upsellCardsMessage = {
+                type: "productCards",
+                productCards: response.upsell.responses.recommendation,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, upsellCardsMessage]);
+            }, 400);
+          }
         } else {
           const aiMessage = {
             type: "ai",
@@ -1782,6 +1818,41 @@ export default function ChatBot({ customerId }) {
     });
   };
 
+  const isAccessories = (product) => {
+    const category =
+      (product && (product.category || product.product_category)) || "";
+    const c = String(category).trim().toLowerCase();
+
+    return (
+      c.includes("accessories") ||
+      c.includes("accessory") ||
+      c.includes("belt") ||
+      c.includes("perfume") ||
+      c.includes("wallet") ||
+      c.includes("costume jewellery") ||
+      c.includes("costume jewelry")
+    );
+  };
+
+  const isFootwear = (product) => {
+    const category = (product && product.category) || "";
+    const c = String(category).toLowerCase();
+    return c.includes("footwear") || c.includes("shoes") || c.includes("shoe");
+  };
+
+  const getDefaultSize = (product) => {
+    if (!product || isAccessories(product)) return "";
+    return isFootwear(product) ? "8" : "M";
+  };
+
+  const getSizeOptions = (product) => {
+    if (!product || isAccessories(product)) return [];
+    if (isFootwear(product)) {
+      return Array.from({ length: 9 }, (_, i) => String(i + 4)); // 4..12
+    }
+    return ["S", "M", "L", "XL", "XXL"];
+  };
+
   const handleRemoveFromCart = async (orderId, productName) => {
     setIsLoading(true);
 
@@ -1975,15 +2046,44 @@ export default function ChatBot({ customerId }) {
           console.log("not silent", cartCardsMessage);
           setMessages((prev) => [...prev, cartCardsMessage]);
 
-          // Add follow-up message asking about next steps
-          setTimeout(() => {
-            const followUpMessage = {
-              type: "ai",
-              text: "Would you like to proceed with the payment or want to add more products? 🛒",
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, followUpMessage]);
-          }, 300);
+          // Render autonomous upsell recommendations if present
+          if (
+            data.upsell &&
+            data.upsell.responses &&
+            data.upsell.responses.recommendation &&
+            data.upsell.responses.recommendation.length > 0
+          ) {
+            const upsellCategory = data.upsell.upsell_category || "accessories";
+            setLastRecommendations(data.upsell.responses.recommendation);
+            fetchReviewsByProductIds(
+              data.upsell.responses.recommendation.map((p) => p?.product_id),
+            );
+            setTimeout(() => {
+              const upsellHeaderMessage = {
+                type: "ai",
+                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, upsellHeaderMessage]);
+
+              const upsellCardsMessage = {
+                type: "productCards",
+                productCards: data.upsell.responses.recommendation,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, upsellCardsMessage]);
+            }, 400);
+          } else {
+            // Add follow-up message asking about next steps (only if no upsell)
+            setTimeout(() => {
+              const followUpMessage = {
+                type: "ai",
+                text: "Would you like to proceed with the payment or want to add more products? 🛒",
+                timestamp: new Date(),
+              };
+              setMessages((prev) => [...prev, followUpMessage]);
+            }, 300);
+          }
         }
       } else {
         const aiMessage = {
@@ -2027,9 +2127,14 @@ export default function ChatBot({ customerId }) {
     }
 
     try {
+      const selectedSize = isAccessories(product)
+        ? undefined
+        : productSizes[product.product_id] || getDefaultSize(product);
+
       const data = await chatWithAgentViaWebSocket(
         customerId,
         `Add ${quantity} units of product ${product.product_id} to cart`,
+        selectedSize ? { size: selectedSize } : undefined,
       );
 
       // Only show success message if it's not a bulk add
@@ -2051,6 +2156,13 @@ export default function ChatBot({ customerId }) {
 
       // Reset quantity for this product
       setProductQuantities((prev) => {
+        const updated = { ...prev };
+        delete updated[product.product_id];
+        return updated;
+      });
+
+      // Reset size for this product (keeps UI consistent for next recommendation turn)
+      setProductSizes((prev) => {
         const updated = { ...prev };
         delete updated[product.product_id];
         return updated;
@@ -4005,33 +4117,70 @@ export default function ChatBot({ customerId }) {
                                                 </p>
                                               )}
                                             </div>
-                                            <div className="quantity-controls">
-                                              <button
-                                                className="qty-btn"
-                                                onClick={() =>
-                                                  handleQuantityChange(
-                                                    product.product_id,
-                                                    -1,
-                                                  )
-                                                }
-                                                disabled={quantity === 0}
-                                              >
-                                                −
-                                              </button>
-                                              <span className="qty-value">
-                                                {quantity}
-                                              </span>
-                                              <button
-                                                className="qty-btn"
-                                                onClick={() =>
-                                                  handleQuantityChange(
-                                                    product.product_id,
-                                                    1,
-                                                  )
-                                                }
-                                              >
-                                                +
-                                              </button>
+                                            <div className="qty-size-row">
+                                              <div className="quantity-controls">
+                                                <button
+                                                  className="qty-btn"
+                                                  onClick={() =>
+                                                    handleQuantityChange(
+                                                      product.product_id,
+                                                      -1,
+                                                    )
+                                                  }
+                                                  disabled={quantity === 0}
+                                                >
+                                                  −
+                                                </button>
+                                                <span className="qty-value">
+                                                  {quantity}
+                                                </span>
+                                                <button
+                                                  className="qty-btn"
+                                                  onClick={() =>
+                                                    handleQuantityChange(
+                                                      product.product_id,
+                                                      1,
+                                                    )
+                                                  }
+                                                >
+                                                  +
+                                                </button>
+                                              </div>
+
+                                              {!isAccessories(product) && (
+                                                <div className="size-control">
+                                                  <select
+                                                    className="size-select"
+                                                    value={
+                                                      productSizes[
+                                                        product.product_id
+                                                      ] ||
+                                                      getDefaultSize(product)
+                                                    }
+                                                    onChange={(e) =>
+                                                      setProductSizes(
+                                                        (prev) => ({
+                                                          ...prev,
+                                                          [product.product_id]:
+                                                            e.target.value,
+                                                        }),
+                                                      )
+                                                    }
+                                                    aria-label="Select size"
+                                                  >
+                                                    {getSizeOptions(
+                                                      product,
+                                                    ).map((opt) => (
+                                                      <option
+                                                        key={opt}
+                                                        value={opt}
+                                                      >
+                                                        {opt}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                </div>
+                                              )}
                                             </div>
                                           </div>
                                         </div>
@@ -4065,6 +4214,11 @@ export default function ChatBot({ customerId }) {
                                     const savings = item.savings || 0;
                                     const totalAmount =
                                       discountPrice * item.quantity;
+                                    const sizeValue =
+                                      item.size ??
+                                      item.selected_size ??
+                                      item.product_size ??
+                                      "";
 
                                     return (
                                       <div
@@ -4123,6 +4277,11 @@ export default function ChatBot({ customerId }) {
                                           <p className="product-id-text">
                                             ID: {item.product_id}
                                           </p>
+                                          {sizeValue ? (
+                                            <p className="product-id-text">
+                                              Size: {sizeValue}
+                                            </p>
+                                          ) : null}
 
                                           {/* Price Display with Discount */}
                                           <div className="product-pricing">
@@ -4472,6 +4631,7 @@ export default function ChatBot({ customerId }) {
                                   const discountedPrice = item.price_per_unit || item.price;
                                   const hasDiscount = item.discount && item.discount > 0;
                                   const totalAmount = item.total_amount || (discountedPrice * item.quantity);
+                                  const sizeValue = item.size ?? item.selected_size ?? item.product_size ?? "";
 
                                   return (
                                     <div key={item.order_id} className="cart-product-card">
@@ -4487,6 +4647,9 @@ export default function ChatBot({ customerId }) {
                                       </div>
                                       <div className="cart-product-info">
                                         <h4 className="product-name">{item.product_name}</h4>
+                                        {sizeValue ? (
+                                          <p className="product-id-text">Size: {sizeValue}</p>
+                                        ) : null}
                                         <div className="product-pricing">
                                           {hasDiscount ? (
                                             <>

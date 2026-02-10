@@ -111,7 +111,7 @@ export default function Pages() {
 
   return (
     <div className="bg-[#f5f5f5] min-h-screen">
-      <header className="bg-white shadow-sm">
+      <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
