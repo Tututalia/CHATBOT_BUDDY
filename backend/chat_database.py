@@ -34,6 +34,15 @@ def init_database():
         ON conversations (customer_id, session_id)
     """)
 
+    # Create payload table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS payload (
+            customer_id TEXT,
+            payload TEXT,
+            FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+        )
+    """)
+
     conn.commit()
     conn.close()
     print(f"✅ Database initialized at: {DB_PATH}")

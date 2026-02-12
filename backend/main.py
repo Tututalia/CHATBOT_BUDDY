@@ -1,22 +1,38 @@
+from http.client import HTTPException
+import logging
 from crud import (
     product_crud, customer_crud, store_crud, order_history_crud,
     store_keeper_transaction_crud, cart_crud, admin_dashboard_data_crud,
-    ProductCRUD, CustomerCRUD, CartCRUD
+    payload_crud, ProductCRUD, CustomerCRUD, CartCRUD
 )
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData
+from store_kiosk_graph import (
+    welcome_node,
+    payment_prompt_node,
+    payment_method_node,
+    fulfillment_node,
+    loyalty_node,
+    post_purchase_node,
+    kiosk_add_to_cart_agent,
+)
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Payload, Feedback
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
-from intelligent_agent_graph import run_agent, create_agent_graph
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from intelligent_agent_graph import run_agent, create_agent_graph, upsell_agent
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, ConfigDict
 import json
 import asyncio
+import re
 from sqlmodel import Session, select, func
 from dotenv import load_dotenv
+from whatsapp import send_message, get_text_message_input
+from security import signature_required
+from fastapi.responses import JSONResponse, PlainTextResponse
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
@@ -74,10 +90,63 @@ def get_customer_orders_from_db(customer_id: str) -> List[OrderHistory]:
     """Get order history for a customer from database"""
     try:
         with get_db_session() as session:
-            return order_history_crud.filter(session, {'customer_id': customer_id})
+            return order_history_crud.filter(
+                session,
+                {"customer_id": customer_id},
+                order_by="order_dates",
+                order_desc=True,
+                limit=1000,
+            )
     except Exception as e:
         print(f"Error getting orders from database: {e}")
         return []
+
+
+def _tool_to_agent_map() -> Dict[str, str]:
+    """Map LangChain tool names to timeline display labels."""
+    return {
+        # Tool names correspond to @tool functions in intelligent_agent_graph.py
+        "customer_info_agent": "Customer Info Agent",
+        "inventory_agent": "Inventory Agent",
+        "recommendation_agent": "Recommendation Agent",
+        "upsell_agent": "Upsell Agent",
+        "add_to_cart_agent": "Add to Cart Agent",
+        "view_cart_agent": "View Cart Agent",
+        "remove_from_cart_agent": "Remove from Cart Agent",
+        "choose_channel_agent": "Sales Agent",
+        "payment_agent": "Payment Agent",
+        "fulfillment_agent": "Fulfillment Agent",
+        "loyalty_agent": "Loyalty Agent",
+        "post_purchase_agent": "Post-Purchase Agent",
+    }
+
+
+def _format_timeline_messages_from_langchain_messages(messages: List[Any]) -> List[Dict[str, str]]:
+    """Extract a deduplicated timeline from LangChain messages containing tool calls."""
+    timeline_messages: List[Dict[str, str]] = []
+    seen_agents: set[str] = set()
+    tool_to_agent_map = _tool_to_agent_map()
+
+    try:
+        from langchain_core.messages import AIMessage as LangChainAIMessage
+    except Exception:
+        LangChainAIMessage = None  # type: ignore
+
+    for message in messages:
+        if LangChainAIMessage is not None and isinstance(message, LangChainAIMessage):
+            tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls:
+                for tool_call in tool_calls:
+                    tool_name = (tool_call or {}).get("name", "")
+                    agent_name = tool_to_agent_map.get(tool_name, tool_name)
+                    if agent_name and agent_name not in seen_agents:
+                        seen_agents.add(agent_name)
+                        timeline_messages.append({
+                            "agent": agent_name,
+                            "timestamp": "now",
+                        })
+
+    return timeline_messages
 
 
 @app.get("/")
@@ -217,6 +286,7 @@ def get_customer_orders_endpoint(customer_id: str):
                 "category": product.category,
                 "price": product.price,
                 "quantity": order.quantity,
+                "size": order.size,
                 "purchase_date": order.order_dates,
                 "loyalty_points": order.loyalty_points,
                 "image_reference": product.image_reference
@@ -225,6 +295,61 @@ def get_customer_orders_endpoint(customer_id: str):
     return {
         "customer_id": customer_id,
         "order_history": order_products
+    }
+
+
+@app.get("/api/customer/{customer_id}/orders/recent")
+def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
+    """Get customer's order history for the last N days (default 7).
+
+    Data source: order_history table filtered by customer_id and order_dates.
+    """
+    if days <= 0:
+        raise HTTPException(status_code=400, detail="days must be > 0")
+
+    customer = load_customer_from_db(customer_id)
+    if customer is None:
+        return {"error": f"Customer with ID {customer_id} not found"}
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    orders = get_customer_orders_from_db(customer_id)
+
+    recent_orders: list[tuple[datetime, OrderHistory]] = []
+    for order in orders:
+        raw_date = (order.order_dates or "").strip()
+        if not raw_date:
+            continue
+        try:
+            parsed = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        except Exception:
+            # If legacy/non-ISO formats exist, skip them rather than failing the whole request
+            continue
+        if parsed >= cutoff:
+            recent_orders.append((parsed, order))
+
+    recent_orders.sort(key=lambda x: x[0], reverse=True)
+
+    order_products = []
+    for parsed, order in recent_orders:
+        product = get_product_from_db(order.product_id)
+        if product:
+            order_products.append({
+                "transaction_id": order.transaction_id,
+                "product_id": product.product_id,
+                "product_name": product.product_name,
+                "category": product.category,
+                "price": product.price,
+                "quantity": order.quantity,
+                "size": order.size,
+                "purchase_date": order.order_dates,
+                "loyalty_points": order.loyalty_points,
+                "image_reference": product.image_reference,
+            })
+
+    return {
+        "customer_id": customer_id,
+        "days": days,
+        "order_history": order_products,
     }
 
 
@@ -311,6 +436,26 @@ def get_multiple_products(product_ids: str):
         "products": products,
         "total_count": len(products)
     }
+
+
+@app.get("/api/feedback/multiple/{product_ids}")
+def get_multiple_feedback_reviews(product_ids: str):
+    """Get product reviews from feedback table by pipe-separated product IDs"""
+    ids_list = [pid.strip() for pid in product_ids.split('|') if pid.strip()]
+    if not ids_list:
+        return {"reviews": {}, "total_count": 0}
+
+    try:
+        with get_db_session() as session:
+            feedback_rows = session.exec(
+                select(Feedback).where(Feedback.product_id.in_(ids_list))
+            ).all()
+
+        reviews = {row.product_id: row.review for row in feedback_rows}
+        return {"reviews": reviews, "total_count": len(reviews)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching feedback reviews: {str(e)}")
 
 
 @app.get("/api/admin/dashboard")
@@ -551,6 +696,201 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                 "offline": {"count": 0, "percentage": 0, "revenue": 0}
             },
             "offline_purchases_per_store": []
+        }
+
+
+@app.get("/api/admin/ai-insights")
+def get_admin_ai_insights(time_range: str = "1month"):
+    """
+    Get AI-powered insights and recommendations for the admin dashboard.
+    Uses LLM to analyze transaction data and provide actionable intelligence.
+
+    Args:
+        time_range: Filter by time range - '7days', '1month', or 'all' (default: '1month')
+    """
+    try:
+        from langchain_openai import ChatOpenAI
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+
+        with get_db_session() as session:
+            # Get all dashboard data
+            all_transactions = admin_dashboard_data_crud.get_all(
+                session, skip=0, limit=100000)
+
+            # Determine date threshold
+            now = datetime.now()
+            date_threshold = None
+            time_period_label = "All Time"
+
+            if time_range == "7days":
+                date_threshold = now - timedelta(days=7)
+                time_period_label = "Last 7 Days"
+            elif time_range == "1month":
+                date_threshold = now - timedelta(days=30)
+                time_period_label = "Last 1 Month"
+
+            # Filter and analyze transactions
+            filtered_transactions = []
+            online_count = 0
+            offline_count = 0
+            online_revenue = 0
+            offline_revenue = 0
+            store_performance = defaultdict(lambda: {"count": 0, "revenue": 0})
+            product_performance = defaultdict(
+                lambda: {"count": 0, "revenue": 0})
+            customer_frequency = defaultdict(int)
+
+            for tx in all_transactions:
+                # Parse date
+                tx_date = None
+                try:
+                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
+                except:
+                    try:
+                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
+                    except:
+                        try:
+                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
+                        except:
+                            continue
+
+                # Filter by date threshold
+                if date_threshold is None or tx_date >= date_threshold:
+                    filtered_transactions.append(tx)
+
+                    if tx.mode.lower() == "online":
+                        online_count += 1
+                        online_revenue += tx.amount
+                    else:
+                        offline_count += 1
+                        offline_revenue += tx.amount
+                        store_performance[tx.store_name]["count"] += 1
+                        store_performance[tx.store_name]["revenue"] += tx.amount
+
+                    product_performance[tx.product]["count"] += tx.qty
+                    product_performance[tx.product]["revenue"] += tx.amount
+                    customer_frequency[tx.user_name] += 1
+
+            # Calculate insights
+            total_transactions = len(filtered_transactions)
+            total_revenue = online_revenue + offline_revenue
+            avg_transaction = total_revenue / \
+                total_transactions if total_transactions > 0 else 0
+            online_percentage = (
+                online_count / total_transactions * 100) if total_transactions > 0 else 0
+
+            # Get top performing products
+            top_products = sorted(product_performance.items(
+            ), key=lambda x: x[1]["revenue"], reverse=True)[:3]
+
+            # Get top stores
+            top_stores = sorted(store_performance.items(),
+                                key=lambda x: x[1]["revenue"], reverse=True)[:3]
+
+            # Get top customers
+            top_customers = sorted(
+                customer_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+
+            # Prepare data summary for LLM
+            data_summary = f"""
+Analyze the following retail dashboard data for {time_period_label}:
+
+OVERALL METRICS:
+- Total Transactions: {total_transactions:,}
+- Total Revenue: ₹{total_revenue:,.2f}
+- Average Transaction Value: ₹{avg_transaction:,.2f}
+- Online Sales: {online_count:,} transactions (₹{online_revenue:,.2f})
+- Offline Sales: {offline_count:,} transactions (₹{offline_revenue:,.2f})
+- Online Percentage: {online_percentage:.1f}%
+
+TOP PERFORMING PRODUCTS:
+{chr(10).join([f"- {prod}: {data['count']} units sold, ₹{data['revenue']:,.2f} revenue" for prod, data in top_products[:3]])}
+
+TOP PERFORMING STORES (Offline):
+{chr(10).join([f"- {store}: {data['count']} transactions, ₹{data['revenue']:,.2f} revenue" for store, data in top_stores[:3]])}
+
+TOP CUSTOMERS (by frequency):
+{chr(10).join([f"- {customer}: {count} purchases" for customer, count in top_customers[:5]])}
+
+Provide insights in the following JSON format:
+{{
+  "overview": "Brief performance summary in 2-3 sentences",
+  "key_insights": ["insight 1", "insight 2", "insight 3"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+  "opportunities": [
+    {{"area": "area name", "suggestion": "specific suggestion", "potential_savings": "estimated impact"}}
+  ]
+}}
+
+Focus on actionable insights about:
+1. Revenue trends and transaction patterns
+2. Product performance and inventory optimization
+3. Store performance differences
+4. Customer behavior and retention strategies
+5. Channel optimization (online vs offline)
+"""
+
+            # Initialize LLM
+            llm = ChatOpenAI(
+                model="gpt-4o-mini",
+                temperature=0.7,
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+
+            # Get AI insights
+            response = llm.invoke(data_summary)
+
+            # Parse LLM response
+            try:
+                # Extract JSON from response
+                response_text = response.content
+
+                # Find JSON in the response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+
+                if json_match:
+                    insights_data = json.loads(json_match.group())
+                else:
+                    # Fallback if JSON not found
+                    insights_data = {
+                        "overview": response_text[:200],
+                        "key_insights": ["Unable to parse structured insights"],
+                        "recommendations": ["Please refresh to try again"],
+                        "opportunities": []
+                    }
+            except Exception as parse_error:
+                print(f"Error parsing LLM response: {parse_error}")
+                insights_data = {
+                    "overview": "Analysis completed but unable to format insights properly.",
+                    "key_insights": ["Data has been analyzed successfully"],
+                    "recommendations": ["Refresh to generate new insights"],
+                    "opportunities": []
+                }
+
+            return {
+                "insights": insights_data,
+                "time_period": time_period_label,
+                "data_summary": {
+                    "total_transactions": total_transactions,
+                    "total_revenue": round(total_revenue, 2),
+                    "avg_transaction_value": round(avg_transaction, 2),
+                    "online_percentage": round(online_percentage, 1)
+                }
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": f"Error generating AI insights: {str(e)}",
+            "insights": {
+                "overview": "Unable to generate insights at this time.",
+                "key_insights": [],
+                "recommendations": [],
+                "opportunities": []
+            }
         }
 
 
@@ -976,6 +1316,43 @@ class ChatResponse(BaseModel):
     agent_calls: List[str] = []
 
 
+kiosk_sessions: Dict[str, Dict[str, Any]] = {}
+
+
+def _init_kiosk_state(customer_id: str) -> Dict[str, Any]:
+    return {
+        "messages": [],
+        "customer_id": customer_id,
+        "order_id": None,
+        "product_id": None,
+        "store_id": None,
+        "payment_completed": False,
+        "fulfillment_done": False,
+        "loyalty_done": False,
+        "post_purchase_done": False,
+        "welcome_done": False,
+        "payment_prompt_done": False,
+    }
+
+
+def _merge_kiosk_result(state: Dict[str, Any], result: Dict[str, Any]) -> List[str]:
+    messages = result.get("messages", [])
+    if messages:
+        state["messages"].extend(messages)
+
+    for key, value in result.items():
+        if key == "messages":
+            continue
+        state[key] = value
+
+    ai_texts = []
+    for message in messages:
+        if isinstance(message, AIMessage) and message.content:
+            ai_texts.append(message.content)
+    return ai_texts
+
+
+# code to  be pasted
 @app.post("/api/chat/test")
 async def test_chat_endpoint(data: dict):
     """Test endpoint to see what data is being received"""
@@ -1076,6 +1453,11 @@ class UpdateCartQuantityModel(BaseModel):
     quantity: int
 
 
+class UpdateCartSizeModel(BaseModel):
+    order_id: str
+    size: Optional[str] = None
+
+
 @app.put("/api/cart/update-quantity")
 def update_cart_quantity(update_data: UpdateCartQuantityModel):
     """Update the quantity of an item in the cart"""
@@ -1121,6 +1503,114 @@ def update_cart_quantity(update_data: UpdateCartQuantityModel):
         return {"success": False, "error": str(e)}
 
 
+@app.put("/api/cart/update-size")
+def update_cart_size(update_data: UpdateCartSizeModel):
+    """Update the size of an item in the cart"""
+    try:
+        with get_db_session() as session:
+            cart_item = cart_crud.get_by_id(session, update_data.order_id)
+            if not cart_item:
+                return {"success": False, "error": "Cart item not found"}
+
+            size_value = update_data.size
+            if isinstance(size_value, str):
+                size_value = size_value.strip() or None
+
+            updated_item = cart_crud.update(
+                session,
+                update_data.order_id,
+                {"size": size_value},
+            )
+            if updated_item:
+                return {
+                    "success": True,
+                    "message": "Updated size",
+                    "cart_item": {
+                        "order_id": updated_item.order_id,
+                        "size": getattr(updated_item, "size", None),
+                    },
+                }
+            return {"success": False, "error": "Failed to update size"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ApplyLoyaltyModel(BaseModel):
+    customer_id: str
+    apply: bool  # True = apply loyalty points, False = remove/unapply
+    cart_total: float  # current cart total before loyalty
+
+
+@app.post("/api/cart/apply-loyalty")
+def apply_loyalty_to_cart(data: ApplyLoyaltyModel):
+    """Apply or remove loyalty points discount on the cart total and update customer loyalty_points."""
+    try:
+        with get_db_session() as session:
+            customer = customer_crud.get_by_id(session, data.customer_id)
+            if not customer:
+                return {"success": False, "error": "Customer not found"}
+
+            available_points = customer.loyalty_points or 0
+
+            if data.apply:
+                # Points to use: min of available points and cart total (1 point = ₹1)
+                points_to_use = min(available_points, int(data.cart_total))
+                new_total = max(data.cart_total - points_to_use, 0)
+                remaining_points = available_points - points_to_use
+
+                # Update customer loyalty_points in DB
+                customer_crud.update(session, data.customer_id, {
+                                     "loyalty_points": remaining_points})
+
+                return {
+                    "success": True,
+                    "applied": True,
+                    "points_used": points_to_use,
+                    "remaining_points": remaining_points,
+                    "new_total": new_total,
+                    "original_total": data.cart_total,
+                }
+            else:
+                # Unapply: we need the frontend to tell us how many points were previously used
+                # Just return current state without deducting
+                return {
+                    "success": True,
+                    "applied": False,
+                    "points_used": 0,
+                    "remaining_points": available_points,
+                    "new_total": data.cart_total,
+                    "original_total": data.cart_total,
+                }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/cart/unapply-loyalty")
+def unapply_loyalty_from_cart(data: ApplyLoyaltyModel):
+    """Restore loyalty points back to customer when unchecking loyalty checkbox."""
+    try:
+        with get_db_session() as session:
+            customer = customer_crud.get_by_id(session, data.customer_id)
+            if not customer:
+                return {"success": False, "error": "Customer not found"}
+
+            # cart_total here is the points_used that need to be restored
+            points_to_restore = int(data.cart_total)
+            current_points = customer.loyalty_points or 0
+            new_points = current_points + points_to_restore
+
+            customer_crud.update(session, data.customer_id, {
+                                 "loyalty_points": new_points})
+
+            return {
+                "success": True,
+                "restored_points": points_to_restore,
+                "remaining_points": new_points,
+            }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/chat")
 async def chat_with_agent(chat_message: ChatMessage):
     """
@@ -1138,13 +1628,65 @@ async def chat_with_agent(chat_message: ChatMessage):
         user_query = chat_message.message
         session_id = customer_id  # Use customer_id as session_id
 
+        def _looks_like_price_band_query(text: str) -> bool:
+            if not text or not isinstance(text, str):
+                return False
+            t = text.lower()
+            # Avoid intercepting cart/checkout intents; let the LLM workflow handle those.
+            if re.search(r"\b(add|buy|purchase|checkout|proceed|payment|remove|cart|quantity|qty|online|offline)\b", t):
+                return False
+            # Must mention a price band keyword AND a number, or a numeric range like 1500-2000.
+            if re.search(r"\b(between|above|over|more\s+than|greater\s+than|below|under|less\s+than|>=|<=)\b", t) and re.search(r"\d", t):
+                return True
+            if re.search(r"\b\d[\d,]*\s*-\s*\d[\d,]*\b", t):
+                return True
+            return False
+
         # Save user message to database
         save_message(customer_id, session_id, "user", user_query)
 
         # Get conversation history from database (limit to recent messages to force fresh tool calls)
-        history = get_conversation_history(customer_id, session_id, limit=6)
+        history = get_conversation_history(customer_id, session_id, limit=1)
 
         print(f"Retrieved {len(history)} messages from history")
+
+        # ---- Price-band browse fast-path ----
+        # When a user asks for products with an explicit price constraint (above/between/below),
+        # do not rely on the LLM to preserve the numeric band in tool args.
+        # Instead, pass the RAW user query to inventory_agent so it can filter on products.price.
+        if _looks_like_price_band_query(user_query):
+            from intelligent_agent_graph import inventory_agent as _inventory_tool, recommendation_agent as _recommendation_tool
+
+            inv_raw = _inventory_tool.invoke({
+                "search_query": user_query,
+                "customer_id": customer_id,
+            })
+
+            rec_raw = _recommendation_tool.invoke({
+                "inventory_data": inv_raw,
+            })
+
+            # Save the assistant's default message for history continuity.
+            try:
+                rec_obj = json.loads(rec_raw) if isinstance(
+                    rec_raw, str) else rec_raw
+            except Exception:
+                rec_obj = None
+
+            if isinstance(rec_obj, dict):
+                default_text = (rec_obj.get("responses") or {}).get("default")
+                if isinstance(default_text, str) and default_text.strip():
+                    save_message(customer_id, session_id, "assistant", default_text, [
+                                 "inventory_agent", "recommendation_agent"])
+                return rec_obj
+
+            # Fallback: return a legacy payload
+            save_message(customer_id, session_id, "assistant", str(
+                rec_raw), ["inventory_agent", "recommendation_agent"])
+            return {
+                "response": str(rec_raw),
+                "agent_calls": ["inventory_agent", "recommendation_agent"],
+            }
 
         # Create agent graph
         graph = create_agent_graph()
@@ -1175,40 +1717,9 @@ async def chat_with_agent(chat_message: ChatMessage):
         result = await graph.ainvoke(initial_state)
 
         # Extract timeline messages from all agent tool calls
-        timeline_messages = []
-        from langchain_core.messages import ToolMessage, AIMessage as LangChainAIMessage
-
-        # Map tool names to agent names for timeline display
-        tool_to_agent_map = {
-            "search_products": "Inventory Agent",
-            "recommend_products": "Recommendation Agent",
-            "add_to_cart": "Add to Cart Agent",
-            "view_cart": "View Cart Agent",
-            "remove_from_cart": "Remove from Cart Agent",
-            "process_payment": "Payment Agent",
-            "schedule_delivery": "Fulfillment Agent",
-            "apply_loyalty_rewards": "Loyalty Agent",
-            "get_customer_info": "Customer Info Agent",
-            "post_purchase_support": "Post-Purchase Agent"
-        }
-
-        # Track which agents have been called
-        seen_agents = set()
-
-        for message in result["messages"]:
-            # Check for tool calls in AIMessage
-            if isinstance(message, LangChainAIMessage) and hasattr(message, 'tool_calls') and message.tool_calls:
-                for tool_call in message.tool_calls:
-                    tool_name = tool_call.get("name", "")
-                    agent_name = tool_to_agent_map.get(tool_name, tool_name)
-
-                    # Only add each agent once to timeline
-                    if agent_name not in seen_agents:
-                        seen_agents.add(agent_name)
-                        timeline_messages.append({
-                            "agent": agent_name,
-                            "timestamp": "now"
-                        })
+        from langchain_core.messages import ToolMessage
+        timeline_messages = _format_timeline_messages_from_langchain_messages(
+            result.get("messages", []))
 
         # Try to return tool output as JSON if present (with timeline)
         for message in reversed(result["messages"]):
@@ -1277,6 +1788,1051 @@ async def chat_with_agent(chat_message: ChatMessage):
         }
 
 
+async def _ws_stream_text(websocket: WebSocket, request_id: str, text: str, chunk_size: int = 24):
+    """Send assistant text in small deltas for a streaming effect."""
+    if not text:
+        return
+    await websocket.send_json({"type": "assistant_stream_start", "request_id": request_id})
+    for i in range(0, len(text), chunk_size):
+        await websocket.send_json({
+            "type": "assistant_stream_delta",
+            "request_id": request_id,
+            "delta": text[i:i + chunk_size],
+        })
+        await asyncio.sleep(0)
+    await websocket.send_json({"type": "assistant_stream_end", "request_id": request_id})
+
+
+def _ws_ts() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+def _single_line(text: str) -> str:
+    if text is None:
+        return ""
+    s = str(text)
+    s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    while "  " in s:
+        s = s.replace("  ", " ")
+    return s.strip()
+
+
+def _ws_line(text: str, max_len: int = 160) -> str:
+    s = _single_line(text)
+    if not s:
+        return ""
+    if len(s) > max_len:
+        s = s[:max_len] + "…"
+    return f"{_ws_ts()} {s}"
+
+
+def _try_parse_json(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return value
+        return value
+    return value
+
+
+def _summarize_tool_start(tool_name: str, tool_args: Any) -> str:
+    args = tool_args if isinstance(tool_args, dict) else {}
+
+    if tool_name == "inventory_agent":
+        q = args.get("search_query") or args.get("query") or args.get("text")
+        parts: List[str] = []
+        if q:
+            parts.append(f"find {q!r}")
+        min_p = args.get("min_price") or args.get("price_min")
+        max_p = args.get("max_price") or args.get("price_max")
+        if min_p is not None or max_p is not None:
+            if min_p is not None and max_p is not None:
+                parts.append(f"price={min_p}-{max_p}")
+            elif max_p is not None:
+                parts.append(f"price<={max_p}")
+            else:
+                parts.append(f"price>={min_p}")
+        color = args.get("color")
+        if color:
+            parts.append(f"color:{color}")
+        size = args.get("size")
+        if size:
+            parts.append(f"size:{size}")
+        return " ".join(parts) if parts else "Searching product catalog"
+
+    if tool_name == "recommendation_agent":
+        return "Preparing recommendations"
+
+    if tool_name == "customer_info_agent":
+        cid = args.get("customer_id")
+        return f"Fetching customer profile ({cid})" if cid else "Fetching customer profile"
+
+    if tool_name == "add_to_cart_agent":
+        pid = args.get("product_id") or args.get("id")
+        qty = args.get("quantity") or args.get("qty")
+        if pid and qty:
+            return f"Add {qty} × {pid} to cart"
+        if pid:
+            return f"Add {pid} to cart"
+        return "Adding item to cart"
+
+    if tool_name == "remove_from_cart_agent":
+        oid = args.get("order_id") or args.get("orderId") or args.get("id")
+        return f"Remove item {oid} from cart" if oid else "Removing item from cart"
+
+    if tool_name == "view_cart_agent":
+        return "Loading cart items"
+
+    if tool_name == "upsell_agent":
+        return "Finding attractive accessories for you"
+
+    if tool_name == "choose_channel_agent":
+        channel = args.get("channel")
+        return f"Choosing purchase channel: {channel}" if channel else "Choosing purchase channel"
+
+    if tool_name == "payment_agent":
+        return "Processing payment"
+
+    if tool_name == "fulfillment_agent":
+        return "Preparing fulfillment"
+
+    if tool_name == "loyalty_agent":
+        return "Applying loyalty benefits"
+
+    if tool_name == "post_purchase_agent":
+        return "Preparing post-purchase support"
+
+    return "Working…"
+
+
+def _summarize_tool_result(tool_name: str, tool_result: Any) -> str:
+    parsed = _try_parse_json(tool_result)
+
+    if isinstance(parsed, dict):
+        msg = parsed.get("message")
+        if isinstance(msg, str) and msg.strip():
+            return msg.strip()
+
+        # Common payloads
+        products = parsed.get("products")
+        if isinstance(products, list):
+            preview_items: List[str] = []
+            for p in products[:6]:
+                if isinstance(p, dict):
+                    pid = p.get("product_id") or p.get("id")
+                    name = p.get("product_name") or p.get("name")
+                    if pid and name:
+                        preview_items.append(f"{pid}:{name}")
+                    elif pid:
+                        preview_items.append(str(pid))
+                else:
+                    preview_items.append(str(p))
+            tail = f" [{', '.join(preview_items)}]" if preview_items else ""
+            return f"{len(products)} SKUs found{tail}"
+
+        cart_items = parsed.get("cart_items")
+        if isinstance(cart_items, list):
+            return f"Cart has {len(cart_items)} item(s)"
+
+        stores = parsed.get("stores")
+        if isinstance(stores, list):
+            return f"Found {len(stores)} store option(s)"
+
+        status = parsed.get("status")
+        if isinstance(status, str) and status.lower() in {"success", "ok"}:
+            return "Done"
+        if isinstance(status, str) and status.lower() in {"error", "failed"}:
+            err = parsed.get("error") or parsed.get("detail") or "Error"
+            return str(err)
+
+        resp = parsed.get("response")
+        if isinstance(resp, str) and resp.strip():
+            return resp.strip()
+
+        return _single_line(json.dumps(parsed, ensure_ascii=False))
+
+    if isinstance(parsed, list):
+        return f"Returned {len(parsed)} item(s)"
+
+    s = _single_line(parsed)
+    return s
+
+
+def _extract_selected_store_name(user_query: Any) -> str:
+    """Extract a concrete store name from a user's pickup-confirmation message.
+
+    This is intentionally conservative to avoid hijacking the earlier
+    "nearest offline store" selection step.
+    """
+    if not isinstance(user_query, str):
+        return ""
+
+    text = user_query.strip()
+    if not text:
+        return ""
+
+    lower = text.lower()
+    # Do NOT treat the generic nearest-store request as a concrete store choice.
+    if "nearest offline store" in lower or "nearest store" in lower:
+        return ""
+
+    patterns = [
+        # Frontend store card selection currently sends this
+        r"\bpick\s*up\s+(?:my\s+)?order\s+from\s+(.+)$",
+        r"\bi\s+want\s+to\s+pick\s*up\s+(?:my\s+)?order\s+from\s+(.+)$",
+        # Defensive: if the UI ever sends the visible message instead
+        r"\bi\s+selected\s+(.+)$",
+    ]
+
+    for pat in patterns:
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        store = (m.group(1) or "").strip()
+        store = store.strip(" \t\r\n\"'`.,;:!?)[]{}")
+        store_lower = store.lower()
+        # Filter out generic non-store selections.
+        if not store or store_lower in {"a store", "any store", "store"}:
+            return ""
+        if "nearest" in store_lower:
+            return ""
+        return store
+
+    return ""
+
+
+@app.websocket("/ws/chat")
+async def ws_chat(websocket: WebSocket):
+    """WebSocket endpoint for live agent timeline updates + streamed assistant output."""
+    await websocket.accept()
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            request_id = payload.get("request_id") or ""
+            customer_id = payload.get("customer_id")
+            user_query = payload.get("message")
+            payload_size = payload.get("size")
+
+            if not customer_id or not user_query:
+                await websocket.send_json({
+                    "type": "error",
+                    "request_id": request_id,
+                    "message": "Missing customer_id or message",
+                })
+                continue
+
+            session_id = customer_id
+
+            def _looks_like_price_band_query(text: str) -> bool:
+                if not text or not isinstance(text, str):
+                    return False
+                t = text.lower()
+                # Avoid intercepting cart/checkout intents; let the LLM workflow handle those.
+                if re.search(r"\b(add|buy|purchase|checkout|proceed|payment|remove|cart|quantity|qty|online|offline)\b", t):
+                    return False
+                if re.search(r"\b(between|above|over|more\s+than|greater\s+than|below|under|less\s+than|>=|<=)\b", t) and re.search(r"\d", t):
+                    return True
+                if re.search(r"\b\d[\d,]*\s*-\s*\d[\d,]*\b", t):
+                    return True
+                return False
+
+            await websocket.send_json({
+                "type": "run_start",
+                "request_id": request_id,
+                "customer_id": customer_id,
+            })
+
+            # Save user message early (keeps parity with /api/chat)
+            save_message(customer_id, session_id, "user", user_query)
+
+            history = get_conversation_history(
+                customer_id, session_id, limit=1)
+            messages: List[Any] = []
+            for msg in history:
+                if msg.get("role") == "user":
+                    messages.append(HumanMessage(
+                        content=msg.get("content", "")))
+                else:
+                    messages.append(AIMessage(content=msg.get("content", "")))
+
+            state: Dict[str, Any] = {
+                "messages": messages,
+                "customer_id": customer_id,
+                "selected_product": None,
+                "inventory_status": None,
+                "purchase_channel": None,
+                "order_id": None,
+                "payment_completed": False,
+                "loyalty_points": 0,
+                "cart_items": [],
+            }
+
+            tool_to_agent = _tool_to_agent_map()
+            agent_calls: List[str] = []
+            timeline_started: set[str] = set()
+
+            # ---- Store selection fast-path (OFFLINE pickup) ----
+            # When the user confirms a specific store, immediately run fulfillment.
+            # This avoids the LLM looping back into inventory/view-cart.
+            selected_store = _extract_selected_store_name(user_query)
+            if selected_store:
+                tool_name = "fulfillment_agent"
+                agent_label = tool_to_agent.get(tool_name, "Fulfillment Agent")
+                tool_args = {
+                    "purchase_type": "offline",
+                    "store_name": selected_store,
+                    "customer_id": customer_id,
+                }
+                agent_calls.append(tool_name)
+
+                await websocket.send_json({
+                    "type": "timeline_start",
+                    "request_id": request_id,
+                    "agent": agent_label,
+                    "tool": tool_name,
+                    "timestamp": "now",
+                    "status": "in_progress",
+                })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": tool_name,
+                    "agent": agent_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"Master Orchestrator → {agent_label}"),
+                })
+
+                start_summary = _summarize_tool_start(tool_name, tool_args)
+                if start_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": tool_name,
+                        "agent": agent_label,
+                        "timestamp": "now",
+                        "text": _ws_line(start_summary),
+                    })
+
+                tool_ok = True
+                try:
+                    from intelligent_agent_graph import fulfillment_agent as _fulfillment_tool
+                    tool_result = await asyncio.to_thread(_fulfillment_tool.invoke, tool_args)
+                except Exception as e:
+                    tool_ok = False
+                    tool_result = {"status": "error",
+                                   "message": f"Tool execution error: {str(e)}"}
+
+                parsed_result = _try_parse_json(tool_result)
+                response_data: Dict[str, Any] = parsed_result if isinstance(
+                    parsed_result, dict) else {}
+                if not response_data:
+                    response_data = {
+                        "response": str(parsed_result) if parsed_result is not None else "",
+                        "agent_calls": agent_calls,
+                    }
+                else:
+                    response_data.setdefault("agent_calls", agent_calls)
+                    if "response" not in response_data and isinstance(response_data.get("message"), str):
+                        response_data["response"] = response_data.get(
+                            "message")
+
+                result_summary = _summarize_tool_result(tool_name, tool_result)
+                if result_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": tool_name,
+                        "agent": agent_label,
+                        "timestamp": "now",
+                        "text": _ws_line(result_summary),
+                    })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": tool_name,
+                    "agent": agent_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"{agent_label} → Master Orchestrator"),
+                })
+
+                await websocket.send_json({
+                    "type": "timeline_end",
+                    "request_id": request_id,
+                    "agent": agent_label,
+                    "tool": tool_name,
+                    "timestamp": "now",
+                    "status": "completed" if tool_ok else "error",
+                })
+
+                if isinstance(response_data.get("response"), str):
+                    await _ws_stream_text(websocket, request_id, response_data.get("response", ""))
+
+                # Save assistant response best-effort
+                try:
+                    assistant_text = response_data.get("response")
+                    if isinstance(assistant_text, str) and assistant_text.strip():
+                        save_message(customer_id, session_id,
+                                     "assistant", assistant_text, agent_calls)
+                except Exception:
+                    pass
+
+                await websocket.send_json({
+                    "type": "final_response",
+                    "request_id": request_id,
+                    "data": response_data,
+                })
+                await websocket.send_json({"type": "run_end", "request_id": request_id})
+                continue
+
+            # ---- Price-band browse fast-path ----
+            if _looks_like_price_band_query(user_query):
+                from intelligent_agent_graph import inventory_agent as _inventory_tool, recommendation_agent as _recommendation_tool
+
+                inv_tool_name = "inventory_agent"
+                rec_tool_name = "recommendation_agent"
+                inv_label = tool_to_agent.get(inv_tool_name, "Inventory Agent")
+                rec_label = tool_to_agent.get(
+                    rec_tool_name, "Recommendation Agent")
+
+                agent_calls.extend([inv_tool_name, rec_tool_name])
+
+                # Inventory timeline
+                await websocket.send_json({
+                    "type": "timeline_start",
+                    "request_id": request_id,
+                    "agent": inv_label,
+                    "tool": inv_tool_name,
+                    "timestamp": "now",
+                    "status": "in_progress",
+                })
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": inv_tool_name,
+                    "agent": inv_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"Master Orchestrator → {inv_label}"),
+                })
+                inv_start = _summarize_tool_start(
+                    inv_tool_name, {"search_query": user_query, "customer_id": customer_id})
+                if inv_start:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(inv_start),
+                    })
+
+                inv_ok = True
+                try:
+                    inv_raw = await asyncio.to_thread(_inventory_tool.invoke, {"search_query": user_query, "customer_id": customer_id})
+                except Exception as e:
+                    inv_ok = False
+                    inv_raw = json.dumps(
+                        {"status": "error", "message": f"Inventory tool error: {str(e)}", "products": []})
+
+                inv_summary = _summarize_tool_result(inv_tool_name, inv_raw)
+                if inv_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(inv_summary),
+                    })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": inv_tool_name,
+                    "agent": inv_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"{inv_label} → Master Orchestrator"),
+                })
+                await websocket.send_json({
+                    "type": "timeline_end",
+                    "request_id": request_id,
+                    "agent": inv_label,
+                    "tool": inv_tool_name,
+                    "timestamp": "now",
+                    "status": "completed" if inv_ok else "error",
+                })
+
+                # Recommendation timeline
+                await websocket.send_json({
+                    "type": "timeline_start",
+                    "request_id": request_id,
+                    "agent": rec_label,
+                    "tool": rec_tool_name,
+                    "timestamp": "now",
+                    "status": "in_progress",
+                })
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": rec_tool_name,
+                    "agent": rec_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"Master Orchestrator → {rec_label}"),
+                })
+
+                rec_ok = True
+                try:
+                    rec_raw = await asyncio.to_thread(_recommendation_tool.invoke, {"inventory_data": inv_raw})
+                except Exception as e:
+                    rec_ok = False
+                    rec_raw = json.dumps({
+                        "name": "Recommendation Agent",
+                        "id": "recommendation_agent",
+                        "responses": {"default": f"❌ Error preparing recommendations: {str(e)}", "recommendation": []},
+                    })
+
+                rec_summary = _summarize_tool_result(rec_tool_name, rec_raw)
+                if rec_summary:
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": rec_tool_name,
+                        "agent": rec_label,
+                        "timestamp": "now",
+                        "text": _ws_line(rec_summary),
+                    })
+
+                await websocket.send_json({
+                    "type": "timeline_log",
+                    "request_id": request_id,
+                    "tool": rec_tool_name,
+                    "agent": rec_label,
+                    "timestamp": "now",
+                    "text": _ws_line(f"{rec_label} → Master Orchestrator"),
+                })
+                await websocket.send_json({
+                    "type": "timeline_end",
+                    "request_id": request_id,
+                    "agent": rec_label,
+                    "tool": rec_tool_name,
+                    "timestamp": "now",
+                    "status": "completed" if rec_ok else "error",
+                })
+
+                parsed_rec = _try_parse_json(rec_raw)
+                response_data: Dict[str, Any] = parsed_rec if isinstance(parsed_rec, dict) else {
+                    "response": str(parsed_rec) if parsed_rec is not None else "",
+                }
+                response_data.setdefault("agent_calls", agent_calls)
+
+                default_text = (response_data.get(
+                    "responses") or {}).get("default")
+                if isinstance(default_text, str) and default_text.strip():
+                    try:
+                        save_message(customer_id, session_id,
+                                     "assistant", default_text, agent_calls)
+                    except Exception:
+                        pass
+
+                await websocket.send_json({
+                    "type": "final_response",
+                    "request_id": request_id,
+                    "data": response_data,
+                })
+                await websocket.send_json({"type": "run_end", "request_id": request_id})
+                continue
+
+            # Step-by-step run (agent decides tool calls, we execute tools, loop)
+            from intelligent_agent_graph import agent_node as _agent_node, _execute_tool as _execute_tool
+            from langchain_core.messages import ToolMessage
+
+            final_ai_text = ""
+
+            while True:
+                agent_out = await asyncio.to_thread(_agent_node, state)
+                ai_msg = agent_out.get("messages", [None])[0]
+                if ai_msg is None:
+                    break
+
+                state["messages"].append(ai_msg)
+
+                tool_calls = getattr(ai_msg, "tool_calls", None)
+                if not tool_calls:
+                    # Conversation ended (no more tool calls)
+                    final_ai_text = getattr(ai_msg, "content", "") or ""
+                    break
+
+                # Emit timeline + logs as tools are called
+                for tool_call in tool_calls:
+                    tool_name = (tool_call or {}).get("name", "")
+                    tool_args = (tool_call or {}).get("args", {})
+
+                    # If the frontend provided size in the websocket payload for an add-to-cart action,
+                    # pass it through as a tool arg so it can be persisted in the cart table.
+                    if tool_name == "add_to_cart_agent" and payload_size:
+                        if not isinstance(tool_args, dict):
+                            tool_args = {}
+                        tool_args.setdefault("size", payload_size)
+                        try:
+                            tool_call["args"] = tool_args
+                        except Exception:
+                            pass
+                    agent_label = tool_to_agent.get(tool_name, tool_name)
+
+                    if tool_name and tool_name not in agent_calls:
+                        agent_calls.append(tool_name)
+
+                    if tool_name and tool_name not in timeline_started:
+                        timeline_started.add(tool_name)
+                        await websocket.send_json({
+                            "type": "timeline_start",
+                            "request_id": request_id,
+                            "agent": agent_label,
+                            "tool": tool_name,
+                            "timestamp": "now",
+                            "status": "in_progress",
+                        })
+
+                    # Human-readable orchestration + progress (avoid raw args/JSON dumps)
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": tool_name,
+                        "agent": agent_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"Master Orchestrator → {agent_label}"),
+                    })
+
+                    start_summary = _summarize_tool_start(tool_name, tool_args)
+                    if start_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": tool_name,
+                            "agent": agent_label,
+                            "timestamp": "now",
+                            "text": _ws_line(start_summary),
+                        })
+
+                    # Execute tool
+                    tool_ok = True
+                    try:
+                        tool_result = await asyncio.to_thread(_execute_tool, tool_call)
+                    except Exception as e:
+                        tool_ok = False
+                        tool_result = {
+                            "status": "error", "message": f"Tool execution error: {str(e)}"}
+
+                    result_summary = _summarize_tool_result(
+                        tool_name, tool_result)
+                    if result_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": tool_name,
+                            "agent": agent_label,
+                            "timestamp": "now",
+                            "text": _ws_line(result_summary),
+                        })
+
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": tool_name,
+                        "agent": agent_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"{agent_label} → Master Orchestrator"),
+                    })
+
+                    # Append tool result into conversation
+                    state["messages"].append(
+                        ToolMessage(content=str(tool_result),
+                                    tool_call_id=(tool_call or {}).get("id"))
+                    )
+
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": agent_label,
+                        "tool": tool_name,
+                        "timestamp": "now",
+                        "status": "completed" if tool_ok else "error",
+                    })
+
+            # Build response data similar to /api/chat behavior
+            response_data: Dict[str, Any]
+
+            # Try last tool JSON as response
+            response_data = {}
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, ToolMessage):
+                    try:
+                        parsed = json.loads(msg.content)
+                        if isinstance(parsed, dict):
+                            response_data = parsed
+                            break
+                    except Exception:
+                        pass
+
+            if not response_data:
+                response_data = {
+                    "response": final_ai_text if final_ai_text else "I apologize, but I couldn't generate a response. Please try again.",
+                    "agent_calls": agent_calls,
+                }
+            else:
+                # Keep frontend compatibility
+                response_data.setdefault("agent_calls", agent_calls)
+                if "response" not in response_data and isinstance(final_ai_text, str) and final_ai_text.strip():
+                    response_data["response"] = final_ai_text
+                if "response" not in response_data and isinstance(response_data.get("responses"), dict):
+                    default_text = response_data.get(
+                        "responses", {}).get("default")
+                    if isinstance(default_text, str) and default_text.strip():
+                        response_data["response"] = default_text
+
+            # Stream assistant text if present
+            if isinstance(response_data.get("response"), str):
+                await _ws_stream_text(websocket, request_id, response_data.get("response", ""))
+
+            # Save assistant response best-effort
+            try:
+                assistant_text = response_data.get("response")
+                if isinstance(assistant_text, str) and assistant_text.strip():
+                    save_message(customer_id, session_id,
+                                 "assistant", assistant_text, agent_calls)
+            except Exception:
+                pass
+
+            # ---- Autonomous Upsell after View Cart ----
+            # If view_cart_agent was called, trigger upsell_agent → inventory_agent → recommendation_agent
+            if "view_cart_agent" in agent_calls and response_data.get("cart_items"):
+                try:
+                    from intelligent_agent_graph import (
+                        upsell_agent as _upsell_tool,
+                        inventory_agent as _inventory_tool,
+                        recommendation_agent as _recommendation_tool,
+                    )
+
+                    # --- Upsell Agent timeline ---
+                    upsell_tool_name = "upsell_agent"
+                    upsell_label = tool_to_agent.get(
+                        upsell_tool_name, "Upsell Agent")
+                    agent_calls.append(upsell_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": upsell_label,
+                        "tool": upsell_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": upsell_tool_name,
+                        "agent": upsell_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"Master Orchestrator → {upsell_label}"),
+                    })
+                    upsell_start = _summarize_tool_start(
+                        upsell_tool_name, {"customer_id": customer_id})
+                    if upsell_start:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": upsell_tool_name,
+                            "agent": upsell_label,
+                            "timestamp": "now",
+                            "text": _ws_line(upsell_start),
+                        })
+
+                    upsell_raw = await asyncio.to_thread(
+                        _upsell_tool.invoke, {"customer_id": customer_id}
+                    )
+                    upsell_data = json.loads(upsell_raw) if isinstance(
+                        upsell_raw, str) else upsell_raw
+                    upsell_query = upsell_data.get(
+                        "search_query", "show me watches")
+
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": upsell_tool_name,
+                        "agent": upsell_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"Upsell category: {upsell_data.get('category', 'accessories')}"),
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": upsell_label,
+                        "tool": upsell_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # --- Inventory Agent timeline (upsell search) ---
+                    inv_tool_name = "inventory_agent"
+                    inv_label = tool_to_agent.get(
+                        inv_tool_name, "Inventory Agent")
+                    agent_calls.append(inv_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": inv_label,
+                        "tool": inv_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": inv_tool_name,
+                        "agent": inv_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"{upsell_label} → {inv_label}"),
+                    })
+                    inv_start = _summarize_tool_start(
+                        inv_tool_name, {"search_query": upsell_query})
+                    if inv_start:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": inv_tool_name,
+                            "agent": inv_label,
+                            "timestamp": "now",
+                            "text": _ws_line(inv_start),
+                        })
+
+                    inv_raw = await asyncio.to_thread(
+                        _inventory_tool.invoke,
+                        {"search_query": upsell_query, "customer_id": customer_id},
+                    )
+
+                    inv_summary = _summarize_tool_result(
+                        inv_tool_name, inv_raw)
+                    if inv_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": inv_tool_name,
+                            "agent": inv_label,
+                            "timestamp": "now",
+                            "text": _ws_line(inv_summary),
+                        })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": inv_label,
+                        "tool": inv_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # --- Recommendation Agent timeline (upsell display) ---
+                    rec_tool_name = "recommendation_agent"
+                    rec_label = tool_to_agent.get(
+                        rec_tool_name, "Recommendation Agent")
+                    agent_calls.append(rec_tool_name)
+
+                    await websocket.send_json({
+                        "type": "timeline_start",
+                        "request_id": request_id,
+                        "agent": rec_label,
+                        "tool": rec_tool_name,
+                        "timestamp": "now",
+                        "status": "in_progress",
+                    })
+                    await websocket.send_json({
+                        "type": "timeline_log",
+                        "request_id": request_id,
+                        "tool": rec_tool_name,
+                        "agent": rec_label,
+                        "timestamp": "now",
+                        "text": _ws_line(f"{inv_label} → {rec_label}"),
+                    })
+
+                    rec_raw = await asyncio.to_thread(
+                        _recommendation_tool.invoke, {
+                            "inventory_data": inv_raw}
+                    )
+
+                    rec_summary = _summarize_tool_result(
+                        rec_tool_name, rec_raw)
+                    if rec_summary:
+                        await websocket.send_json({
+                            "type": "timeline_log",
+                            "request_id": request_id,
+                            "tool": rec_tool_name,
+                            "agent": rec_label,
+                            "timestamp": "now",
+                            "text": _ws_line(rec_summary),
+                        })
+                    await websocket.send_json({
+                        "type": "timeline_end",
+                        "request_id": request_id,
+                        "agent": rec_label,
+                        "tool": rec_tool_name,
+                        "timestamp": "now",
+                        "status": "completed",
+                    })
+
+                    # Parse recommendation result and attach to response_data
+                    rec_parsed = _try_parse_json(rec_raw)
+                    if isinstance(rec_parsed, dict):
+                        recs = (rec_parsed.get("responses") or {}).get(
+                            "recommendation", [])
+                        if recs:
+                            response_data["upsell"] = rec_parsed
+                            response_data["upsell"]["upsell_category"] = upsell_data.get(
+                                "category", "accessories")
+
+                except Exception as upsell_err:
+                    print(
+                        f"[UPSELL] Error during autonomous upsell: {upsell_err}")
+                    import traceback
+                    traceback.print_exc()
+
+            await websocket.send_json({
+                "type": "final_response",
+                "request_id": request_id,
+                "data": response_data,
+            })
+            await websocket.send_json({"type": "run_end", "request_id": request_id})
+
+    except WebSocketDisconnect:
+        return
+    except Exception as e:
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+        return
+
+
+@app.post("/api/kiosk/chat")
+async def chat_with_kiosk(chat_message: ChatMessage):
+    """Chat endpoint for the store kiosk flow."""
+    try:
+        customer_id = chat_message.customer_id
+        user_query = (chat_message.message or "").strip()
+
+        state = kiosk_sessions.get(
+            customer_id) or _init_kiosk_state(customer_id)
+
+        # If a previous kiosk run completed, but the customer still has pending cart items,
+        # reset the kiosk session so users can pay for the new items.
+        try:
+            with get_db_session() as session:
+                pending_items = cart_crud.filter(
+                    session,
+                    filters={"customer_id": customer_id, "status": "pending"},
+                    operators={"customer_id": "==", "status": "=="},
+                    limit=1,
+                )
+            if pending_items and state.get("payment_completed"):
+                state = _init_kiosk_state(customer_id)
+                # Skip welcome step for this request; frontend already shows the cart.
+                state["welcome_done"] = True
+        except Exception:
+            # If cart check fails, keep existing state (do not block kiosk flow).
+            pass
+        # Intercept kiosk barcode-style add-to-cart commands.
+        # Frontend sends: "add to cart product id PRD033 quantity 2"
+        q_lower = user_query.lower()
+        if "add to cart" in q_lower:
+            product_match = re.search(
+                r"\b(PRD\d+)\b", user_query, flags=re.IGNORECASE)
+            qty_match = re.search(
+                r"\b(?:qty|quantity)\s*(\d+)\b", user_query, flags=re.IGNORECASE)
+            size_match = re.search(
+                r"\bsize\s*[:=]?\s*([A-Za-z]{1,3}|\d{1,2})\b",
+                user_query,
+                flags=re.IGNORECASE,
+            )
+            if product_match:
+                product_id = product_match.group(1).upper()
+                qty = int(qty_match.group(1)) if qty_match else 1
+                size = size_match.group(1).strip() if size_match else None
+                tool_result = kiosk_add_to_cart_agent.invoke(
+                    {
+                        "product_id": product_id,
+                        "quantity": qty,
+                        "customer_id": customer_id,
+                        "size": size,
+                    }
+                )
+                kiosk_sessions[customer_id] = state
+                return {"response": tool_result or ""}
+
+        responses: List[str] = []
+
+        if user_query == "__kiosk_start__" or not state.get("welcome_done"):
+            result = welcome_node(state)
+            responses.extend(_merge_kiosk_result(state, result))
+            state["welcome_done"] = True
+            kiosk_sessions[customer_id] = state
+            return {"response": "\n\n".join(responses) if responses else ""}
+
+        state["messages"].append(HumanMessage(content=user_query))
+
+        if not state.get("payment_prompt_done"):
+            result = payment_prompt_node(state)
+            responses.extend(_merge_kiosk_result(state, result))
+            state["payment_prompt_done"] = True
+        elif not state.get("payment_completed"):
+            result = payment_method_node(state)
+            responses.extend(_merge_kiosk_result(state, result))
+
+            if state.get("payment_completed"):
+                for node in (fulfillment_node, loyalty_node, post_purchase_node):
+                    node_result = node(state)
+                    responses.extend(_merge_kiosk_result(state, node_result))
+                state["fulfillment_done"] = True
+                state["loyalty_done"] = True
+                state["post_purchase_done"] = True
+        else:
+            responses.append("✅ This kiosk session is already completed.")
+
+        kiosk_sessions[customer_id] = state
+        return {"response": "\n\n".join(responses) if responses else ""}
+    except Exception as e:
+        print(f"Error in kiosk chat endpoint: {e}")
+        return {"response": f"Sorry, I encountered an error: {str(e)}"}
+
+
+@app.post("/api/cart/switch-to-online")
+async def switch_cart_to_online(request: dict):
+    """Switch customer's offline cart items to online channel for later payment"""
+    try:
+        customer_id = request.get("customer_id")
+        if not customer_id:
+            return {"success": False, "error": "Customer ID is required"}
+
+        # Use the tool from store_kiosk_graph
+        from store_kiosk_graph import switch_channel_instore_to_online
+        result = switch_channel_instore_to_online.invoke(
+            {"customer_id": customer_id})
+
+        # Check if operation was successful
+        if "✅" in result:
+            return {"success": True, "message": result}
+        else:
+            return {"success": False, "error": result}
+    except Exception as e:
+        print(f"Error in switch_cart_to_online endpoint: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.delete("/api/chat/history/{customer_id}")
 async def clear_chat_history(customer_id: str):
     """Clear conversation history for a customer"""
@@ -1285,3 +2841,225 @@ async def clear_chat_history(customer_id: str):
         return {"success": True, "message": f"Conversation history cleared for {customer_id}"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+@app.post("/api/payload/save")
+async def save_payload(payload_data: dict):
+    """Save conversation log payload to chat_history database"""
+    try:
+        customer_id = payload_data.get("customer_id")
+        payload_content = payload_data.get("payload")
+
+        if not customer_id or not payload_content:
+            return {"success": False, "error": "Missing customer_id or payload"}
+
+        # Use chat_history.db instead of retail_agent.db
+        import sqlite3
+        import json
+        import os
+
+        db_path = os.path.join(os.path.dirname(__file__), "chat_history.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Check if customer_id already has a payload entry
+        cursor.execute(
+            "SELECT customer_id FROM payload WHERE customer_id = ?", (customer_id,))
+        existing = cursor.fetchone()
+
+        if existing:
+            # Update existing payload for this customer
+            cursor.execute(
+                "UPDATE payload SET payload = ? WHERE customer_id = ?",
+                (json.dumps(payload_content), customer_id)
+            )
+            message = f"Payload updated for customer {customer_id}"
+        else:
+            # Insert new payload for this customer
+            cursor.execute(
+                "INSERT INTO payload (customer_id, payload) VALUES (?, ?)",
+                (customer_id, json.dumps(payload_content))
+            )
+            message = f"Payload created for customer {customer_id}"
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": message,
+            "customer_id": customer_id
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/payload/{customer_id}")
+async def get_payload(customer_id: str):
+    """Retrieve conversation log payload from chat_history database by customer ID"""
+    try:
+        import sqlite3
+        import json
+        import os
+
+        db_path = os.path.join(os.path.dirname(__file__), "chat_history.db")
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Retrieve payload for the customer
+        cursor.execute(
+            "SELECT payload FROM payload WHERE customer_id = ?", (customer_id,))
+        result = cursor.fetchone()
+
+        conn.close()
+
+        if result and result[0]:
+            # Parse the JSON payload
+            payload_data = json.loads(result[0])
+            return {
+                "success": True,
+                "customer_id": customer_id,
+                "payload": payload_data
+            }
+        else:
+            return {
+                "success": True,
+                "customer_id": customer_id,
+                "payload": None,
+                "message": "No payload found for this customer"
+            }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "payload": None}
+
+
+async def handle_message(body: dict):
+    """
+    Handle incoming webhook events from the WhatsApp API.
+
+    This function processes incoming WhatsApp messages and other events,
+    such as delivery statuses. If the event is a valid message, it gets
+    processed. If the incoming payload is not a recognized WhatsApp event,
+    an error is returned.
+
+    Every message send will trigger 4 HTTP requests to your webhook: message, sent, delivered, read.
+
+    Returns:
+        response: A JSON response with appropriate HTTP status code.
+    """
+    # logging.info(f"request body: {body}")
+
+    # Check if it's a WhatsApp status update
+    if (
+        body.get("entry", [{}])[0]
+        .get("changes", [{}])[0]
+        .get("value", {})
+        .get("statuses")
+    ):
+        logging.info("Received a WhatsApp status update.")
+        return JSONResponse(content={"status": "ok"}, status_code=200)
+
+    try:
+        # if is_valid_whatsapp_message(body):
+        #     process_whatsapp_message(body)
+        send_message(body)
+        return JSONResponse(content={"status": "ok"}, status_code=200)
+        # else:
+        #     # if the request is not a WhatsApp API event, return an error
+        #     raise HTTPException(
+        #         status_code=404,
+        #         detail="Not a WhatsApp API event"
+        #     )
+    except json.JSONDecodeError:
+        logging.error("Failed to decode JSON")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON provided"
+        )
+
+
+@app.post("/webhook")
+@signature_required
+async def webhook_post(request: Request):
+    """
+    Handle incoming webhook POST requests from WhatsApp.
+    """
+    # Get body from request state (stored by decorator)
+    import json
+    # import pdb; pdb.set_trace()
+
+    try:
+        body = json.loads(request.state.body)
+        print(body)
+        wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
+        name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
+        contact_number = body["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
+
+        message = body["entry"][0]["changes"][0]["value"]["messages"][0]
+        message_body = message["text"]["body"]
+        wp_data = ChatMessage(customer_id="CUST001",
+                              message=message_body, conversation_history=[])
+        res_data = await chat_with_agent(wp_data)
+
+        async def _intent_20_words_from_json(res_json) -> str:
+            """Use gpt-4o-mini to digest res_data JSON and return its intent in <=20 words."""
+            try:
+                import os
+                from langchain_openai import ChatOpenAI
+
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    return ""
+
+                try:
+                    payload_text = json.dumps(res_json, ensure_ascii=False)
+                except Exception:
+                    payload_text = str(res_json)
+
+                llm = ChatOpenAI(model="gpt-4o-mini",
+                                 temperature=0.2, api_key=api_key)
+                prompt = (
+                    "You will receive a JSON object that represents an agent response. "
+                    "Write the intent of the JSON for an end-user in 120 words or fewer. "
+                    "If user is looking for a product,you should return the product name and price also include atleast 3 products. "
+                    "Plain text only. No emojis. No markdown. Output ONLY the sentence.\n\n"
+                    f"JSON:\n{payload_text}"
+                )
+
+                resp = await llm.ainvoke(prompt)
+                text = getattr(resp, "content", resp)
+                text = (text or "").strip()
+            except Exception:
+                return ""
+
+            # Enforce <=120 words even if the model overshoots.
+            words = text.split()
+            if len(words) > 120:
+                text = " ".join(words[:120])
+            return text
+
+        bot_response = await _intent_20_words_from_json(res_data)
+        if not bot_response:
+            # Fallback to existing fields if LLM/key fails
+            bot_response = (
+                res_data.get("responses", {}).get("default")
+                if isinstance(res_data, dict)
+                else ""
+            )
+        if not bot_response:
+            bot_response = "OK."
+        print(bot_response)
+        print("********")
+        print(res_data)
+        print("********")
+        print(contact_number)
+
+        wp_payload = get_text_message_input(contact_number, bot_response)
+        send_message(wp_payload)
+
+        return True
+    except Exception as e:
+        pass

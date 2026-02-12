@@ -2,7 +2,7 @@ from sqlmodel import Session, select, or_, and_, func, SQLModel
 from typing import Optional, List, Dict, Any, Type, Union
 from models import (
     Customer, Product, Store, OrderHistory,
-    StoreKeeperTransaction, AdminDashboardData, Cart
+    StoreKeeperTransaction, AdminDashboardData, Cart, Payload
 )
 
 
@@ -276,6 +276,7 @@ store_keeper_transaction_crud = UniversalCRUD(
     StoreKeeperTransaction, primary_key="id")
 admin_dashboard_data_crud = UniversalCRUD(AdminDashboardData, primary_key="id")
 cart_crud = UniversalCRUD(Cart, primary_key="order_id")
+payload_crud = UniversalCRUD(Payload, primary_key="id")
 
 
 # ==================== LEGACY CLASSES (for backward compatibility) ====================

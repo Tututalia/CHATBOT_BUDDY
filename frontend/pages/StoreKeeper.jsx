@@ -22,6 +22,8 @@ export default function StoreKeeper() {
   const [aiInsights, setAiInsights] = useState(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
+  const [benchmark, setBenchmark] = useState(null);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [dailyOrdersData, setDailyOrdersData] = useState(null);
   const [dailyOrdersTimeRange, setDailyOrdersTimeRange] = useState("weekly");
   const navigate = useNavigate();
@@ -105,12 +107,99 @@ export default function StoreKeeper() {
     }
   };
 
+  const fetchStoreBenchmark = async (range) => {
+    const cacheKey = `sk_store_benchmark_${range}`;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        setBenchmark(JSON.parse(cached));
+        return;
+      }
+    } catch {
+      // ignore cache issues
+    }
+
+    try {
+      setBenchmarkLoading(true);
+
+      const storeIds = Array.from(
+        { length: 23 },
+        (_, i) => `STR${String(i + 1).padStart(3, "0")}`,
+      );
+
+      const results = await Promise.all(
+        storeIds.map(async (id) => {
+          try {
+            const resp = await fetch(
+              `http://localhost:8000/api/store/${id}/transactions?time_range=${range}`,
+            );
+            const data = await resp.json();
+            const txs = data?.transactions || [];
+
+            const revenue = txs.reduce((sum, t) => {
+              if (!isRevenueStatus(t?.status)) return sum;
+              const amount = Number(t?.amount);
+              return sum + (Number.isFinite(amount) ? amount : 0);
+            }, 0);
+
+            return {
+              store_id: id,
+              txCount: txs.length,
+              revenue,
+            };
+          } catch {
+            return { store_id: id, txCount: 0, revenue: 0 };
+          }
+        }),
+      );
+
+      const activeStores = results.filter((r) => r.txCount > 0);
+      const storeCount = activeStores.length || results.length;
+
+      const avgRevenue =
+        storeCount > 0
+          ? activeStores.reduce((s, r) => s + r.revenue, 0) / storeCount
+          : 0;
+      const avgTx =
+        storeCount > 0
+          ? activeStores.reduce((s, r) => s + r.txCount, 0) / storeCount
+          : 0;
+
+      const revenueSorted = [...results].sort((a, b) => b.revenue - a.revenue);
+      const txSorted = [...results].sort((a, b) => b.txCount - a.txCount);
+
+      const revenueRank =
+        revenueSorted.findIndex((r) => r.store_id === storeId) + 1 || null;
+      const txRank =
+        txSorted.findIndex((r) => r.store_id === storeId) + 1 || null;
+
+      const summary = {
+        range,
+        storeCount: results.length,
+        activeStoreCount: activeStores.length,
+        avgRevenue,
+        avgTx,
+        revenueRank,
+        txRank,
+      };
+
+      setBenchmark(summary);
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(summary));
+      } catch {
+        // ignore cache issues
+      }
+    } finally {
+      setBenchmarkLoading(false);
+    }
+  };
+
   const fetchAIInsights = async (storeId, range) => {
     // COMMENTED OUT TO SAVE TOKENS - AI insights API call disabled
-    
+
     try {
       setInsightsLoading(true);
-      console.log("calling store api")
+      console.log("calling store api");
       const response = await fetch(
         `http://localhost:8000/api/store/${storeId}/ai-insights?time_range=${range}`,
       );
@@ -121,7 +210,7 @@ export default function StoreKeeper() {
         setAiInsights(null);
       } else {
         setAiInsights(data.insights);
-        console.log("data",data?.insights)
+        console.log("data", data?.insights);
       }
     } catch (error) {
       console.error("Error fetching AI insights:", error);
@@ -129,15 +218,16 @@ export default function StoreKeeper() {
     } finally {
       setInsightsLoading(false);
     }
-    
-    // Temporarily disabled - uncomment above code to re-enable AI insights
-    // setAiInsights(null);
-    setInsightsLoading(false);
   };
 
   const handleViewInsights = () => {
-    if (!showInsights && !aiInsights) {
-      fetchAIInsights(storeKeeperData.store_id, timeRange);
+    if (!showInsights) {
+      if (!aiInsights) {
+        fetchAIInsights(storeKeeperData.store_id, timeRange);
+      }
+      if (!benchmark || benchmark.range !== timeRange) {
+        fetchStoreBenchmark(timeRange);
+      }
     }
     setShowInsights(!showInsights);
   };
@@ -175,6 +265,179 @@ export default function StoreKeeper() {
 
   const COLORS = ["#4f46e5", "#ef4444"];
   const storeId = storeKeeperData.store_id || "sk1";
+
+  // --- AI Insights Key Metrics (computed from store_keeper_transactions via /transactions API) ---
+  const transactionsList = transactionData?.transactions || [];
+  const transactionVolume = transactionsList.length;
+
+  const uniqueCustomers = new Set(
+    transactionsList.map((t) => t?.customer_id).filter(Boolean),
+  );
+  const customerVisits = uniqueCustomers.size || transactionVolume;
+
+  const isRevenueStatus = (status) => {
+    const s = String(status || "")
+      .trim()
+      .toLowerCase();
+    return (
+      s === "success" || s === "complete" || s === "completed" || s === "paid"
+    );
+  };
+
+  const totalRevenueInr = transactionsList.reduce((sum, t) => {
+    if (!isRevenueStatus(t?.status)) return sum;
+    const amount = Number(t?.amount);
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+
+  const formatINR = (amount) =>
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(Number.isFinite(Number(amount)) ? Number(amount) : 0);
+
+  const parseTxDate = (dateStr) => {
+    if (!dateStr) return null;
+    const s = String(dateStr).trim();
+
+    // Try M/D/YYYY (or MM/DD/YYYY)
+    const mdyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdyMatch) {
+      const month = Number(mdyMatch[1]);
+      const day = Number(mdyMatch[2]);
+      const year = Number(mdyMatch[3]);
+      const d = new Date(Date.UTC(year, month - 1, day));
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    // Try ISO
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const toDayKey = (dateObj) => {
+    if (!dateObj) return null;
+    const y = dateObj.getUTCFullYear();
+    const m = String(dateObj.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(dateObj.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const completedTxCount = transactionsList.reduce(
+    (count, t) => (isRevenueStatus(t?.status) ? count + 1 : count),
+    0,
+  );
+  const avgTransactionValueInr =
+    completedTxCount > 0 ? totalRevenueInr / completedTxCount : 0;
+
+  // Build a simple day-series to infer transaction + revenue trends.
+  const dayBuckets = new Map();
+  for (const t of transactionsList) {
+    const dt = parseTxDate(t?.date);
+    const key = toDayKey(dt);
+    if (!key) continue;
+
+    if (!dayBuckets.has(key)) {
+      dayBuckets.set(key, { txCount: 0, revenue: 0 });
+    }
+    const b = dayBuckets.get(key);
+    b.txCount += 1;
+    if (isRevenueStatus(t?.status)) {
+      const amt = Number(t?.amount);
+      if (Number.isFinite(amt)) b.revenue += amt;
+    }
+  }
+
+  const series = Array.from(dayBuckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([day, v]) => ({ day, ...v }));
+
+  const splitIndex = Math.max(1, Math.floor(series.length / 2));
+  const firstHalf = series.slice(0, splitIndex);
+  const secondHalf = series.slice(splitIndex);
+
+  const sum = (arr, key) => arr.reduce((s, x) => s + (x[key] || 0), 0);
+  const txFirst = sum(firstHalf, "txCount");
+  const txSecond = sum(secondHalf, "txCount");
+  const revFirst = sum(firstHalf, "revenue");
+  const revSecond = sum(secondHalf, "revenue");
+
+  const trendLabel = (first, second) => {
+    if (series.length < 2) return "stable";
+    const delta = second - first;
+    const denom = Math.max(1, Math.abs(first));
+    const pct = (delta / denom) * 100;
+    if (pct > 10) return "increasing";
+    if (pct < -10) return "decreasing";
+    return "stable";
+  };
+
+  const transactionTrend = trendLabel(txFirst, txSecond);
+  const revenueTrend = trendLabel(revFirst, revSecond);
+
+  const zoneComparisonText = benchmark
+    ? ` Compared with ${benchmark.activeStoreCount || benchmark.storeCount} other stores in the zone, this store ranks ${benchmark.revenueRank}/${benchmark.storeCount} by revenue and ${benchmark.txRank}/${benchmark.storeCount} by transaction volume. Zone averages are ${formatINR(benchmark.avgRevenue)} revenue and ${Math.round(benchmark.avgTx)} transactions per store.`
+    : benchmarkLoading
+      ? " Benchmarking performance against other stores..."
+      : "";
+
+  const performanceOverview =
+    transactionVolume > 0
+      ? `Over the selected period, the store recorded ${transactionVolume} transactions from ${customerVisits} customer visits. Total revenue is ${formatINR(totalRevenueInr)} with an average transaction value of ${formatINR(avgTransactionValueInr)}. Transaction activity is ${transactionTrend}, and the revenue trend is ${revenueTrend} across the period.${zoneComparisonText}`
+      : aiInsights?.performance_overview ||
+        "No transactions found for the selected period.";
+
+  const defaultKeyMetrics = [
+    {
+      metric: "Customer Visits",
+      value: `${customerVisits}`,
+      insight: "Total customer visits in the selected period.",
+    },
+    {
+      metric: "Revenue",
+      value: formatINR(totalRevenueInr),
+      insight: "Total revenue from completed transactions.",
+    },
+    {
+      metric: "Transaction Volume",
+      value: `${transactionVolume}`,
+      insight: "Total transactions recorded for this store.",
+    },
+  ];
+
+  const keyMetrics = aiInsights?.key_metrics?.length
+    ? aiInsights.key_metrics.map((m) => {
+        const metricName = String(m?.metric || "").toLowerCase();
+
+        if (metricName.includes("success")) {
+          return {
+            ...m,
+            metric: "Customer Visits",
+            value: `${customerVisits}`,
+            insight: "Total customer visits in the selected period.",
+          };
+        }
+
+        if (metricName.includes("revenue")) {
+          return {
+            ...m,
+            value: formatINR(totalRevenueInr),
+            insight: "Total revenue from completed transactions.",
+          };
+        }
+
+        if (metricName.includes("transaction")) {
+          return {
+            ...m,
+            value: `${transactionVolume}`,
+          };
+        }
+
+        return m;
+      })
+    : defaultKeyMetrics;
 
   return (
     <div className="bg-[#f5f5f5] min-h-screen p-6">
@@ -305,20 +568,20 @@ export default function StoreKeeper() {
                           📊 Performance Overview
                         </h3>
                         <p className="text-gray-700 leading-relaxed">
-                          {aiInsights.performance_overview}
+                          {performanceOverview}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Key Metrics */}
-                  {aiInsights.key_metrics && (
+                  {keyMetrics && (
                     <div>
                       <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         <span className="text-2xl">📈</span> Key Metrics
                       </h3>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {aiInsights.key_metrics.map((metric, index) => (
+                        {keyMetrics.map((metric, index) => (
                           <div
                             key={index}
                             className="bg-white p-5 rounded-xl shadow-lg border border-gray-200 hover:shadow-xl transition-shadow"
@@ -677,7 +940,12 @@ export default function StoreKeeper() {
                       textAnchor="end"
                       height={140}
                       interval={0}
-                      tick={{ fontSize: 13, fill: "#4b5563", fontWeight: 500, dy: 5 }}
+                      tick={{
+                        fontSize: 13,
+                        fill: "#4b5563",
+                        fontWeight: 500,
+                        dy: 5,
+                      }}
                       stroke="#d1d5db"
                       tickMargin={12}
                     />
@@ -686,7 +954,12 @@ export default function StoreKeeper() {
                       tick={{ fontSize: 13, fill: "#4b5563", fontWeight: 500 }}
                       stroke="#d1d5db"
                       tickMargin={8}
-                      label={{ value: 'Quantity Sold', angle: -90, position: 'insideLeft', style: { fill: '#6b7280', fontWeight: 600 } }}
+                      label={{
+                        value: "Quantity Sold",
+                        angle: -90,
+                        position: "insideLeft",
+                        style: { fill: "#6b7280", fontWeight: 600 },
+                      }}
                     />
                     <Tooltip
                       contentStyle={{
@@ -696,7 +969,7 @@ export default function StoreKeeper() {
                         color: "#fff",
                         boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
                         padding: "12px 16px",
-                        fontSize: "14px"
+                        fontSize: "14px",
                       }}
                       cursor={{ fill: "rgba(249, 115, 22, 0.1)" }}
                     />
@@ -774,7 +1047,9 @@ export default function StoreKeeper() {
               </div>
             </div>
             <div className="p-8">
-              {dailyOrdersData && dailyOrdersData.daily_orders && dailyOrdersData.daily_orders.length > 0 ? (
+              {dailyOrdersData &&
+              dailyOrdersData.daily_orders &&
+              dailyOrdersData.daily_orders.length > 0 ? (
                 <>
                   <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
                     {/* Total Orders Card */}
@@ -812,19 +1087,29 @@ export default function StoreKeeper() {
                               outerRadius={140}
                               innerRadius={80}
                               label={({ date, count, percentage }) =>
-                                `${new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ${count} (${percentage}%)`
+                                `${new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${count} (${percentage}%)`
                               }
                               labelLine={{ stroke: "#6b7280", strokeWidth: 2 }}
                             >
-                              {dailyOrdersData.daily_orders.map((entry, index) => {
-                                const colors = ['#991b1b', '#b91c1c', '#dc2626', '#f97316', '#fb923c', '#fbbf24', '#fde047'];
-                                return (
-                                  <Cell
-                                    key={`cell-${index}`}
-                                    fill={colors[index % colors.length]}
-                                  />
-                                );
-                              })}
+                              {dailyOrdersData.daily_orders.map(
+                                (entry, index) => {
+                                  const colors = [
+                                    "#991b1b",
+                                    "#b91c1c",
+                                    "#dc2626",
+                                    "#f97316",
+                                    "#fb923c",
+                                    "#fbbf24",
+                                    "#fde047",
+                                  ];
+                                  return (
+                                    <Cell
+                                      key={`cell-${index}`}
+                                      fill={colors[index % colors.length]}
+                                    />
+                                  );
+                                },
+                              )}
                             </Pie>
                             <Tooltip
                               contentStyle={{
@@ -837,7 +1122,11 @@ export default function StoreKeeper() {
                               }}
                               formatter={(value, name, props) => [
                                 `${value} orders (${props.payload.percentage}%)`,
-                                new Date(name).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+                                new Date(name).toLocaleDateString("en-US", {
+                                  weekday: "long",
+                                  month: "short",
+                                  day: "numeric",
+                                }),
                               ]}
                             />
                           </PieChart>
@@ -848,10 +1137,20 @@ export default function StoreKeeper() {
 
                   {/* Daily Breakdown Cards */}
                   <div className="mb-6">
-                    <h4 className="text-lg font-bold text-gray-800 mb-4">Daily Breakdown</h4>
+                    <h4 className="text-lg font-bold text-gray-800 mb-4">
+                      Daily Breakdown
+                    </h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                       {dailyOrdersData.daily_orders.map((day, index) => {
-                        const colors = ['#991b1b', '#b91c1c', '#dc2626', '#f97316', '#fb923c', '#fbbf24', '#fde047'];
+                        const colors = [
+                          "#991b1b",
+                          "#b91c1c",
+                          "#dc2626",
+                          "#f97316",
+                          "#fb923c",
+                          "#fbbf24",
+                          "#fde047",
+                        ];
                         const date = new Date(day.date);
                         return (
                           <div
@@ -861,17 +1160,25 @@ export default function StoreKeeper() {
                             <div className="flex items-center gap-2 mb-2">
                               <div
                                 className="w-3 h-3 rounded-full"
-                                style={{ backgroundColor: colors[index % colors.length] }}
+                                style={{
+                                  backgroundColor:
+                                    colors[index % colors.length],
+                                }}
                               />
                               <p className="text-xs font-semibold text-gray-600 uppercase">
-                                {date.toLocaleDateString('en-US', { weekday: 'short' })}
+                                {date.toLocaleDateString("en-US", {
+                                  weekday: "short",
+                                })}
                               </p>
                             </div>
                             <p className="text-2xl font-bold text-gray-900 mb-1">
                               {day.count}
                             </p>
                             <p className="text-xs text-gray-500">
-                              {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {date.toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              })}
                             </p>
                           </div>
                         );
@@ -884,8 +1191,16 @@ export default function StoreKeeper() {
                     <div className="bg-gradient-to-br from-red-50 to-orange-50 p-5 rounded-xl border border-red-200">
                       <div className="flex items-center gap-3">
                         <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
-                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+                          <svg
+                            className="w-6 h-6 text-white"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+                              clipRule="evenodd"
+                            />
                           </svg>
                         </div>
                         <div>
@@ -894,7 +1209,7 @@ export default function StoreKeeper() {
                           </p>
                           <p className="text-lg font-bold text-red-900">
                             {dailyOrdersData.peak_day
-                              ? `${new Date(dailyOrdersData.peak_day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${dailyOrdersData.peak_day.count})`
+                              ? `${new Date(dailyOrdersData.peak_day.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} (${dailyOrdersData.peak_day.count})`
                               : "N/A"}
                           </p>
                         </div>
@@ -903,7 +1218,11 @@ export default function StoreKeeper() {
                     <div className="bg-gradient-to-br from-orange-50 to-yellow-50 p-5 rounded-xl border border-orange-200">
                       <div className="flex items-center gap-3">
                         <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
-                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <svg
+                            className="w-6 h-6 text-white"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
                             <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
                           </svg>
                         </div>
@@ -920,8 +1239,16 @@ export default function StoreKeeper() {
                     <div className="bg-gradient-to-br from-yellow-50 to-amber-50 p-5 rounded-xl border border-yellow-200">
                       <div className="flex items-center gap-3">
                         <div className="bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 p-3 rounded-lg">
-                          <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
+                          <svg
+                            className="w-6 h-6 text-white"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z"
+                              clipRule="evenodd"
+                            />
                           </svg>
                         </div>
                         <div>

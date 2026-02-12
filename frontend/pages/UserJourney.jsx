@@ -125,10 +125,19 @@ export default function UserJourney() {
 
   // Calculate product quantities from purchases (for order history)
   const productMap = {};
+  const productSizeMap = {};
   if (orderHistory && orderHistory.length > 0) {
     orderHistory.forEach((product) => {
       const pid = product.product_id;
       productMap[pid] = (productMap[pid] || 0) + 1;
+
+      const sizeValue = String(product?.size || "").trim();
+      if (sizeValue) {
+        if (!productSizeMap[pid]) productSizeMap[pid] = [];
+        if (!productSizeMap[pid].includes(sizeValue)) {
+          productSizeMap[pid].push(sizeValue);
+        }
+      }
     });
   }
 
@@ -290,6 +299,8 @@ export default function UserJourney() {
                 const prod = orderHistory.find((p) => p.product_id === pid);
                 if (!prod) return null;
 
+                const sizesForProduct = productSizeMap[pid] || [];
+
                 return (
                   <div
                     key={pid}
@@ -355,6 +366,12 @@ export default function UserJourney() {
                       <p className="text-sm text-gray-600 mb-2">
                         Category: {prod.category}
                       </p>
+                      {sizesForProduct.length > 0 && (
+                        <p className="text-sm text-gray-600 mb-2">
+                          {sizesForProduct.length > 1 ? "Sizes" : "Size"}: {" "}
+                          {sizesForProduct.join(", ")}
+                        </p>
+                      )}
                       <p className="text-xl font-bold text-green-600 mb-3">
                         ₹{prod.price}
                       </p>

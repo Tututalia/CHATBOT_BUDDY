@@ -76,7 +76,7 @@ export default function Home({ onLoginClick }) {
                   </svg>
                 </button>
                 <button
-                  onClick={() => onLoginClick("customer")}
+                  onClick={() => onLoginClick("kiosk")}
                   className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg font-semibold hover:from-orange-600 hover:to-yellow-600 transition-all duration-200 flex items-center justify-center gap-1 text-sm whitespace-nowrap shadow-md"
                 >
                   In-Store Kiosk

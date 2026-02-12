@@ -1,4 +1,3 @@
-
 from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime, date
@@ -27,6 +26,8 @@ class Customer(SQLModel, table=True):
     order_dates: Optional[str] = None    # Comma-separated dates
     pending_orders: Optional[str] = None
     role_id: Optional[int] = Field(default=None, foreign_key="role.id")
+    customer_type: Optional[str] = None  # tier_1, tier_2, or tier_3
+    type_justification: Optional[str] = None  # Justification for customer tier
 
     # Relationships
     orders: List["OrderHistory"] = Relationship(back_populates="customer")
@@ -85,6 +86,7 @@ class OrderHistory(SQLModel, table=True):
     product_id: str = Field(foreign_key="products.product_id", index=True)
     product_name: str
     quantity: int
+    size: Optional[str] = Field(default=None)
     order_dates: str  # Date as string
     loyalty_points: int
 
@@ -104,6 +106,7 @@ class StoreKeeperTransaction(SQLModel, table=True):
     user_name: str
     product: str  # Product name
     qty: int
+    size: Optional[str] = Field(default=None)
     mode: str  # Online/Offline
     # store_name is a human-readable name; use `store_id` as the FK to `stores.store_id`
     store_name: str = Field(index=True)
@@ -154,8 +157,49 @@ class Cart(SQLModel, table=True):
     status: Optional[str] = Field(default="pending")
     created_at: Optional[str] = Field(default=None)
     quantity: int = Field(default=1)  # Quantity of product in cart
+    size: Optional[str] = Field(default=None)
 
     # Relationships
     customer: Optional[Customer] = Relationship()
     product: Optional[Product] = Relationship()
     store: Optional[Store] = Relationship()
+
+# Payload Model - Stores conversation log data
+
+
+class Payload(SQLModel, table=True):
+    __tablename__ = "payload"
+
+    id: int = Field(primary_key=True)
+    customer_id: str = Field(foreign_key="customers.customer_id", index=True)
+    payload: str  # JSON string of the conversation log entry
+    created_at: str  # Timestamp when the payload was created
+
+    # Relationships
+    customer: Optional[Customer] = Relationship()
+
+
+# Distance Model
+class Distance(SQLModel, table=True):
+    __tablename__ = "distance"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: str = Field(foreign_key="customers.customer_id", index=True)
+    customer_address: str
+    store_id: str = Field(foreign_key="stores.store_id", index=True)
+    store_name: str
+    store_address: str
+    distance: float  # Distance in kilometers
+    map_url: Optional[str] = None  # URL to Google Maps directions
+
+
+# Feedback Model
+class Feedback(SQLModel, table=True):
+    __tablename__ = "feedback"
+
+    product_id: str = Field(
+        primary_key=True,
+        foreign_key="products.product_id",
+        index=True,
+    )
+    review: float = Field(default=0.0)

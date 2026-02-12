@@ -5,15 +5,207 @@ Store Kiosk Chatbot Workflow (Linear LangGraph)
 - LLM prompts for payment, then processes payment, fulfillment, loyalty, and post-purchase in a linear flow
 """
 
-from crud import cart_crud
+import random
+import time
+from datetime import datetime
+
+from crud import cart_crud, product_crud
 from models import Cart
 from database import get_db_session
-from typing import TypedDict, Annotated, List, Dict, Any
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_core.tools import tool
 from intelligent_agent_graph import payment_agent, fulfillment_agent, loyalty_agent, post_purchase_agent
+
+
+def _get_offline_store_id_for_customer(customer_id: str) -> str | None:
+    """Resolve the customer's current offline store context from the cart table."""
+    if not customer_id:
+        return None
+    try:
+        with get_db_session() as session:
+            recent = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "channel": "offline"},
+                operators={"customer_id": "==", "channel": "=="},
+                order_by="created_at",
+                order_desc=True,
+                limit=50,
+            )
+
+        for item in recent or []:
+            store_id = getattr(item, "store_id", None)
+            if store_id:
+                return store_id
+        # return None
+        return "STR011"  # Default store ID if none found
+    except Exception as e:
+        print(f"Error resolving offline store_id for {customer_id}: {e}")
+        # return None
+        return "STR011"
+
+
+@tool
+def kiosk_add_to_cart_agent(
+    product_id: str,
+    quantity: int,
+    customer_id: str,
+    size: Optional[str] = None,
+) -> str:
+    """Kiosk-only add-to-cart.
+
+    Requirements:
+    - MUST set channel='offline'
+    - MUST set store_id based on the customer's existing offline cart context
+    - MUST NOT call intelligent_agent_graph.add_to_cart_agent
+    """
+    product_id = (product_id or "").strip()
+    if not product_id:
+        return "❌ Please provide a valid product ID."
+
+    try:
+        quantity = int(quantity)
+    except Exception:
+        quantity = 1
+
+    if quantity <= 0:
+        return "❌ Please specify a valid quantity (greater than 0)."
+
+    if not customer_id:
+        return "❌ Missing customer_id."
+
+    normalized_size: Optional[str] = None
+    if isinstance(size, str):
+        s = size.strip()
+        if s:
+            normalized_size = s
+
+    store_id = _get_offline_store_id_for_customer(customer_id)
+    if not store_id:
+        return (
+            "❌ I couldn't determine your pickup store for this offline session. "
+            "Please ask staff for assistance or restart the offline pickup flow."
+        )
+
+    try:
+        with get_db_session() as session:
+            product = product_crud.get_by_id(session, product_id)
+            if not product:
+                return f"❌ Product {product_id} not found."
+
+            if getattr(product, "quantity", 0) < quantity:
+                return (
+                    f"❌ Sorry, only {getattr(product, 'quantity', 0)} units of {product.product_name} "
+                    "are available in stock."
+                )
+
+            # If the same product is already in the offline cart for the same store, increment quantity.
+            existing = cart_crud.filter(
+                session,
+                filters={
+                    "customer_id": customer_id,
+                    "product_id": product_id,
+                    "store_id": store_id,
+                    "channel": "offline",
+                    "status": "pending",
+                },
+                operators={
+                    "customer_id": "==",
+                    "product_id": "==",
+                    "store_id": "==",
+                    "channel": "==",
+                    "status": "==",
+                },
+                limit=1,
+            )
+            if existing:
+                cart_item = existing[0]
+                new_qty = int(getattr(cart_item, "quantity", 1)
+                              or 1) + quantity
+                if getattr(product, "quantity", 0) < new_qty:
+                    return (
+                        f"❌ Sorry, only {getattr(product, 'quantity', 0)} units of {product.product_name} "
+                        "are available in stock."
+                    )
+                cart_crud.update(session, cart_item.order_id,
+                                 {"quantity": new_qty})
+                return (
+                    f"✅ Updated cart: {product.product_name} quantity is now {new_qty} "
+                    f"for pickup store {store_id}."
+                )
+
+            order_id = f"KIOSK{int(time.time() * 1000) % 1000000}{random.randint(100, 999)}"
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cart = Cart(
+                order_id=order_id,
+                customer_id=customer_id,
+                product_id=product_id,
+                store_id=store_id,
+                channel="offline",
+                status="pending",
+                created_at=now,
+                quantity=quantity,
+                size=normalized_size,
+            )
+            cart_crud.create(session, cart)
+
+            return (
+                f"✅ Added to offline cart for store {store_id}: {product.product_name} "
+                f"(ID: {product_id}) × {quantity}."
+            )
+    except Exception as e:
+        print(f"Error in kiosk_add_to_cart_agent: {e}")
+        return "❌ Error adding product to kiosk cart. Please try again."
+
+
+@tool
+def switch_channel_instore_to_online(customer_id: str) -> str:
+    """Switch customer's offline cart items to pending channel for later payment.
+
+    This allows customers to move their in-store cart to pending so they can pay later.
+    Updates all offline cart items for the customer:
+    - Sets store_id to NULL
+    - Changes channel from 'offline' to 'pending'
+    - Keeps status as 'pending'
+    """
+    if not customer_id:
+        return "❌ Customer ID is required."
+
+    try:
+        with get_db_session() as session:
+            # Find all offline cart items for this customer
+            offline_items = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "channel": "offline"},
+                operators={"customer_id": "==", "channel": "=="},
+                limit=100,
+            )
+
+            if not offline_items:
+                return "❌ No offline cart items found to switch to pending."
+
+            # Update each item
+            updated_count = 0
+            for item in offline_items:
+                cart_crud.update(
+                    session,
+                    item.order_id,
+                    {"store_id": None, "channel": "pending"}
+                )
+                updated_count += 1
+
+            session.commit()
+
+            return (
+                f"✅ Successfully switched {updated_count} item(s) from in-store to pending cart. "
+                f"You can now pay for these items later at your convenience."
+            )
+    except Exception as e:
+        print(f"Error in switch_channel_instore_to_online: {e}")
+        return "❌ Error switching cart to pending. Please try again."
+
 
 # ============ State Definition ============
 
@@ -114,7 +306,7 @@ def payment_prompt_node(state: KioskState):
         if "proceed" in content_lower or "pay" in content_lower or "yes" in content_lower:
             # User confirmed - proceed with all items in cart
             return {
-                "messages": [AIMessage(content="Great! Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "messages": [AIMessage(content="Great! Please type your payment method (UPI, Credit Card, Debit Card, Cash on Delivery) to proceed.")],
                 "pay_all": True  # Flag to indicate paying for all items
             }
 
@@ -125,7 +317,7 @@ def payment_prompt_node(state: KioskState):
             print(
                 f"[DEBUG] Selected order: {selected_order.order_id}, product: {selected_order.product_id}, store: {selected_order.store_id}")
             return {
-                "messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit, Debit, Net Banking) to proceed.")],
+                "messages": [AIMessage(content=f"You selected Order ID: {selected_order.order_id}. Please type your payment method (UPI, Credit Card, Debit Card, Cash on Delivery) to proceed.")],
                 "order_id": selected_order.order_id,
                 "product_id": selected_order.product_id,
                 "store_id": selected_order.store_id,
@@ -142,54 +334,62 @@ def payment_method_node(state: KioskState):
     pay_all = state.get("pay_all", False)
 
     # If not paying for all and no specific order selected, return error
-    if not pay_all and not state.get("order_id"):
-        return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
+    # if not pay_all and not state.get("order_id"):
+    #     return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
 
     # Wait for user to select a payment method
     last_msg = state["messages"][-1] if state["messages"] else None
     if last_msg and isinstance(last_msg, HumanMessage):
         content = last_msg.content.lower()
-        for method in ["upi", "credit", "debit", "net banking"]:
-            if method in content:
-                customer_id = state["customer_id"]
+        method_selected = None
+        if "cash on delivery" in content or content.strip() == "cod" or " cod" in content:
+            method_selected = "cash on delivery"
+        else:
+            for method in ["upi", "credit", "debit", "net banking"]:
+                if method in content:
+                    method_selected = method
+                    break
 
-                try:
-                    from intelligent_agent_graph import get_product_by_id
-                    with get_db_session() as session:
-                        if pay_all:
-                            # Process all items in cart
-                            pending_orders = get_pending_offline_orders(
-                                customer_id)
-                            if not pending_orders:
-                                return {"messages": [AIMessage(content="❌ No items found in cart.")]}
+        if method_selected:
+            customer_id = state["customer_id"]
 
-                            total_amount = 0
-                            order_details = []
+            try:
+                from intelligent_agent_graph import get_product_by_id
+                with get_db_session() as session:
+                    if pay_all:
+                        # Process all items in cart
+                        pending_orders = get_pending_offline_orders(
+                            customer_id)
+                        if not pending_orders:
+                            return {"messages": [AIMessage(content="❌ No items found in cart.")]}
 
-                            for order in pending_orders:
-                                # Get product details
-                                product = get_product_by_id(order.product_id)
-                                if product:
-                                    qty = getattr(order, 'quantity', 1)
-                                    # Calculate discount price
-                                    original_price = product.price
-                                    discount = getattr(
-                                        product, 'discount', 0) or 0
-                                    discount_price = round(
-                                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
-                                    item_total = discount_price * qty
-                                    total_amount += item_total
-                                    order_details.append(
-                                        f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
+                        total_amount = 0
+                        order_details = []
 
-                                    # Update cart status to 'paid'
-                                    order.status = 'paid'
+                        for order in pending_orders:
+                            # Get product details
+                            product = get_product_by_id(order.product_id)
+                            if product:
+                                qty = getattr(order, 'quantity', 1)
+                                # Calculate discount price
+                                original_price = product.price
+                                discount = getattr(
+                                    product, 'discount', 0) or 0
+                                discount_price = round(
+                                    original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                                item_total = discount_price * qty
+                                total_amount += item_total
+                                order_details.append(
+                                    f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
 
-                            session.commit()
+                                # Update cart status to 'paid'
+                                order.status = 'paid'
 
-                            payment_msg = f"""✅ **Payment Successful!**
+                        session.commit()
 
-Payment Method: {method.upper()}
+                        payment_msg = f"""✅ **Payment Successful!**
+
+Payment Method: {method_selected.upper()}
 Items Paid:
 {chr(10).join(order_details)}
 
@@ -197,46 +397,46 @@ Total Amount Paid: ₹{total_amount:.2f}
 
 Your orders are now ready for pickup. Please proceed to the store counter."""
 
-                            # Store first order details for subsequent nodes
-                            first_order = pending_orders[0]
-                            return {
-                                "messages": [AIMessage(content=payment_msg)],
-                                "payment_completed": True,
-                                "order_id": first_order.order_id,
-                                "product_id": first_order.product_id,
-                                "store_id": first_order.store_id,
-                                "all_orders": [{"order_id": o.order_id, "product_id": o.product_id, "store_id": o.store_id} for o in pending_orders]
-                            }
-                        else:
-                            # Process single item
-                            product_id = state["product_id"]
-                            order_id = state["order_id"]
+                        # Store first order details for subsequent nodes
+                        first_order = pending_orders[0]
+                        return {
+                            "messages": [AIMessage(content=payment_msg)],
+                            "payment_completed": True,
+                            "order_id": first_order.order_id,
+                            "product_id": first_order.product_id,
+                            "store_id": first_order.store_id,
+                            "all_orders": [{"order_id": o.order_id, "product_id": o.product_id, "store_id": o.store_id} for o in pending_orders]
+                        }
+                    else:
+                        # Process single item
+                        product_id = state["product_id"]
+                        order_id = state["order_id"]
 
-                            # Get cart item
-                            cart_item = cart_crud.get_by_id(session, order_id)
-                            if not cart_item:
-                                return {"messages": [AIMessage(content="❌ Order not found. Please try again.")]}
+                        # Get cart item
+                        cart_item = cart_crud.get_by_id(session, order_id)
+                        if not cart_item:
+                            return {"messages": [AIMessage(content="❌ Order not found. Please try again.")]}
 
-                            # Get product details
-                            product = get_product_by_id(product_id)
-                            if not product:
-                                return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
+                        # Get product details
+                        product = get_product_by_id(product_id)
+                        if not product:
+                            return {"messages": [AIMessage(content="❌ Product not found. Please try again.")]}
 
-                            qty = getattr(cart_item, 'quantity', 1)
-                            # Calculate discount price
-                            original_price = product.price
-                            discount = getattr(product, 'discount', 0) or 0
-                            discount_price = round(
-                                original_price * (1 - discount / 100), 2) if discount > 0 else original_price
-                            total_amount = discount_price * qty
+                        qty = getattr(cart_item, 'quantity', 1)
+                        # Calculate discount price
+                        original_price = product.price
+                        discount = getattr(product, 'discount', 0) or 0
+                        discount_price = round(
+                            original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                        total_amount = discount_price * qty
 
-                            # Update cart status to 'paid' but keep channel as 'offline'
-                            cart_item.status = 'paid'
-                            session.commit()
+                        # Update cart status to 'paid' but keep channel as 'offline'
+                        cart_item.status = 'paid'
+                        session.commit()
 
-                            payment_msg = f"""✅ **Payment Successful!**
+                        payment_msg = f"""✅ **Payment Successful!**
 
-Payment Method: {method.upper()}
+Payment Method: {method_selected.upper()}
 Order ID: {order_id}
 Product: {product.product_name}
 Quantity: {qty}
@@ -244,15 +444,15 @@ Amount Paid: ₹{total_amount:.2f}
 
 Your order is now ready for pickup. Please proceed to the store counter."""
 
-                            return {"messages": [AIMessage(content=payment_msg)], "payment_completed": True}
+                        return {"messages": [AIMessage(content=payment_msg)], "payment_completed": True}
 
-                except Exception as e:
-                    print(f"Error processing payment: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    return {"messages": [AIMessage(content=f"❌ Payment processing failed: {str(e)}. Please try again.")]}
+            except Exception as e:
+                print(f"Error processing payment: {e}")
+                import traceback
+                traceback.print_exc()
+                return {"messages": [AIMessage(content=f"❌ Payment processing failed: {str(e)}. Please try again.")]}
 
-        return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, or Net Banking.")]}
+        return {"messages": [AIMessage(content="Please select a valid payment method: UPI, Credit Card, Debit Card, Cash on Delivery, or Net Banking.")]}
     return {"messages": []}
 
 # ============ Node 3: Fulfillment Agent ============
@@ -528,6 +728,7 @@ Have a great day! 🎉"""
                 if product and customer and cart_item:
                     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     qty = getattr(cart_item, 'quantity', 1)
+                    size = getattr(cart_item, 'size', None)
                     total_amount = product.price * qty
 
                     print("[DEBUG] Creating OrderHistory record...")
@@ -538,6 +739,7 @@ Have a great day! 🎉"""
                         product_id=curr_product_id,
                         product_name=product.product_name,
                         quantity=qty,
+                        size=size,
                         order_dates=now,
                         loyalty_points=getattr(customer, 'loyalty_points', 0)
                     )
@@ -552,6 +754,7 @@ Have a great day! 🎉"""
                         user_name=customer.customer_name,
                         product=product.product_name,
                         qty=qty,
+                        size=size,
                         mode="Offline",
                         store_name=store.store_name if store else "",
                         store_id=curr_store_id,
