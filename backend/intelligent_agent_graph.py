@@ -283,6 +283,25 @@ def get_customer_purchased_product_ids(customer_id: str) -> set[str]:
 # to see more products of the same category/query.
 _SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY: dict[tuple[str, str], set[str]] = {}
 
+# In-memory tracking of loyalty points used per customer during the current checkout.
+# Set by the WebSocket handler when the frontend sends loyalty_points_used with payment.
+_LOYALTY_POINTS_USED_BY_CUSTOMER: dict[str, int] = {}
+
+
+def set_loyalty_points_used(customer_id: str, points: int):
+    """Store loyalty points used by a customer for the current checkout session."""
+    _LOYALTY_POINTS_USED_BY_CUSTOMER[customer_id] = points
+
+
+def get_loyalty_points_used(customer_id: str) -> int:
+    """Retrieve loyalty points used by a customer for the current checkout session."""
+    return _LOYALTY_POINTS_USED_BY_CUSTOMER.get(customer_id, 0)
+
+
+def clear_loyalty_points_used(customer_id: str):
+    """Clear loyalty points tracking after checkout is complete."""
+    _LOYALTY_POINTS_USED_BY_CUSTOMER.pop(customer_id, None)
+
 
 def _normalize_inventory_query_key(search_query: str) -> str:
     if not search_query:
@@ -632,7 +651,7 @@ def recommendation_agent(inventory_data: str) -> str:
 
 
 @tool
-def inventory_agent(search_query: str = None, product_id: str = None, customer_id: str = None) -> str:
+def inventory_agent(search_query: str = None, product_id: str = None, customer_id: str = None, sort_by_rating: bool = False) -> str:
     """
     Searches and fetches products from database based on user query or checks specific product availability.
     Uses customer tier to personalize product recommendations.
@@ -648,6 +667,7 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
         search_query: User's product search query (e.g., "hoodies", "winter wear")
         product_id: Specific product ID to check (optional, use when checking specific product)
         customer_id: Customer ID to personalize recommendations based on their tier
+        sort_by_rating: If True, sort results by highest customer rating (from feedback table) first
 
     Returns:
         JSON string with product details or availability status
@@ -887,6 +907,31 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                 "products": []
             })
 
+        # --- Rating-based sorting (sort BEFORE the 4-item limit) ---
+        product_ratings: dict[str, float] = {}
+        if sort_by_rating:
+            try:
+                from database import get_db_session as _rating_db_session
+                from models import Feedback as _FeedbackModel
+                from sqlmodel import select as _sel
+
+                with _rating_db_session() as _rsess:
+                    _all_fb = _rsess.exec(_sel(_FeedbackModel)).all()
+                    product_ratings = {
+                        fb.product_id: fb.review for fb in _all_fb}
+
+                # Sort products by rating descending; products without a rating get 0.0
+                products.sort(
+                    key=lambda p: product_ratings.get(
+                        _product_canonical_id(p) or "", 0.0),
+                    reverse=True,
+                )
+                print(
+                    f"[DEBUG] Sorted {len(products)} products by rating. Top ratings: {[(product_ratings.get(_product_canonical_id(p) or '', 0.0)) for p in products[:6]]}")
+            except Exception as rating_err:
+                print(
+                    f"[DEBUG] Rating sort failed (falling back to default order): {rating_err}")
+
         # Limit to 4 products
         products = products[:4]
 
@@ -905,7 +950,7 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
         # Format products as JSON with customer tier info
         product_list = []
         for p in products:
-            product_list.append({
+            item = {
                 "product_id": getattr(p, "sku", None) or getattr(p, "product_id", None) or getattr(p, "id", None),
                 "product_name": p.product_name,
                 "category": getattr(p, "category", None),
@@ -914,7 +959,12 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                 "discount": getattr(p, "discount", 0) or 0,
                 "image_reference": getattr(p, "image_reference", None),
                 "description": getattr(p, "description", None)
-            })
+            }
+            # Attach rating from feedback table when sorting by rating
+            pid = _product_canonical_id(p)
+            if sort_by_rating and pid and pid in product_ratings:
+                item["rating"] = product_ratings[pid]
+            product_list.append(item)
 
         # Include customer tier in response if available
         response_data = {
@@ -1089,10 +1139,20 @@ def view_cart_agent(customer_id: str) -> str:
                         "savings": item_total_original - item_total_discounted if discount > 0 else 0
                     })
 
+            # Fetch customer loyalty points
+            available_loyalty_points = 0
+            try:
+                customer = get_customer_by_id(customer_id)
+                if customer:
+                    available_loyalty_points = customer.loyalty_points or 0
+            except Exception:
+                available_loyalty_points = 0
+
             result += f"════════════════════════════════\\n"
             if total_discount > 0:
                 result += f"💚 **Total Savings: ₹{int(total_discount):,}**\\n"
-            result += f"💰 **Total Amount: ₹{int(total_amount):,}**\\n\\n"
+            result += f"💰 **Total Amount: ₹{int(total_amount):,}**\\n"
+            result += f"🎁 **Available Loyalty Points: {available_loyalty_points}**\\n\\n"
             result += "**What would you like to do?**\\n"
             result += "- Type 'proceed' to continue to payment\\n"
             result += "- Type 'add more' to browse more products\\n"
@@ -1106,7 +1166,8 @@ def view_cart_agent(customer_id: str) -> str:
                 "cart_items": cart_details,
                 "total_amount": total_amount,
                 "total_savings": total_discount,
-                "total_items": len(cart_items)
+                "total_items": len(cart_items),
+                "available_loyalty_points": available_loyalty_points
             })
 
     except Exception as e:
@@ -1278,11 +1339,18 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
         print(f"Error in payment_agent: {e}")
         return f"❌ Error loading cart for payment. Please try again."
 
+    # Round total to nearest integer to match frontend's Math.round() display
+    total_amount = round(total_amount)
+
+    # Apply loyalty points deduction if any
+    loyalty_used = get_loyalty_points_used(customer_id)
+    payable_amount = round(max(total_amount - loyalty_used, 0))
+
     # If no payment method specified, show available methods
     if not payment_method:
         result = f"💳 **Payment for Your Cart**\\n\\n"
         result += f"Total Items: {len(cart_items)}\\n"
-        result += f"**Total Amount: ₹{int(total_amount):,}**\\n\\n"
+        result += f"**Total Amount: ₹{payable_amount:,}**\\n\\n"
         result += "Please choose your preferred payment method:\\n\\n"
         result += "1. 📱 **UPI** - Pay using any UPI app (Google Pay, PhonePe, Paytm, etc.)\\n"
         result += "2. 💳 **Credit Card** - Visa, Mastercard, American Express, etc.\\n"
@@ -1298,7 +1366,7 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
     result = f"💳 **Processing Payment...**\\n\\n"
     result += f"Order ID: {order_id}\\n"
     result += f"Total Items: {len(cart_items)}\\n"
-    result += f"Amount: ₹{int(total_amount):,}\\n"
+    result += f"Amount: ₹{payable_amount:,}\\n"
     result += f"Method: {payment_method.upper()}\\n"
     result += f"Payment ID: {payment_id}\\n\\n"
     result += "✅ **Payment Successful!**\\n\\n"
@@ -1397,6 +1465,13 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         cart_summary = []
         total_amount = 0
 
+    # Round total to nearest integer to match frontend's Math.round() display
+    total_amount = round(total_amount)
+
+    # Apply loyalty points deduction if any
+    loyalty_used = get_loyalty_points_used(customer_id) if customer_id else 0
+    payable_amount = round(max(total_amount - loyalty_used, 0))
+
     # Always return the fulfillment agent message in a dict with 'response' key for frontend
     if purchase_type.lower() == "online":
         print("⏳ Confirming your order...")
@@ -1405,7 +1480,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         result = f"📦 **Order Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
         result += f"Total Items: {len(cart_summary)}\n"
-        result += f"Total Amount: ₹{int(total_amount):,}\n"
+        result += f"Total Amount: ₹{payable_amount:,}\n"
         result += f"Delivery Type: Home Delivery\n"
         result += f"Expected Delivery: {delivery_date}\n\n"
         if cart_summary:
@@ -1442,7 +1517,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         result = f"🏪 **In-Store Pickup Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
         result += f"Total Items: {len(cart_summary)}\n"
-        result += f"Total Amount: ₹{int(total_amount):,}\n"
+        result += f"Total Amount: ₹{payable_amount:,}\n"
         result += f"Pickup Store: {store_display_name}\n"
         result += f"Store Address: {store_address}\n"
         result += f"Status: Ready for pickup in 2 hours\n\n"
@@ -1601,26 +1676,72 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
             customer = CustomerCRUD.get_by_id(session, customer_id)
             customer_name = customer.customer_name if customer else ''
 
-            print(f"[DEBUG] Processing {len(cart_items)} cart items...")
+            # Retrieve loyalty points used during this checkout for proportional distribution
+            total_loyalty_used = get_loyalty_points_used(customer_id)
+
+            # First pass: calculate discounted totals for all items to determine loyalty distribution
+            items_data = []
+            cart_discounted_total = 0
             for cart_item in cart_items:
                 product_id = cart_item.product_id
-                item_order_id = cart_item.order_id
-                qty = getattr(cart_item, 'quantity', 1)
-                size = getattr(cart_item, 'size', None)
-
-                # Get product details
                 product = ProductCRUD.get_by_id(session, product_id)
                 if not product:
                     print(
                         f"[WARNING] Product {product_id} not found, skipping...")
                     continue
+                qty = getattr(cart_item, 'quantity', 1)
+                size = getattr(cart_item, 'size', None)
+                original_price = product.price
+                discount = getattr(product, 'discount', 0) or 0
+                discount_price = round(
+                    original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                item_discounted_total = round(discount_price * qty)
+                item_discount_amount = round(
+                    (original_price * qty) - (discount_price * qty))
+                cart_discounted_total += item_discounted_total
+                items_data.append({
+                    'cart_item': cart_item,
+                    'product': product,
+                    'qty': qty,
+                    'size': size,
+                    'original_price': original_price,
+                    'discount_price': discount_price,
+                    'item_discounted_total': item_discounted_total,
+                    'item_discount_amount': item_discount_amount,
+                })
 
+            print(f"[DEBUG] Processing {len(items_data)} cart items...")
+            # Distribute loyalty proportionally across items
+            loyalty_distributed = 0
+            for idx, item_data in enumerate(items_data):
+                cart_item = item_data['cart_item']
+                product = item_data['product']
+                product_id = cart_item.product_id
+                item_order_id = cart_item.order_id
+                qty = item_data['qty']
+                size = item_data['size']
                 product_name = product.product_name
-                product_price = product.price
-                total_amount = product_price * qty
+                item_discounted_total = item_data['item_discounted_total']
+                item_discount_amount = item_data['item_discount_amount']
+
+                # Proportional loyalty allocation
+                if total_loyalty_used > 0 and cart_discounted_total > 0:
+                    if idx == len(items_data) - 1:
+                        # Last item gets remainder to avoid rounding drift
+                        item_loyalty = total_loyalty_used - loyalty_distributed
+                    else:
+                        item_loyalty = round(
+                            total_loyalty_used * item_discounted_total / cart_discounted_total)
+                        loyalty_distributed += item_loyalty
+                else:
+                    item_loyalty = 0
+
+                final_price = round(
+                    max(item_discounted_total - item_loyalty, 0))
 
                 print(
-                    f"[DEBUG] Processing cart item: {item_order_id}, product: {product_name}, qty: {qty}")
+                    f"[DEBUG] Processing cart item: {item_order_id}, product: {product_name}, qty: {qty}, "
+                    f"discount_amt: {item_discount_amount}, loyalty: {item_loyalty}, final: {final_price}")
 
                 # Add to order_history
                 try:
@@ -1636,7 +1757,10 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
                         quantity=qty,
                         size=size,
                         order_dates=now,
-                        loyalty_points=loyalty_pts * qty
+                        loyalty_points=loyalty_pts * qty,
+                        discount_amount=item_discount_amount,
+                        loyalty_applied=item_loyalty,
+                        final_price=final_price
                     )
                     OrderHistoryCRUD.create(session, order_history)
                     print(
@@ -1660,7 +1784,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
                         store_name="Online",
                         store_id=None,
                         status="Complete",
-                        amount=total_amount,
+                        amount=final_price,
                         address=getattr(customer, 'address', ""),
                         phone=getattr(customer, 'phone', "")
                     )
@@ -1725,6 +1849,9 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
         print(
             f"[ERROR] Failed to clear payload for customer {customer_id}: {e}")
         traceback.print_exc()
+
+    # Clear loyalty points tracking for this customer after checkout is complete
+    clear_loyalty_points_used(customer_id)
 
     result = f"📝 **Post-Purchase Services**\n\n"
     result += f"Order ID: {order_id}\n\n"
@@ -1828,6 +1955,7 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
 - When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query AND customer_id parameters
+- **RATING-BASED SEARCH**: If the user asks for "best rated", "top rated", "highest rated", "most popular", or "best reviewed" products, pass `sort_by_rating=True` to `inventory_agent`. This sorts results by customer ratings from the feedback table (highest first). Example: user says "show me best rated shirts" → call `inventory_agent(search_query="shirts", customer_id="...", sort_by_rating=True)`
 - **MANDATORY**: IMMEDIATELY call `recommendation_agent` passing the COMPLETE JSON RESPONSE from inventory_agent
 - **CRITICAL RULE**: EVERY `inventory_agent(search_query=X)` call MUST be followed by `recommendation_agent(inventory_data=<FULL_JSON_FROM_INVENTORY_AGENT>)`
 - **PARAMETER FORMAT**: inventory_data must be the EXACT JSON string returned by inventory_agent, NOT just the search query

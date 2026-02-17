@@ -7,6 +7,9 @@ export default function UserJourney() {
   const [orderHistory, setOrderHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [feedbackMap, setFeedbackMap] = useState({}); // { product_id: rating }
+  const [hoverMap, setHoverMap] = useState({}); // { product_id: hoveredStar }
+  const [submittingFeedback, setSubmittingFeedback] = useState({}); // { product_id: true/false }
 
   useEffect(() => {
     // Add fade-in animation CSS
@@ -65,7 +68,20 @@ export default function UserJourney() {
         if (data.error) {
           setError(data.error);
         } else {
-          setOrderHistory(data.order_history || []);
+          const orders = data.order_history || [];
+          setOrderHistory(orders);
+          // Pre-populate feedbackMap from existing feedback in order data
+          const existingFeedback = {};
+          orders.forEach((o) => {
+            if (
+              o.feedback != null &&
+              o.feedback !== "" &&
+              !existingFeedback[o.product_id]
+            ) {
+              existingFeedback[o.product_id] = parseInt(o.feedback, 10);
+            }
+          });
+          setFeedbackMap(existingFeedback);
         }
         setLoading(false);
       })
@@ -169,6 +185,111 @@ export default function UserJourney() {
         .join("")
         .toUpperCase() || "A"
     );
+  };
+
+  // Download invoice as PDF for a given product order
+  const downloadInvoice = (prod) => {
+    const customerName = user?.customer_name || user?.name || "Customer";
+    const phone = user?.phone || "N/A";
+    const address = user?.address || "N/A";
+    const transactionId = prod.transaction_id || "N/A";
+    const productName = prod.product_name || "Product";
+    const category = prod.category || "";
+    const qty = prod.quantity || productMap[prod.product_id] || 1;
+    const originalPrice =
+      prod.original_price != null ? prod.original_price : prod.price;
+    const discountAmount =
+      prod.discount_amount != null ? Number(prod.discount_amount) : 0;
+    const loyaltyApplied =
+      prod.loyalty_applied != null ? Number(prod.loyalty_applied) : 0;
+    const netAmount = prod.final_price != null ? prod.final_price : prod.price;
+    const productDesc = `${productName}${category ? " (" + category + ")" : ""}${prod.size ? " — Size: " + prod.size : ""} × ${qty}`;
+    const logoUrl = window.location.origin + "/images/abfrl-icon.png";
+
+    const invoiceHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ABFRL Purchase Invoice</title>
+<style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #f8f3ea; }
+    .invoice-container { width: 900px; margin: 30px auto; background: #ffffff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-top: 8px solid #d2232a; }
+    .header { text-align: center; border-bottom: 2px solid #f1d2b3; padding-bottom: 15px; }
+    .logo { height: 80px; }
+    .invoice-title { font-size: 26px; font-weight: bold; color: #d2232a; margin-top: 10px; }
+    .invoice-id { margin-top: 5px; font-size: 14px; color: #444; }
+    .customer-section { margin-top: 25px; background: #fff4e6; padding: 15px; border-radius: 6px; }
+    .customer-section h3 { margin-top: 0; color: #c41e3a; }
+    .invoice-table { width: 100%; border-collapse: collapse; margin-top: 25px; }
+    .invoice-table th { background: linear-gradient(to right, #f5c28b, #f7e2c4); padding: 12px; text-align: left; font-size: 14px; border-bottom: 2px solid #d2232a; }
+    .invoice-table td { padding: 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+    .invoice-table tr:hover { background-color: #fff9f0; }
+    .total-row td { font-weight: bold; background: #fff4e6; }
+    .footer { margin-top: 30px; padding-top: 15px; border-top: 2px solid #f1d2b3; font-size: 13px; color: #444; }
+    .footer-title { font-weight: bold; color: #d2232a; margin-bottom: 8px; }
+    .contact-info { margin-top: 10px; line-height: 1.6; }
+    @media print { body { background: #fff; } .invoice-container { box-shadow: none; margin: 0 auto; } }
+</style>
+</head>
+<body>
+<div class="invoice-container">
+    <div class="header">
+        <img src="${logoUrl}" class="logo" alt="Aditya Birla Logo">
+        <div class="invoice-title">ABFRL Purchase Invoice</div>
+        <div class="invoice-id">Invoice ID: <strong>${transactionId}</strong></div>
+    </div>
+    <div class="customer-section">
+        <h3>Customer Details</h3>
+        <p><strong>Name:</strong> ${customerName}</p>
+        <p><strong>Phone:</strong> ${phone}</p>
+        <p><strong>Address:</strong> ${address}</p>
+    </div>
+    <table class="invoice-table">
+        <thead>
+            <tr>
+                <th>Product Description</th>
+                <th>Actual Price</th>
+                <th>Discount Amount</th>
+                <th>Loyalty Points Applied</th>
+                <th>NET Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>${productDesc}</td>
+                <td>\u20B9 ${Number(originalPrice * qty).toLocaleString("en-IN")}</td>
+                <td>\u20B9 ${Number(discountAmount).toLocaleString("en-IN")}</td>
+                <td>\u20B9 ${Number(loyaltyApplied).toLocaleString("en-IN")}</td>
+                <td>\u20B9 ${Number(netAmount).toLocaleString("en-IN")}</td>
+            </tr>
+            <tr class="total-row">
+                <td colspan="4" style="text-align:right;">Grand Total</td>
+                <td>\u20B9 ${Number(netAmount).toLocaleString("en-IN")}</td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="footer">
+        <div class="footer-title">Registered Address</div>
+        Ecospace Business Park, Block 4A, 8th Floor, New Town, Kolkata, West Bengal \u2013 700156
+        <div class="contact-info">
+            <strong>Phone</strong><br>
+            Online related queries: 8105060501<br>
+            Store related queries: 1800 425 3050<br><br>
+            <strong>Email</strong><br>
+            For store related queries: customerservice@abfrl.adityabirla.com<br>
+            For online enquiries: happytohelp@abfrl.in
+        </div>
+    </div>
+</div>
+<script>window.onload=function(){window.print();}</script>
+</body>
+</html>`;
+
+    const printWindow = window.open("", "_blank");
+    if (printWindow) {
+      printWindow.document.write(invoiceHtml);
+      printWindow.document.close();
+    }
   };
 
   return (
@@ -333,6 +454,44 @@ export default function UserJourney() {
                     className="bg-white border-3 border-yellow-400 rounded-2xl overflow-hidden shadow-lg relative transform transition-all duration-500 hover:scale-105 hover:shadow-2xl hover:-translate-y-2 animate-fadeIn"
                     style={{ animationDelay: `${index * 100}ms` }}
                   >
+                    {/* Return Status Badge - Top Left */}
+                    {prod.return_status && (
+                      <div className="absolute top-4 left-4 z-10">
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-white text-xs font-bold px-3.5 py-2 rounded-full shadow-lg tracking-wide uppercase ${
+                            prod.return_status.toLowerCase() === "returned"
+                              ? "bg-green-600"
+                              : "bg-red-600"
+                          }`}
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.5}
+                            viewBox="0 0 24 24"
+                          >
+                            {prod.return_status.toLowerCase() === "returned" ? (
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M5 13l4 4L19 7"
+                              />
+                            ) : (
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                              />
+                            )}
+                          </svg>
+                          {prod.return_status === "Initiated"
+                            ? "Return Initiated"
+                            : ` ${prod.return_status}`}
+                        </span>
+                      </div>
+                    )}
+
                     {/* Quantity Badge */}
                     <div className="absolute top-4 right-4 z-10">
                       <div className="bg-gradient-to-br from-orange-600 to-orange-700 text-white px-4 py-2 rounded-full flex items-center gap-1 font-bold shadow-lg transform transition-transform duration-300 hover:scale-110 hover:rotate-3">
@@ -392,9 +551,21 @@ export default function UserJourney() {
                       <p className="text-sm text-gray-600 mb-2">
                         Category: {prod.category}
                       </p>
-                      <p className="text-xl font-bold text-green-600 mb-3">
-                        ₹{prod.price}
-                      </p>
+                      {prod.original_price != null &&
+                      prod.original_price !== prod.price ? (
+                        <div className="mb-3">
+                          <span className="text-sm text-gray-400 line-through mr-2">
+                            ₹{prod.original_price}
+                          </span>
+                          <span className="text-xl font-bold text-green-600">
+                            ₹{prod.price}
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xl font-bold text-green-600 mb-3">
+                          ₹{prod.price}
+                        </p>
+                      )}
                       {/* Purchase Date */}
                       {prod.purchase_date && (
                         <div className="mb-3 flex items-center gap-2 text-sm text-gray-600">
@@ -414,11 +585,149 @@ export default function UserJourney() {
                           </span>
                         </div>
                       )}
-                      <div className="mt-3">
+                      {/* <div className="mt-3">
                         <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
                           {prod.season}
                         </span>
+                      </div> */}
+
+                      {/* Star Feedback Section */}
+                      <div className="mt-3 mb-1">
+                        {(() => {
+                          const existingRating = feedbackMap[pid];
+                          const isSubmitting = submittingFeedback[pid];
+                          const hovered = hoverMap[pid] || 0;
+
+                          const handleStarClick = async (starValue) => {
+                            if (existingRating || isSubmitting) return; // Already rated or submitting
+                            setSubmittingFeedback((prev) => ({
+                              ...prev,
+                              [pid]: true,
+                            }));
+                            try {
+                              const loggedInCustomerId =
+                                localStorage.getItem("loggedInCustomerId");
+                              const res = await fetch(
+                                "http://localhost:8000/api/orders/feedback",
+                                {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    customer_id: loggedInCustomerId,
+                                    product_id: pid,
+                                    feedback: starValue,
+                                  }),
+                                },
+                              );
+                              const result = await res.json();
+                              if (res.ok) {
+                                setFeedbackMap((prev) => ({
+                                  ...prev,
+                                  [pid]: starValue,
+                                }));
+                              } else {
+                                console.error("Feedback error:", result.detail);
+                              }
+                            } catch (err) {
+                              console.error("Failed to submit feedback:", err);
+                            } finally {
+                              setSubmittingFeedback((prev) => ({
+                                ...prev,
+                                [pid]: false,
+                              }));
+                            }
+                          };
+
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-0.5">
+                                {[1, 2, 3, 4, 5].map((star) => {
+                                  const filled = existingRating
+                                    ? star <= existingRating
+                                    : star <= hovered;
+                                  return (
+                                    <button
+                                      key={star}
+                                      type="button"
+                                      disabled={
+                                        !!existingRating || isSubmitting
+                                      }
+                                      onClick={() => handleStarClick(star)}
+                                      onMouseEnter={() => {
+                                        if (!existingRating)
+                                          setHoverMap((prev) => ({
+                                            ...prev,
+                                            [pid]: star,
+                                          }));
+                                      }}
+                                      onMouseLeave={() => {
+                                        if (!existingRating)
+                                          setHoverMap((prev) => ({
+                                            ...prev,
+                                            [pid]: 0,
+                                          }));
+                                      }}
+                                      className={`focus:outline-none transition-transform duration-150 ${
+                                        existingRating
+                                          ? "cursor-default"
+                                          : "cursor-pointer hover:scale-125"
+                                      }`}
+                                    >
+                                      <svg
+                                        className={`w-6 h-6 transition-colors duration-200 ${
+                                          filled
+                                            ? "text-yellow-400 drop-shadow-sm"
+                                            : "text-gray-300"
+                                        }`}
+                                        fill="currentColor"
+                                        viewBox="0 0 20 20"
+                                      >
+                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                      </svg>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {!existingRating && (
+                                <span className="text-xs text-gray-400 italic">
+                                  Awaiting Feedback
+                                </span>
+                              )}
+                              {isSubmitting && (
+                                <span className="text-xs text-orange-500">
+                                  Saving...
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
+
+                      {/* Download Invoice Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadInvoice(prod);
+                        }}
+                        className="mt-4 w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white text-sm font-semibold py-2.5 px-4 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg hover:scale-[1.02] active:scale-95"
+                      >
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                          />
+                        </svg>
+                        Download Invoice
+                      </button>
                     </div>
                   </div>
                 );

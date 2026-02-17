@@ -9,6 +9,7 @@ import {
 import Home from "./pages/Home";
 import UserJourney from "./pages/UserJourney";
 import StoreKeeper from "./pages/StoreKeeper";
+import StoreKeeperHub from "./pages/StoreKeeperHub";
 import Admin from "./pages/Admin";
 import ChatBot from "./src/components/ChatBot";
 import Chatbot_Kiosk from "./src/components/Chatbot_Kiosk";
@@ -360,7 +361,12 @@ export default function Pages() {
             }
           />
           <Route path="/user" element={<UserJourney />} />
-          <Route path="/store" element={<StoreKeeper />} />
+          <Route path="/store" element={<StoreKeeperHub />} />
+          <Route path="/store/admin" element={<StoreKeeper />} />
+          <Route
+            path="/store/kiosk"
+            element={<Chatbot_Kiosk customerId={isLoggedIn || "GUEST"} />}
+          />
           <Route path="/admin" element={<Admin />} />
           <Route
             path="/kiosk"
@@ -369,10 +375,11 @@ export default function Pages() {
         </Routes>
       </main>
 
-      {/* Chatbot - Available on all pages */}
-      {location.pathname !== "/kiosk" && (
-        <ChatBot customerId={isLoggedIn || "GUEST"} />
-      )}
+      {/* Chatbot - Available on all pages except kiosk views */}
+      {location.pathname !== "/kiosk" &&
+        location.pathname !== "/store/kiosk" && (
+          <ChatBot customerId={isLoggedIn || "GUEST"} />
+        )}
     </div>
   );
 }

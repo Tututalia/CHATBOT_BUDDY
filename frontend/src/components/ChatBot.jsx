@@ -56,6 +56,7 @@ export default function ChatBot({ customerId }) {
     message: "",
   });
   const [isRefundGuidelinesOpen, setIsRefundGuidelinesOpen] = useState(false);
+  const [pendingRefundOrder, setPendingRefundOrder] = useState(null); // Tracks order awaiting return reason
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
@@ -69,6 +70,44 @@ export default function ChatBot({ customerId }) {
     expiryDate: "",
     cvv: "",
   });
+  const [loyaltyApplied, setLoyaltyApplied] = useState(false);
+  const [loyaltyPointsUsed, setLoyaltyPointsUsed] = useState(0);
+  const [loyaltyProcessing, setLoyaltyProcessing] = useState(false);
+  const [paymentFailModal, setPaymentFailModal] = useState({ open: false });
+  const [wishlistedIds, setWishlistedIds] = useState(new Set());
+
+  // Load wishlist on mount / when customerId changes
+  useEffect(() => {
+    if (!customerId) return;
+    fetch(`http://localhost:8000/api/wishlist/${customerId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.product_ids) setWishlistedIds(new Set(data.product_ids));
+      })
+      .catch(() => {});
+  }, [customerId]);
+
+  const handleWishlistToggle = async (productId) => {
+    try {
+      const res = await fetch("http://localhost:8000/api/wishlist/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_id: customerId,
+          product_id: productId,
+        }),
+      });
+      const data = await res.json();
+      setWishlistedIds((prev) => {
+        const next = new Set(prev);
+        if (data.wishlisted) next.add(productId);
+        else next.delete(productId);
+        return next;
+      });
+    } catch (err) {
+      console.error("Wishlist toggle failed", err);
+    }
+  };
 
   // Helper function to add timeline entries sequentially with animation delay
   const addTimelineEntriesSequentially = (entries, delayMs = 500) => {
@@ -105,11 +144,14 @@ export default function ChatBot({ customerId }) {
       // Display cart items as product cards
       if (response.cart_items.length > 0) {
         console.log("Rendering cart items:", response.cart_items);
+        setLoyaltyApplied(false);
+        setLoyaltyPointsUsed(0);
         const cartCardsMessage = {
           type: "cartItems",
           cartItems: response.cart_items,
           total_amount: response.total_amount,
           total_savings: response.total_savings,
+          available_loyalty_points: response.available_loyalty_points || 0,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, cartCardsMessage]);
@@ -296,6 +338,15 @@ export default function ChatBot({ customerId }) {
     if (!isOpen) setIsQuickActionsOpen(false);
   }, [isOpen]);
 
+  // Silent return-monitoring agent: runs when chatbot opens (batch for all customers)
+  useEffect(() => {
+    if (isOpen) {
+      fetch("http://localhost:8000/api/orders/return-monitoring", {
+        method: "POST",
+      }).catch(() => {});
+    }
+  }, [isOpen]);
+
   // Auto-scroll to bottom when chatbot is opened and history is restored
   useEffect(() => {
     if (isOpen && historyLoaded && messages.length > 0) {
@@ -368,6 +419,8 @@ export default function ChatBot({ customerId }) {
                   cartItems: response.cart_items,
                   total_amount: response.total_amount,
                   total_savings: response.total_savings,
+                  available_loyalty_points:
+                    response.available_loyalty_points || 0,
                   timestamp: new Date(),
                 });
               } else {
@@ -650,6 +703,13 @@ export default function ChatBot({ customerId }) {
         reject(new Error("WebSocket connection error"));
       };
 
+      ws.onclose = (event) => {
+        // If the socket closed before we got a run_end or error, reject the promise
+        if (!finalResponse) {
+          reject(new Error("WebSocket closed unexpectedly"));
+        }
+      };
+
       ws.onmessage = (event) => {
         let msg;
         try {
@@ -728,6 +788,112 @@ export default function ChatBot({ customerId }) {
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // --- Handle pending refund: user is providing return reason ---
+    if (pendingRefundOrder) {
+      const returnReason = inputValue.trim();
+      const order = pendingRefundOrder;
+      const transactionId = order?.transaction_id;
+      const productName = order?.product_name || "Product";
+
+      // Show user message
+      setMessages((prev) => [
+        ...prev,
+        { type: "user", text: returnReason, timestamp: new Date() },
+      ]);
+      setInputValue("");
+      setIsLoading(true);
+
+      try {
+        const res = await fetch(
+          "http://localhost:8000/api/orders/initiate-return",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              transaction_id: transactionId,
+              return_reason: returnReason,
+            }),
+          },
+        );
+        const data = await res.json();
+
+        if (data.success) {
+          // Reason accepted — clear pending order and show confirmation
+          setPendingRefundOrder(null);
+
+          // Pause for a couple of seconds before showing confirmation in chat
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: [
+                `✅ **Your refund request has been initiated successfully.**`,
+                ``,
+                `**Product:** ${productName}  •  **Order ID:** ${transactionId}`,
+                `**Reason:** ${returnReason}`,
+                ``,
+                `**What happens next:**`,
+                `• Our pickup partner will collect the item within 2–3 business days.`,
+                `• After pickup and verification, the refund will be processed to your original payment method.`,
+                ``,
+                `Please keep the product packed and ready (tags/invoice if available).`,
+              ].join("\n"),
+              timestamp: new Date(),
+            },
+          ]);
+        } else if (data.invalid_reason) {
+          // Reason rejected — keep pendingRefundOrder so user can retry
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: [
+                `⚠️ **Your return reason was not specific enough.**`,
+                ``,
+                `Please provide a **valid product-related reason** such as:`,
+                `• 📏 **Size/Fit issue** — too small, too big, doesn't fit`,
+                `• 🔧 **Defective/Damaged** — broken, torn, scratched`,
+                `• 🎨 **Wrong item/color** — received incorrect product`,
+                `• 🧵 **Quality issue** — poor fabric, bad stitching`,
+                `• 🤦 **Ordered by mistake** — accidental purchase`,
+                `• 📦 **Packaging damaged** — box damaged, seal broken`,
+                ``,
+                `Please type your reason below:`,
+              ].join("\n"),
+              timestamp: new Date(),
+            },
+          ]);
+        } else {
+          // Other errors — clear pending order
+          setPendingRefundOrder(null);
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: `⚠️ ${data.error || "Failed to initiate return. Please try again."}`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      } catch (e) {
+        setPendingRefundOrder(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "ai",
+            text: "❌ Something went wrong while processing your return. Please try again.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+    // --- End pending refund handling ---
 
     const userMessage = {
       type: "user",
@@ -815,11 +981,14 @@ export default function ChatBot({ customerId }) {
 
         // Display cart items as product cards
         if (response.cart_items.length > 0) {
+          setLoyaltyApplied(false);
+          setLoyaltyPointsUsed(0);
           const cartCardsMessage = {
             type: "cartItems",
             cartItems: response.cart_items,
             total_amount: response.total_amount,
             total_savings: response.total_savings,
+            available_loyalty_points: response.available_loyalty_points || 0,
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, cartCardsMessage]);
@@ -986,6 +1155,32 @@ export default function ChatBot({ customerId }) {
   const handleRefundQuickAction = async () => {
     if (isLoading || isRefundLoading) return;
     setIsRefundLoading(true);
+
+    // Emit live timeline entries for Return Agent flow
+    const returnKey = `${Date.now()}:return_agent`;
+    ensureTimelineEntry({
+      key: returnKey,
+      tool: "return_agent",
+      agentLabel: "Return Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Return Agent`,
+      });
+    }, 200);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Fetching recent orders (last 7 days)`,
+      });
+    }, 500);
+
     try {
       const res = await fetch(
         `http://localhost:8000/api/customer/${customerId}/orders/recent?days=7`,
@@ -994,6 +1189,22 @@ export default function ChatBot({ customerId }) {
       const orders = Array.isArray(data?.order_history)
         ? data.order_history
         : [];
+
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Found ${orders.length} eligible order(s)`,
+      });
+      setTimeout(() => {
+        appendTimelineLog({
+          key: returnKey,
+          tool: "return_agent",
+          agentLabel: "Return Agent",
+          line: `[${formatLocalTime()}] Return Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: returnKey, status: "completed" });
+      }, 400);
 
       setMessages((prev) => [
         ...prev,
@@ -1004,6 +1215,14 @@ export default function ChatBot({ customerId }) {
         },
       ]);
     } catch (e) {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Failed to fetch recent orders`,
+      });
+      endTimelineEntry({ key: returnKey, status: "error" });
+
       setMessages((prev) => [
         ...prev,
         {
@@ -1017,41 +1236,152 @@ export default function ChatBot({ customerId }) {
     }
   };
 
+  const handleLocateUs = async () => {
+    if (isLoading || isRefundLoading) return;
+    setIsRefundLoading(true);
+
+    // Emit live timeline entries for Locate Us Agent flow
+    const locateKey = `${Date.now()}:locate_us_agent`;
+    ensureTimelineEntry({
+      key: locateKey,
+      tool: "locate_us_agent",
+      agentLabel: "Locate Us Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Locate Us Agent`,
+      });
+    }, 200);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Fetching store distances & map data`,
+      });
+    }, 500);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/stores/locate/${customerId}`,
+      );
+      const data = await res.json();
+      const stores = Array.isArray(data?.stores) ? data.stores : [];
+
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Found ${stores.length} store location(s)`,
+      });
+      setTimeout(() => {
+        appendTimelineLog({
+          key: locateKey,
+          tool: "locate_us_agent",
+          agentLabel: "Locate Us Agent",
+          line: `[${formatLocalTime()}] Locate Us Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: locateKey, status: "completed" });
+      }, 400);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "storeLocator",
+          stores,
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (e) {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Failed to fetch store locations`,
+      });
+      endTimelineEntry({ key: locateKey, status: "error" });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "ai",
+          text: "Sorry, I couldn't fetch store locations right now. Please try again.",
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsRefundLoading(false);
+    }
+  };
+
+  const handleCustomerSupport = () => {
+    // Add user message to chat
+    setMessages((prev) => [
+      ...prev,
+      { type: "user", text: "Customer Support", timestamp: new Date() },
+    ]);
+
+    // Add timeline entry
+    const csKey = `${Date.now()}:customer_support`;
+    ensureTimelineEntry({
+      key: csKey,
+      tool: "post_purchase_agent",
+      agentLabel: "Post-Purchase Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: csKey,
+        tool: "post_purchase_agent",
+        agentLabel: "Post-Purchase Agent",
+        line: `[${formatLocalTime()}] Showing customer support contact info`,
+      });
+      endTimelineEntry({ key: csKey, status: "completed" });
+    }, 300);
+
+    // Add contact support card
+    setMessages((prev) => [
+      ...prev,
+      { type: "contactSupport", timestamp: new Date() },
+    ]);
+  };
+
   const openRefundModal = (order) => {
-    const productName = order?.product_name ? String(order.product_name) : null;
+    const productName = order?.product_name
+      ? String(order.product_name)
+      : "this product";
     const transactionId = order?.transaction_id
       ? String(order.transaction_id)
       : null;
-    const purchaseDate = order?.purchase_date
-      ? formatOrderDate(order.purchase_date)
-      : null;
 
-    const orderLineParts = [
-      productName ? `Product: ${productName}` : null,
-      transactionId ? `Order ID: ${transactionId}` : null,
-      purchaseDate ? `Purchased: ${purchaseDate}` : null,
-    ].filter(Boolean);
+    // Store the order awaiting a return reason
+    setPendingRefundOrder(order);
 
-    const orderLine =
-      orderLineParts.length > 0 ? `${orderLineParts.join("  •  ")}` : "";
-
-    const message = [
-      "Your refund request has been initiated successfully.",
-      orderLine,
-      "",
-      "What happens next:",
-      "• Our pickup partner will collect the item within 2–3 business days.",
-      "• After pickup and verification, the refund will be processed to your original payment method.",
-      "",
-      "Please keep the product packed and ready (tags/invoice if available).",
-    ]
-      .filter((line) => line !== "")
-      .join("\n");
-
-    setRefundModal({
-      open: true,
-      message,
-    });
+    // Ask user for return reason via chatbot message with valid reason guidance
+    setMessages((prev) => [
+      ...prev,
+      {
+        type: "ai",
+        text: [
+          `🔄 You have selected **${productName}**${transactionId ? ` (Order ID: ${transactionId})` : ""} for return/refund.`,
+          ``,
+          `Please provide a **specific product-related reason** for your return. Accepted reasons include:`,
+          `• 📏 Size/Fit issue`,
+          `• 🔧 Defective or damaged product`,
+          `• 🎨 Wrong item or color received`,
+          `• 🧵 Quality issue (fabric, stitching, etc.)`,
+          `• 🤦 Ordered by mistake`,
+          `• 📦 Packaging damaged`,
+          ``,
+          `⚠️ _Generic reasons like "I want my money back" will not be accepted._`,
+        ].join("\n"),
+        timestamp: new Date(),
+      },
+    ]);
   };
 
   const closeRefundModal = () => {
@@ -1108,22 +1438,26 @@ export default function ChatBot({ customerId }) {
     );
     if (orderMatch) {
       const orderText = orderMatch[1];
-      // Updated regex patterns to handle ** markdown bold syntax
-      const orderIdMatch = orderText.match(/\*\*Order ID:\*\*\s*(\w+)/);
-      const totalItemsMatch = orderText.match(/\*\*Total Items:\*\*\s*(\d+)/);
+      // Flexible regex patterns to handle both **bold:** and plain formats
+      const orderIdMatch = orderText.match(
+        /(?:\*\*)?Order\s*ID:?(?:\*\*)?\s*(\w+)/i,
+      );
+      const totalItemsMatch = orderText.match(
+        /(?:\*\*)?Total\s*Items:?(?:\*\*)?\s*(\d+)/i,
+      );
       const totalAmountMatch = orderText.match(
-        /\*\*Total Amount:\*\*\s*₹([\d,]+)/,
+        /(?:\*\*)?(?:Total\s*)?Amount:?(?:\*\*)?\s*₹([\d,]+)/i,
       );
       const deliveryTypeMatch = orderText.match(
-        /\*\*Delivery Type:\*\*\s*([^\n]+)/,
+        /(?:\*\*)?Delivery\s*Type:?(?:\*\*)?\s*([^\n]+)/i,
       );
       const deliveryTimeMatch = orderText.match(
-        /\*\*Expected Delivery:\*\*\s*([^\n]+)/,
+        /(?:\*\*)?Expected\s*Delivery:?(?:\*\*)?\s*([^\n]+)/i,
       );
 
       // Parse items
       const itemsMatch = orderText.match(
-        /\*\*Your Items:\*\*([\s\S]*?)(?=\n\n|$)/,
+        /(?:\*\*)?Your\s*Items:?(?:\*\*)?([\s\S]*?)(?=\n\n|$)/i,
       );
       let items = [];
       if (itemsMatch) {
@@ -1217,18 +1551,18 @@ export default function ChatBot({ customerId }) {
 
     // Parse Loyalty Rewards section
     const loyaltyMatch = text.match(
-      /🎉\s*\*\*Loyalty Rewards Unlocked!\*\*([\s\S]*?)(?=\*\*Coupon Codes|\*\*Available Services|$)/i,
+      /🎉\s*(?:\*\*)?Loyalty Rewards Unlocked!?(?:\*\*)?([\s\S]*?)(?=(?:\*\*)?Coupon Codes|(?:\*\*)?Available Services|$)/i,
     );
     if (loyaltyMatch) {
       const loyaltyText = loyaltyMatch[1];
-      // Updated regex to handle ** markdown bold syntax
+      // Flexible regex to handle both **Points Earned:** and Points Earned: formats
       const pointsMatch = loyaltyText.match(
-        /\*\*Points Earned:\*\*\s*(\d+)\s*points/,
+        /(?:\*\*)?Points\s*Earned:?(?:\*\*)?\s*(\d+)\s*points/i,
       );
 
       // Parse coupon codes
       const couponsMatch = text.match(
-        /\*\*Coupon Codes for Next Purchase:\*\*([\s\S]*?)(?=\*\*Available Services|Thank you|$)/i,
+        /(?:\*\*)?Coupon Codes for Next Purchase:?(?:\*\*)?([\s\S]*?)(?=(?:\*\*)?Available Services|Thank you|$)/i,
       );
       let coupons = [];
       if (couponsMatch) {
@@ -1277,7 +1611,7 @@ export default function ChatBot({ customerId }) {
 
     // Parse Available Services section - improved matching
     const servicesMatch = text.match(
-      /\*\*Available Services:\*\*([\s\S]*?)(?=Thank you|$)/i,
+      /(?:\*\*)?Available Services:?(?:\*\*)?([\s\S]*?)(?=Thank you|$)/i,
     );
     if (servicesMatch) {
       const servicesText = servicesMatch[1];
@@ -1434,6 +1768,9 @@ export default function ChatBot({ customerId }) {
       const response = await chatWithAgentViaWebSocket(
         customerId,
         paymentMessage,
+        loyaltyApplied && loyaltyPointsUsed > 0
+          ? { loyalty_points_used: loyaltyPointsUsed }
+          : undefined,
       );
 
       console.log("Payment response:", response);
@@ -1509,6 +1846,9 @@ export default function ChatBot({ customerId }) {
     };
     setMessages((prev) => [...prev, userMessage]);
 
+    // Capture payment method before resetting
+    const currentPaymentMethod = selectedPaymentMethod;
+
     // Reset form
     setSelectedPaymentMethod(null);
     setPaymentDetails({
@@ -1520,10 +1860,22 @@ export default function ChatBot({ customerId }) {
 
     setIsLoading(true);
 
+    // Hardcoded credit card payment failure
+    if (currentPaymentMethod === "credit card") {
+      setTimeout(() => {
+        setPaymentFailModal({ open: true });
+        setIsLoading(false);
+      }, 2000);
+      return;
+    }
+
     try {
       const response = await chatWithAgentViaWebSocket(
         customerId,
         paymentMessage,
+        loyaltyApplied && loyaltyPointsUsed > 0
+          ? { loyalty_points_used: loyaltyPointsUsed }
+          : undefined,
       );
 
       console.log("Payment response:", response);
@@ -1938,6 +2290,24 @@ export default function ChatBot({ customerId }) {
       const data = await response.json();
 
       if (data.success) {
+        // If loyalty was applied, unapply since totals changed
+        if (loyaltyApplied && loyaltyPointsUsed > 0) {
+          try {
+            await fetch("http://localhost:8000/api/cart/unapply-loyalty", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                customer_id: customerId,
+                apply: false,
+                cart_total: loyaltyPointsUsed,
+              }),
+            });
+          } catch (e) {
+            /* best-effort */
+          }
+          setLoyaltyApplied(false);
+          setLoyaltyPointsUsed(0);
+        }
         // Update the cart items in the existing message
         setMessages((prevMessages) => {
           return prevMessages.map((message) => {
@@ -1955,9 +2325,19 @@ export default function ChatBot({ customerId }) {
                 return item;
               });
 
+              const newTotalAmount = updatedCartItems.reduce(
+                (sum, i) =>
+                  sum + (i.price || i.price_per_unit || 0) * i.quantity,
+                0,
+              );
+
               return {
                 ...message,
                 cartItems: updatedCartItems,
+                total_amount: newTotalAmount,
+                loyalty_applied: false,
+                loyalty_points_used: 0,
+                payable_amount: newTotalAmount,
               };
             }
             return message;
@@ -1976,6 +2356,102 @@ export default function ChatBot({ customerId }) {
       const errorMessage = {
         type: "ai",
         text: "Sorry, there was an error updating the quantity. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleShowWishlist = async () => {
+    setIsLoading(true);
+
+    // Show user message
+    const userMessage = {
+      type: "user",
+      text: "Show my wishlist",
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    // Emit timeline entries
+    const wlKey = `${Date.now()}:wishlist_agent`;
+    ensureTimelineEntry({
+      key: wlKey,
+      tool: "wishlist_agent",
+      agentLabel: "Wishlist Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: wlKey,
+        tool: "wishlist_agent",
+        agentLabel: "Wishlist Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Wishlist Agent`,
+      });
+    }, 300);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: wlKey,
+        tool: "wishlist_agent",
+        agentLabel: "Wishlist Agent",
+        line: `[${formatLocalTime()}] Fetching wishlist products & checking availability`,
+      });
+    }, 600);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/wishlist/${customerId}/products`,
+      );
+      const data = await res.json();
+
+      setTimeout(() => {
+        appendTimelineLog({
+          key: wlKey,
+          tool: "wishlist_agent",
+          agentLabel: "Wishlist Agent",
+          line: `[${formatLocalTime()}] Wishlist Agent → Master Orchestrator`,
+        });
+      }, 900);
+      setTimeout(() => {
+        endTimelineEntry({ key: wlKey, status: "completed" });
+      }, 1200);
+
+      if (data.products && data.products.length > 0) {
+        // Fetch reviews for wishlist products
+        fetchReviewsByProductIds(data.products.map((p) => p.product_id));
+
+        const headerMessage = {
+          type: "ai",
+          text: `❤️ **Your Wishlist** — ${data.products.length} product${data.products.length > 1 ? "s" : ""} saved. Select quantity and add to cart!`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, headerMessage]);
+
+        const wishlistCardsMessage = {
+          type: "productCards",
+          productCards: data.products,
+          isWishlist: true,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, wishlistCardsMessage]);
+      } else {
+        const emptyMessage = {
+          type: "ai",
+          text: "Your wishlist is empty. Browse products and tap 🤍 to add items to your wishlist!",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, emptyMessage]);
+      }
+    } catch (error) {
+      console.error("Error fetching wishlist products:", error);
+      setTimeout(() => {
+        endTimelineEntry({ key: wlKey, status: "error" });
+      }, 900);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, I couldn't fetch your wishlist right now. Please try again.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -2019,12 +2495,15 @@ export default function ChatBot({ customerId }) {
         data.cart_items.length > 0
       ) {
         fetchReviewsByProductIds(data.cart_items.map((i) => i?.product_id));
+        setLoyaltyApplied(false);
+        setLoyaltyPointsUsed(0);
         const cartCardsMessage = {
           type: "cartItems",
           cartItems: data.cart_items,
           total_amount: data.total_amount,
           total_items: data.total_items,
           total_savings: data.total_savings,
+          available_loyalty_points: data.available_loyalty_points || 0,
           timestamp: new Date(),
         };
 
@@ -2104,6 +2583,90 @@ export default function ChatBot({ customerId }) {
     }
 
     setIsLoading(false);
+  };
+
+  const handleToggleLoyalty = async (
+    checked,
+    originalTotal,
+    availablePoints,
+  ) => {
+    setLoyaltyProcessing(true);
+    try {
+      if (checked) {
+        // Apply loyalty points
+        const res = await fetch(
+          "http://localhost:8000/api/cart/apply-loyalty",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customer_id: customerId,
+              apply: true,
+              cart_total: originalTotal,
+            }),
+          },
+        );
+        const result = await res.json();
+        if (result.success) {
+          setLoyaltyApplied(true);
+          setLoyaltyPointsUsed(result.points_used);
+          // Update the cart message in-place with new total
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.type === "cartItems") {
+                return {
+                  ...m,
+                  loyalty_applied: true,
+                  loyalty_points_used: result.points_used,
+                  loyalty_remaining: result.remaining_points,
+                  payable_amount: result.new_total,
+                  available_loyalty_points: result.remaining_points,
+                };
+              }
+              return m;
+            }),
+          );
+        }
+      } else {
+        // Unapply loyalty points – restore them back to customer
+        const pointsToRestore = loyaltyPointsUsed;
+        const res = await fetch(
+          "http://localhost:8000/api/cart/unapply-loyalty",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customer_id: customerId,
+              apply: false,
+              cart_total: pointsToRestore, // pass points to restore
+            }),
+          },
+        );
+        const result = await res.json();
+        if (result.success) {
+          setLoyaltyApplied(false);
+          setLoyaltyPointsUsed(0);
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.type === "cartItems") {
+                return {
+                  ...m,
+                  loyalty_applied: false,
+                  loyalty_points_used: 0,
+                  loyalty_remaining: result.remaining_points,
+                  payable_amount: m.total_amount,
+                  available_loyalty_points: result.remaining_points,
+                };
+              }
+              return m;
+            }),
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Error toggling loyalty:", err);
+    }
+    setLoyaltyProcessing(false);
   };
 
   const handleAddToCart = async (product, isBulkAdd = false) => {
@@ -2206,6 +2769,8 @@ export default function ChatBot({ customerId }) {
     ]);
     setAgentTimeline([]);
     setProductQuantities({});
+    setLoyaltyApplied(false);
+    setLoyaltyPointsUsed(0);
   };
 
   return (
@@ -2222,6 +2787,52 @@ export default function ChatBot({ customerId }) {
       {isOpen && (
         <div className="chatbot-window">
           <div className="chatbot-container">
+            {paymentFailModal.open && (
+              <div
+                className="payment-fail-modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Payment failed"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget)
+                    setPaymentFailModal({ open: false });
+                }}
+              >
+                <div className="payment-fail-modal">
+                  <div className="payment-fail-modal-icon">❌</div>
+                  <div className="payment-fail-modal-title">
+                    Payment Failed!
+                  </div>
+                  <div className="payment-fail-modal-body">
+                    Your Credit Card transaction could not be processed. The
+                    payment was declined by your bank. Please try again with a
+                    different payment method or contact your bank for
+                    assistance.
+                  </div>
+                  <div className="payment-fail-modal-actions">
+                    <button
+                      type="button"
+                      className="payment-fail-modal-btn"
+                      onClick={() => {
+                        setPaymentFailModal({ open: false });
+                        // Re-show payment method options (UPI, Credit Card, Debit Card, COD)
+                        setSelectedPaymentMethod(null);
+                        const retryMessage = {
+                          type: "paymentMethods",
+                          text: "Please select a payment method to try again.",
+                          timestamp: new Date(),
+                        };
+                        setMessages((prev) => [...prev, retryMessage]);
+                      }}
+                      autoFocus
+                    >
+                      🔄 Pay Again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {refundModal.open && (
               <div
                 className="refund-modal-overlay"
@@ -2455,6 +3066,54 @@ export default function ChatBot({ customerId }) {
                           className="action-tool-btn quick-action-support"
                           onClick={() => {
                             setIsQuickActionsOpen(false);
+
+                            // Emit live timeline entries for Post Purchase Agent
+                            const ppKey = `${Date.now()}:post_purchase_agent`;
+                            ensureTimelineEntry({
+                              key: ppKey,
+                              tool: "post_purchase_agent",
+                              agentLabel: "Post-Purchase Agent",
+                              status: "in_progress",
+                            });
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Master Orchestrator → Post-Purchase Agent`,
+                              });
+                            }, 300);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Preparing post-purchase support`,
+                              });
+                            }, 700);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Loading return, support & feedback services`,
+                              });
+                            }, 1100);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Post-Purchase Agent → Master Orchestrator`,
+                              });
+                            }, 1500);
+                            setTimeout(() => {
+                              endTimelineEntry({
+                                key: ppKey,
+                                status: "completed",
+                              });
+                            }, 1800);
+
                             setMessages((prev) => [
                               ...prev,
                               {
@@ -2469,6 +3128,16 @@ export default function ChatBot({ customerId }) {
                         >
                           🎧 Post Purchase Support
                         </button>
+                        <div className="quick-actions-separator"></div>
+                        <button
+                          className="action-tool-btn quick-action-wishlist"
+                          onClick={handleShowWishlist}
+                          disabled={isLoading}
+                          title="Show Wishlist"
+                          role="menuitem"
+                        >
+                          ❤️ Show Wishlist
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2479,7 +3148,27 @@ export default function ChatBot({ customerId }) {
               </div>
 
               <div className="chat-messages" ref={chatContainerRef}>
+                {(() => {
+                  // Find the index of the last paymentMethods message
+                  var lastPaymentMethodsIndex = -1;
+                  for (let i = messages.length - 1; i >= 0; i--) {
+                    if (messages[i].type === "paymentMethods") {
+                      lastPaymentMethodsIndex = i;
+                      break;
+                    }
+                  }
+                  return null;
+                })()}
                 {messages.map((message, index) => {
+                  const isLatestPaymentMethods =
+                    message.type === "paymentMethods" &&
+                    (() => {
+                      for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].type === "paymentMethods")
+                          return i === index;
+                      }
+                      return false;
+                    })();
                   const { text: displayText, purchaseOptions } =
                     message.type === "ai"
                       ? parseMessageContent(message.text)
@@ -2499,10 +3188,13 @@ export default function ChatBot({ customerId }) {
                   // Check if this is a welcome message
                   const isWelcomeMessage = message.isWelcomeCard && index === 0;
 
+                  // Skip viewCartPrompt messages (buttons removed, available via quick actions)
+                  if (message.type === "viewCartPrompt") return null;
+
                   return (
                     <div
                       key={index}
-                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""} ${message.type === "postPurchaseActions" || message.type === "refundOrders" ? "wide-message" : ""}`}
+                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""} ${message.type === "postPurchaseActions" || message.type === "refundOrders" || message.type === "storeLocator" || message.type === "contactSupport" ? "wide-message" : ""}`}
                     >
                       {isWelcomeMessage ? (
                         <div className="welcome-gradient-card">
@@ -2584,7 +3276,9 @@ export default function ChatBot({ customerId }) {
                                   <ul className="refund-guidelines-list">
                                     <li>
                                       Refunds are eligible for purchases made
-                                      within the last 7 days.
+                                      between 24 hours and 7 days ago. Items
+                                      purchased within the last 24 hours are not
+                                      eligible for return.
                                     </li>
                                     <li>
                                       Items should be unused, in original
@@ -2654,20 +3348,202 @@ export default function ChatBot({ customerId }) {
                                       <button
                                         className="refund-init-btn"
                                         type="button"
+                                        disabled={
+                                          order?.return_status &&
+                                          order.return_status.toLowerCase() !==
+                                            ""
+                                        }
                                         onClick={() => {
                                           openRefundModal(order);
                                         }}
                                       >
-                                        Refund
+                                        {order?.return_status
+                                          ? ` ${order.return_status}`
+                                          : "Return"}
                                       </button>
                                     </div>
                                   ))}
                                 </div>
                               ) : (
                                 <div className="refund-orders-empty">
-                                  No orders found in the last 7 days.
+                                  No eligible orders found. Only purchases made
+                                  between 24 hours and 7 days ago are eligible
+                                  for return.
                                 </div>
                               )}
+                            </div>
+                          )}
+
+                          {message.type === "storeLocator" && (
+                            <div className="store-locator-section">
+                              <div className="store-locator-container">
+                                <div className="store-locator-header">
+                                  <span className="store-locator-icon">📍</span>
+                                  <div className="store-locator-header-text">
+                                    <h4>Store Locator</h4>
+                                    <p>Find our stores nearest to you</p>
+                                  </div>
+                                </div>
+
+                                {Array.isArray(message.stores) &&
+                                message.stores.length > 0 ? (
+                                  <div className="store-locator-table-wrap">
+                                    <table className="store-locator-table">
+                                      <thead>
+                                        <tr>
+                                          <th>#</th>
+                                          <th>Store Name</th>
+                                          <th>Distance</th>
+                                          <th>Locate on Map</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {message.stores.map((store, idx) => (
+                                          <tr key={idx}>
+                                            <td className="store-rank">
+                                              {idx + 1}
+                                            </td>
+                                            <td className="store-name-cell">
+                                              <span className="store-name-icon">
+                                                🏬
+                                              </span>
+                                              {store.store_name}
+                                            </td>
+                                            <td className="store-distance-cell">
+                                              <span className="distance-badge">
+                                                {store.distance} km
+                                              </span>
+                                            </td>
+                                            <td className="store-map-cell">
+                                              {store.map_url ? (
+                                                <a
+                                                  href={store.map_url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="map-link-btn"
+                                                >
+                                                  🗺️ Open Map
+                                                </a>
+                                              ) : (
+                                                <span className="map-unavailable">
+                                                  —
+                                                </span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="store-locator-empty">
+                                    No store locations found for your area.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {message.type === "contactSupport" && (
+                            <div className="contact-support-section">
+                              <div className="contact-support-card">
+                                {/* Address */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Address</h4>
+                                    <span className="cs-block-icon">📍</span>
+                                  </div>
+                                  <p className="cs-block-text">
+                                    Aditya Birla Fashion and Retail Ltd, Piramal
+                                    Agastya Corporate Park, Building
+                                    &lsquo;A&rsquo;, 4th and 5th Floor, Unit No.
+                                    401, 403, 501, 502, L.B.S. Road, Kurla,
+                                    Mumbai &ndash; 400 070.
+                                  </p>
+                                </div>
+                                <div className="cs-divider" />
+                                {/* Phone */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Phone</h4>
+                                    <span className="cs-block-icon">📞</span>
+                                  </div>
+                                  <div className="cs-phone-row">
+                                    <span className="cs-phone-label">
+                                      Online related queries
+                                    </span>
+                                    <a
+                                      href="tel:8105060501"
+                                      className="cs-phone-number"
+                                    >
+                                      8105060501
+                                    </a>
+                                  </div>
+                                  <div className="cs-phone-row">
+                                    <span className="cs-phone-label">
+                                      Store related queries
+                                    </span>
+                                    <a
+                                      href="tel:18004253050"
+                                      className="cs-phone-number"
+                                    >
+                                      1800 425 3050
+                                    </a>
+                                  </div>
+                                </div>
+                                <div className="cs-divider" />
+                                {/* Email */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Email</h4>
+                                    <span className="cs-block-icon">✉️</span>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For store related queries
+                                    </p>
+                                    <a
+                                      href="mailto:customerservice@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      customerservice@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For online enquiries
+                                    </p>
+                                    <a
+                                      href="mailto:happytohelp@abfrl.in"
+                                      className="cs-email-link"
+                                    >
+                                      happytohelp@abfrl.in
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For corporate orders
+                                    </p>
+                                    <a
+                                      href="mailto:corporate.sales@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      corporate.sales@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For franchisee
+                                    </p>
+                                    <a
+                                      href="mailto:franchiseenquiry@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      franchiseenquiry@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           )}
 
@@ -2682,50 +3558,37 @@ export default function ChatBot({ customerId }) {
                                   </div>
                                 </div>
 
-                                <div className="quick-actions-grid">
+                                <div className="pp-actions-grid">
                                   <button
-                                    className="quick-action-btn return-btn refund-btn"
+                                    className="pp-action-card pp-return-card"
                                     onClick={() => {
                                       handleRefundQuickAction();
                                     }}
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      💸
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Refund
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">💸</span>
+                                    </div>
+                                    <div className="pp-action-name">Return</div>
                                   </button>
                                   <button
-                                    className="quick-action-btn support-btn"
+                                    className="pp-action-card pp-support-card"
                                     onClick={() => {
-                                      setInputValue("customer support");
-                                      setTimeout(() => sendMessage(), 0);
+                                      handleCustomerSupport();
                                     }}
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      💬
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Customer support
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">💬</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Customer Support
+                                    </div>
                                   </button>
                                   <button
-                                    className="quick-action-btn rate-btn feedback-btn"
+                                    className="pp-action-card pp-feedback-card"
                                     onClick={() => {
                                       setInputValue("feedback");
                                       setTimeout(() => sendMessage(), 0);
@@ -2733,17 +3596,27 @@ export default function ChatBot({ customerId }) {
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      ⭐
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Feedback
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">⭐</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Feedback
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="pp-action-card pp-locate-card"
+                                    onClick={() => {
+                                      handleLocateUs();
+                                    }}
+                                    disabled={isLoading || isRefundLoading}
+                                    type="button"
+                                  >
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">📍</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Locate Us on Map
+                                    </div>
                                   </button>
                                 </div>
                               </div>
@@ -3205,69 +4078,84 @@ export default function ChatBot({ customerId }) {
                           )}
 
                           {/* Render Payment Methods */}
-                          {message.type === "paymentMethods" && (
-                            <div className="payment-methods-container">
-                              <div className="payment-methods-header">
-                                <span className="payment-icon">💳</span>
-                                <h4>Choose Payment Method</h4>
+                          {message.type === "paymentMethods" &&
+                            !isLatestPaymentMethods && (
+                              <div className="payment-methods-container payment-methods-expired">
+                                <div className="payment-methods-header">
+                                  <span className="payment-icon">💳</span>
+                                  <h4>Payment method selection expired</h4>
+                                </div>
                               </div>
-                              <div className="payment-methods-grid">
-                                <button
-                                  className="payment-method-card upi-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("upi")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">+</span>
-                                  </div>
-                                  <div className="payment-method-name">UPI</div>
-                                </button>
-                                <button
-                                  className="payment-method-card credit-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("credit card")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💳</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Credit Card
-                                  </div>
-                                </button>
-                                <button
-                                  className="payment-method-card debit-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("debit card")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💳</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Debit Card
-                                  </div>
-                                </button>
-                                <button
-                                  className="payment-method-card cod-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("cash on delivery")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💵</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Cash on Delivery
-                                  </div>
-                                </button>
+                            )}
+                          {message.type === "paymentMethods" &&
+                            isLatestPaymentMethods && (
+                              <div className="payment-methods-container">
+                                <div className="payment-methods-header">
+                                  <span className="payment-icon">💳</span>
+                                  <h4>Choose Payment Method</h4>
+                                </div>
+                                <div className="payment-methods-grid">
+                                  <button
+                                    className="payment-method-card upi-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("upi")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">+</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      UPI
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card credit-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("credit card")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💳</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Credit Card
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card debit-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("debit card")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💳</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Debit Card
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card cod-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick(
+                                        "cash on delivery",
+                                      )
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💵</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Cash on Delivery
+                                    </div>
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            )}
 
                           {/* Payment Detail Forms */}
                           {message.type === "paymentMethods" &&
+                            isLatestPaymentMethods &&
                             selectedPaymentMethod === "upi" && (
                               <div className="payment-detail-form">
                                 <div
@@ -3333,6 +4221,7 @@ export default function ChatBot({ customerId }) {
                             )}
 
                           {message.type === "paymentMethods" &&
+                            isLatestPaymentMethods &&
                             (selectedPaymentMethod === "credit card" ||
                               selectedPaymentMethod === "debit card") && (
                               <div className="payment-detail-form">
@@ -3915,41 +4804,44 @@ export default function ChatBot({ customerId }) {
                               <div className="products-section">
                                 <div className="products-header">
                                   <h4 className="products-title">
-                                    🛍️ Recommended Products
+                                    {message.isWishlist
+                                      ? "❤️ Your Wishlist"
+                                      : "🛍️ Recommended Products"}
                                   </h4>
                                   {(() => {
-                                    const selectedCount = message.productCards
-                                      .slice(0, 4)
-                                      .filter(
-                                        (p) =>
-                                          productQuantities[p.product_id] &&
-                                          productQuantities[p.product_id] > 0,
-                                      ).length;
-                                    const totalQuantity = message.productCards
-                                      .slice(0, 4)
-                                      .reduce(
-                                        (sum, p) =>
-                                          sum +
-                                          (productQuantities[p.product_id] ||
-                                            0),
-                                        0,
-                                      );
+                                    const selectedCount = (
+                                      message.isWishlist
+                                        ? message.productCards
+                                        : message.productCards.slice(0, 4)
+                                    ).filter(
+                                      (p) =>
+                                        productQuantities[p.product_id] &&
+                                        productQuantities[p.product_id] > 0,
+                                    ).length;
+                                    const totalQuantity = (
+                                      message.isWishlist
+                                        ? message.productCards
+                                        : message.productCards.slice(0, 4)
+                                    ).reduce(
+                                      (sum, p) =>
+                                        sum +
+                                        (productQuantities[p.product_id] || 0),
+                                      0,
+                                    );
                                     return selectedCount > 0 ? (
                                       <button
                                         className="bulk-add-to-cart-btn"
                                         onClick={async () => {
-                                          const productsToAdd =
-                                            message.productCards
-                                              .slice(0, 4)
-                                              .filter(
-                                                (p) =>
-                                                  productQuantities[
-                                                    p.product_id
-                                                  ] &&
-                                                  productQuantities[
-                                                    p.product_id
-                                                  ] > 0,
-                                              );
+                                          const productsToAdd = (
+                                            message.isWishlist
+                                              ? message.productCards
+                                              : message.productCards.slice(0, 4)
+                                          ).filter(
+                                            (p) =>
+                                              productQuantities[p.product_id] &&
+                                              productQuantities[p.product_id] >
+                                                0,
+                                          );
 
                                           if (productsToAdd.length === 0)
                                             return;
@@ -4035,157 +4927,183 @@ export default function ChatBot({ customerId }) {
                                   })()}
                                 </div>
                                 <div className="product-cards-container">
-                                  {message.productCards
-                                    .slice(0, 4)
-                                    .map((product) => {
-                                      const quantity =
-                                        productQuantities[product.product_id] ||
-                                        0;
-                                      const isSelected = quantity > 0;
-                                      return (
-                                        <div
-                                          key={product.product_id}
-                                          className={`product-card ${
-                                            isSelected ? "selected" : ""
-                                          }`}
-                                        >
-                                          <div className="product-image-wrapper">
-                                            <img
-                                              src={
-                                                product.image_reference ||
-                                                "/images/placeholder.png"
-                                              }
-                                              alt={product.product_name}
-                                              className="product-image"
-                                              onError={(e) => {
-                                                e.target.src =
-                                                  "/images/placeholder.png";
-                                              }}
-                                            />
-                                            {product.quantity > 0 &&
-                                              product.quantity < 10 && (
-                                                <span className="product-badge trending">
-                                                  Low Stock
-                                                </span>
-                                              )}
-                                            {isSelected && (
-                                              <div className="selected-overlay">
-                                                <span className="selected-badge">
-                                                  ✓ Selected
-                                                </span>
-                                              </div>
-                                            )}
-                                          </div>
-                                          <div className="product-info">
-                                            <h4 className="product-name product-name-row">
-                                              <span className="product-name-text">
-                                                {product.product_name}
+                                  {(message.isWishlist
+                                    ? message.productCards
+                                    : message.productCards.slice(0, 4)
+                                  ).map((product) => {
+                                    const quantity =
+                                      productQuantities[product.product_id] ||
+                                      0;
+                                    const isSelected = quantity > 0;
+                                    return (
+                                      <div
+                                        key={product.product_id}
+                                        className={`product-card ${
+                                          isSelected ? "selected" : ""
+                                        }`}
+                                      >
+                                        <div className="product-image-wrapper">
+                                          <img
+                                            src={
+                                              product.image_reference ||
+                                              "/images/placeholder.png"
+                                            }
+                                            alt={product.product_name}
+                                            className="product-image"
+                                            onError={(e) => {
+                                              e.target.src =
+                                                "/images/placeholder.png";
+                                            }}
+                                          />
+                                          {product.quantity > 0 &&
+                                            product.quantity < 10 && (
+                                              <span className="product-badge trending">
+                                                Low Stock
                                               </span>
-                                              {typeof productReviews?.[
-                                                product.product_id
-                                              ] === "number" && (
-                                                <span className="product-rating">
-                                                  ⭐{" "}
-                                                  {Number(
-                                                    productReviews[
-                                                      product.product_id
-                                                    ],
-                                                  ).toFixed(2)}
-                                                </span>
-                                              )}
-                                            </h4>
-                                            <div className="product-pricing">
-                                              {product.discount &&
-                                              product.discount > 0 ? (
-                                                <>
-                                                  <span className="original-price">
-                                                    ₹
-                                                    {product.price.toLocaleString()}
-                                                  </span>
-                                                  <span className="discount-price">
-                                                    ₹
-                                                    {product.discount_price.toLocaleString()}
-                                                  </span>
-                                                  <span className="discount-badge">
-                                                    {product.discount}% off
-                                                  </span>
-                                                </>
-                                              ) : (
-                                                <p className="product-price">
+                                            )}
+                                          {isSelected && (
+                                            <div className="selected-overlay">
+                                              <span className="selected-badge">
+                                                ✓ Selected
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="product-info">
+                                          <h4 className="product-name product-name-row">
+                                            <span className="product-name-text">
+                                              {product.product_name}
+                                            </span>
+                                            {typeof productReviews?.[
+                                              product.product_id
+                                            ] === "number" && (
+                                              <span className="product-rating">
+                                                ⭐{" "}
+                                                {Number(
+                                                  productReviews[
+                                                    product.product_id
+                                                  ],
+                                                ).toFixed(2)}
+                                              </span>
+                                            )}
+                                          </h4>
+                                          <div className="product-pricing">
+                                            {product.discount &&
+                                            product.discount > 0 ? (
+                                              <>
+                                                <span className="original-price">
                                                   ₹
                                                   {product.price.toLocaleString()}
-                                                </p>
-                                              )}
-                                            </div>
-                                            <div className="qty-size-row">
-                                              <div className="quantity-controls">
-                                                <button
-                                                  className="qty-btn"
-                                                  onClick={() =>
-                                                    handleQuantityChange(
-                                                      product.product_id,
-                                                      -1,
-                                                    )
-                                                  }
-                                                  disabled={quantity === 0}
-                                                >
-                                                  −
-                                                </button>
-                                                <span className="qty-value">
-                                                  {quantity}
                                                 </span>
-                                                <button
-                                                  className="qty-btn"
-                                                  onClick={() =>
-                                                    handleQuantityChange(
-                                                      product.product_id,
-                                                      1,
-                                                    )
-                                                  }
-                                                >
-                                                  +
-                                                </button>
-                                              </div>
+                                                <span className="discount-price">
+                                                  ₹
+                                                  {product.discount_price.toLocaleString()}
+                                                </span>
+                                                <span className="discount-badge">
+                                                  {product.discount}% off
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <p className="product-price">
+                                                ₹
+                                                {product.price.toLocaleString()}
+                                              </p>
+                                            )}
+                                            <button
+                                              className={`wishlist-heart-btn${
+                                                wishlistedIds.has(
+                                                  product.product_id,
+                                                )
+                                                  ? " wishlisted"
+                                                  : ""
+                                              }`}
+                                              title={
+                                                wishlistedIds.has(
+                                                  product.product_id,
+                                                )
+                                                  ? "Remove from wishlist"
+                                                  : "Add to wishlist"
+                                              }
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleWishlistToggle(
+                                                  product.product_id,
+                                                );
+                                              }}
+                                            >
+                                              {wishlistedIds.has(
+                                                product.product_id,
+                                              )
+                                                ? "❤️"
+                                                : "🤍"}
+                                            </button>
+                                          </div>
+                                          <div className="qty-size-row">
+                                            <div className="quantity-controls">
+                                              <button
+                                                className="qty-btn"
+                                                onClick={() =>
+                                                  handleQuantityChange(
+                                                    product.product_id,
+                                                    -1,
+                                                  )
+                                                }
+                                                disabled={quantity === 0}
+                                              >
+                                                −
+                                              </button>
+                                              <span className="qty-value">
+                                                {quantity}
+                                              </span>
+                                              <button
+                                                className="qty-btn"
+                                                onClick={() =>
+                                                  handleQuantityChange(
+                                                    product.product_id,
+                                                    1,
+                                                  )
+                                                }
+                                              >
+                                                +
+                                              </button>
+                                            </div>
 
-                                              {!isAccessories(product) && (
-                                                <div className="size-control">
-                                                  <select
-                                                    className="size-select"
-                                                    value={
-                                                      productSizes[
-                                                        product.product_id
-                                                      ] ||
-                                                      getDefaultSize(product)
-                                                    }
-                                                    onChange={(e) =>
-                                                      setProductSizes(
-                                                        (prev) => ({
-                                                          ...prev,
-                                                          [product.product_id]:
-                                                            e.target.value,
-                                                        }),
-                                                      )
-                                                    }
-                                                    aria-label="Select size"
-                                                  >
-                                                    {getSizeOptions(
-                                                      product,
-                                                    ).map((opt) => (
+                                            {!isAccessories(product) && (
+                                              <div className="size-control">
+                                                <select
+                                                  className="size-select"
+                                                  value={
+                                                    productSizes[
+                                                      product.product_id
+                                                    ] || getDefaultSize(product)
+                                                  }
+                                                  onChange={(e) =>
+                                                    setProductSizes((prev) => ({
+                                                      ...prev,
+                                                      [product.product_id]:
+                                                        e.target.value,
+                                                    }))
+                                                  }
+                                                  aria-label="Select size"
+                                                >
+                                                  {getSizeOptions(product).map(
+                                                    (opt) => (
                                                       <option
                                                         key={opt}
                                                         value={opt}
                                                       >
                                                         {opt}
                                                       </option>
-                                                    ))}
-                                                  </select>
-                                                </div>
-                                              )}
-                                            </div>
+                                                    ),
+                                                  )}
+                                                </select>
+                                              </div>
+                                            )}
                                           </div>
                                         </div>
-                                      );
-                                    })}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}
@@ -4407,6 +5325,70 @@ export default function ChatBot({ customerId }) {
                                       </span>
                                     )}
                                   </p>
+
+                                  {/* Loyalty Points Section */}
+                                  {(message.available_loyalty_points > 0 ||
+                                    message.loyalty_applied) && (
+                                    <div className="loyalty-points-section">
+                                      <div className="loyalty-points-header">
+                                        <span className="loyalty-icon">🎁</span>
+                                        <span className="loyalty-label">
+                                          Available Loyalty Points:{" "}
+                                          <strong>
+                                            {message.available_loyalty_points ??
+                                              0}
+                                          </strong>
+                                        </span>
+                                      </div>
+                                      <label className="loyalty-checkbox-label">
+                                        <input
+                                          type="checkbox"
+                                          className="loyalty-checkbox"
+                                          checked={
+                                            message.loyalty_applied || false
+                                          }
+                                          disabled={loyaltyProcessing}
+                                          onChange={(e) =>
+                                            handleToggleLoyalty(
+                                              e.target.checked,
+                                              message.total_amount,
+                                              message.available_loyalty_points,
+                                            )
+                                          }
+                                        />
+                                        <span className="loyalty-checkbox-text">
+                                          Use my loyalty points
+                                          {loyaltyProcessing &&
+                                            " (processing...)"}
+                                        </span>
+                                      </label>
+                                      {message.loyalty_applied &&
+                                        message.loyalty_points_used > 0 && (
+                                          <div className="loyalty-applied-summary">
+                                            <div className="loyalty-deduction">
+                                              <span>Loyalty Discount:</span>
+                                              <span className="loyalty-deduction-amount">
+                                                − ₹
+                                                {Math.round(
+                                                  message.loyalty_points_used,
+                                                ).toLocaleString()}
+                                              </span>
+                                            </div>
+                                            <div className="loyalty-payable">
+                                              <span>Total Payable:</span>
+                                              <span className="loyalty-payable-amount">
+                                                ₹
+                                                {Math.round(
+                                                  message.payable_amount ??
+                                                    message.total_amount,
+                                                ).toLocaleString()}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        )}
+                                    </div>
+                                  )}
+
                                   <p className="proceed-prompt">
                                     Would you like to proceed to payment? 🛍️
                                   </p>
@@ -4414,25 +5396,7 @@ export default function ChatBot({ customerId }) {
                               </div>
                             )}
 
-                          {/* Render View Cart Prompt */}
-                          {message.type === "viewCartPrompt" && (
-                            <div className="view-cart-prompt">
-                              <button
-                                className="view-cart-btn"
-                                onClick={handleViewCart}
-                              >
-                                🛒 View Cart
-                              </button>
-                              <button
-                                className="continue-shopping-btn"
-                                onClick={() =>
-                                  setInputValue("show me more products")
-                                }
-                              >
-                                Continue Shopping
-                              </button>
-                            </div>
-                          )}
+                          {/* View Cart Prompt removed - available via quick actions menu */}
 
                           {/* Render Add-to-Cart confirmation card */}
                           {message.type === "cartConfirmation" &&

@@ -14,7 +14,7 @@ from store_kiosk_graph import (
     post_purchase_node,
     kiosk_add_to_cart_agent,
 )
-from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Payload, Feedback
+from models import Customer, Product, Store, OrderHistory, StoreKeeperTransaction, AdminDashboardData, Payload, Feedback, Distance, Wishlist
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
@@ -29,9 +29,12 @@ import asyncio
 import re
 from sqlmodel import Session, select, func
 from dotenv import load_dotenv
-from whatsapp import send_message, get_text_message_input
+from whatsapp import send_text_message, send_image_message, resolve_image_url, is_valid_whatsapp_message
+from intelligent_whatsapp_graph import run_whatsapp_agent, send_whatsapp_text
 from security import signature_required
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from datetime import datetime, timedelta
 
 # Load environment variables
@@ -54,6 +57,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve product images so Twilio can fetch them for WhatsApp media messages.
+# Images live in  frontend/public/images/  →  mounted at /images/
+_IMAGES_DIR = Path(__file__).resolve().parent.parent / \
+    "frontend" / "public" / "images"
+if _IMAGES_DIR.is_dir():
+    app.mount("/images", StaticFiles(directory=str(_IMAGES_DIR)),
+              name="product-images")
 
 
 def load_products_from_db(skip: int = 0, limit: int = 100) -> List[Product]:
@@ -118,6 +129,7 @@ def _tool_to_agent_map() -> Dict[str, str]:
         "fulfillment_agent": "Fulfillment Agent",
         "loyalty_agent": "Loyalty Agent",
         "post_purchase_agent": "Post-Purchase Agent",
+        "locate_us_agent": "Locate Us Agent",
     }
 
 
@@ -279,23 +291,79 @@ def get_customer_orders_endpoint(customer_id: str):
         # Get full product details
         product = get_product_from_db(order.product_id)
         if product:
+            # Use final_price from order if available (includes discount + loyalty),
+            # otherwise fall back to product's current price
+            display_price = order.final_price if order.final_price is not None else product.price
             order_products.append({
                 "transaction_id": order.transaction_id,
                 "product_id": product.product_id,
                 "product_name": product.product_name,
                 "category": product.category,
-                "price": product.price,
+                "price": display_price,
+                "original_price": product.price,
+                "discount_amount": order.discount_amount,
+                "loyalty_applied": order.loyalty_applied,
+                "final_price": order.final_price,
                 "quantity": order.quantity,
                 "size": order.size,
                 "purchase_date": order.order_dates,
                 "loyalty_points": order.loyalty_points,
-                "image_reference": product.image_reference
+                "image_reference": product.image_reference,
+                "return_status": order.return_status,
+                "feedback": order.feedback,
             })
 
     return {
         "customer_id": customer_id,
         "order_history": order_products
     }
+
+
+class SubmitFeedbackModel(BaseModel):
+    customer_id: str
+    product_id: str
+    feedback: int  # 1-5 star rating
+
+
+@app.post("/api/orders/feedback")
+def submit_order_feedback(data: SubmitFeedbackModel):
+    """Submit star-rating feedback for a purchased product. Once set it cannot be changed."""
+    if data.feedback < 1 or data.feedback > 5:
+        raise HTTPException(
+            status_code=400, detail="Feedback must be between 1 and 5")
+
+    try:
+        with Session(engine) as session:
+            # Find the order(s) for this customer + product
+            orders = session.exec(
+                select(OrderHistory).where(
+                    OrderHistory.customer_id == data.customer_id,
+                    OrderHistory.product_id == data.product_id
+                )
+            ).all()
+
+            if not orders:
+                raise HTTPException(
+                    status_code=404, detail="No order found for this customer and product")
+
+            # Check if feedback already exists on any of the matching orders
+            already_rated = any(o.feedback is not None for o in orders)
+            if already_rated:
+                raise HTTPException(
+                    status_code=400, detail="Feedback already submitted for this product")
+
+            # Update all matching orders with the feedback
+            for order in orders:
+                order.feedback = str(data.feedback)
+                session.add(order)
+            session.commit()
+
+            return {"status": "success", "message": "Feedback submitted successfully", "feedback": data.feedback}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error submitting feedback: {str(e)}")
 
 
 @app.get("/api/customer/{customer_id}/orders/recent")
@@ -312,6 +380,7 @@ def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
         return {"error": f"Customer with ID {customer_id} not found"}
 
     cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff_24h = datetime.utcnow() - timedelta(hours=24)
     orders = get_customer_orders_from_db(customer_id)
 
     recent_orders: list[tuple[datetime, OrderHistory]] = []
@@ -324,7 +393,9 @@ def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
         except Exception:
             # If legacy/non-ISO formats exist, skip them rather than failing the whole request
             continue
-        if parsed >= cutoff:
+        # Eligible for return: purchased between 24 hours ago and N days ago
+        # (items purchased in the last 24 hours are NOT eligible)
+        if parsed >= cutoff and parsed <= cutoff_24h:
             recent_orders.append((parsed, order))
 
     recent_orders.sort(key=lambda x: x[0], reverse=True)
@@ -333,17 +404,23 @@ def get_customer_recent_orders_endpoint(customer_id: str, days: int = 7):
     for parsed, order in recent_orders:
         product = get_product_from_db(order.product_id)
         if product:
+            display_price = order.final_price if order.final_price is not None else product.price
             order_products.append({
                 "transaction_id": order.transaction_id,
                 "product_id": product.product_id,
                 "product_name": product.product_name,
                 "category": product.category,
-                "price": product.price,
+                "price": display_price,
+                "original_price": product.price,
+                "discount_amount": order.discount_amount,
+                "loyalty_applied": order.loyalty_applied,
+                "final_price": order.final_price,
                 "quantity": order.quantity,
                 "size": order.size,
                 "purchase_date": order.order_dates,
                 "loyalty_points": order.loyalty_points,
                 "image_reference": product.image_reference,
+                "return_status": order.return_status,
             })
 
     return {
@@ -1417,6 +1494,196 @@ def create_order_endpoint(order: OrderCreateModel):
         return {"success": False, "error": str(e)}
 
 
+class InitiateReturnModel(BaseModel):
+    transaction_id: str
+    return_reason: str
+
+
+@app.post("/api/orders/initiate-return")
+def initiate_return_endpoint(data: InitiateReturnModel):
+    """Initiate a return/refund for an order.
+
+    Updates return_status, return_reason, and return_initiated_time
+    in the order_history table for the given transaction_id.
+    """
+    if not data.return_reason or not data.return_reason.strip():
+        raise HTTPException(
+            status_code=400, detail="Return reason is required.")
+
+    # Validate that the return reason is product-related (not generic)
+    reason_lower = data.return_reason.strip().lower()
+    valid_reason_keywords = [
+        "size", "fit", "fitting", "too small", "too big", "too large", "too tight", "too loose",
+        "defect", "defective", "damaged", "broken", "torn", "ripped", "scratched", "dent",
+        "quality", "poor quality", "bad quality", "low quality", "fabric", "material", "stitching",
+        "color", "colour", "shade", "faded", "discolored", "wrong color", "wrong colour",
+        "wrong", "wrong product", "wrong item", "incorrect", "mismatch", "not matching",
+        "mistake", "by mistake", "accidentally", "accidental", "ordered wrong", "didn't mean",
+        "not as described", "not as shown", "different from", "doesn't match", "does not match",
+        "expired", "stale", "spoiled", "smell", "odor", "stain", "dirty",
+        "missing", "missing part", "incomplete", "not working", "malfunction", "faulty",
+        "allergic", "allergy", "reaction", "irritation", "rash",
+        "duplicate", "ordered twice", "double order",
+        "not needed", "no longer need", "don't need", "changed mind", "change of mind",
+        "better price", "found cheaper", "price drop",
+        "late delivery", "delayed", "took too long",
+        "packaging", "box damaged", "seal broken",
+    ]
+    reason_is_valid = any(
+        keyword in reason_lower for keyword in valid_reason_keywords)
+
+    if not reason_is_valid:
+        return {
+            "success": False,
+            "error": "Please provide a valid product-related reason for return. Examples: size issue, defective product, wrong item received, quality issue, bought by mistake, etc.",
+            "invalid_reason": True,
+        }
+
+    try:
+        with get_db_session() as session:
+            order = order_history_crud.get_by_id(session, data.transaction_id)
+            if order is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Order with transaction_id {data.transaction_id} not found.",
+                )
+
+            if order.return_status and order.return_status.lower() in ("initiated", "completed"):
+                return {
+                    "success": False,
+                    "error": "Return has already been initiated for this order.",
+                }
+
+            # Reject returns for items purchased less than 24 hours ago
+            raw_date = (order.order_dates or "").strip()
+            if raw_date:
+                try:
+                    parsed_date = datetime.fromisoformat(
+                        raw_date.replace("Z", "+00:00"))
+                    cutoff_24h = datetime.utcnow() - timedelta(hours=24)
+                    if parsed_date > cutoff_24h:
+                        return {
+                            "success": False,
+                            "error": "Items purchased within the last 24 hours are not eligible for return. Please try again after 24 hours from purchase.",
+                        }
+                except Exception:
+                    pass
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            order_history_crud.update(
+                session,
+                data.transaction_id,
+                {
+                    "return_status": "Initiated",
+                    "return_reason": data.return_reason.strip(),
+                    "return_initiated_time": now,
+                },
+            )
+            session.commit()
+
+            return {
+                "success": True,
+                "transaction_id": data.transaction_id,
+                "return_status": "Initiated",
+                "return_reason": data.return_reason.strip(),
+                "return_initiated_time": now,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/orders/return-monitoring")
+def return_monitoring_endpoint():
+    """Silent return-monitoring agent (batch operation).
+
+    Scans the entire order_history table for orders where return_status is
+    'Initiated' and return_initiated_time is older than 10 minutes.
+    Updates those orders' return_status to 'Returned' for all customers.
+    """
+    updated_count = 0
+    try:
+        with get_db_session() as session:
+            orders = order_history_crud.get_all(session, skip=0, limit=100000)
+            now = datetime.now()
+
+            for order in orders:
+                if not order.return_status or order.return_status.lower() != "initiated":
+                    continue
+                raw_time = (order.return_initiated_time or "").strip()
+                if not raw_time:
+                    continue
+                try:
+                    # Handle both "YYYY-MM-DD HH:MM:SS" and ISO formats
+                    normalized = raw_time.replace("T", " ").replace("Z", "")
+                    initiated_time = datetime.strptime(
+                        normalized.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    continue
+
+                diff_minutes = (now - initiated_time).total_seconds() / 60.0
+                if diff_minutes >= 10:
+                    # 1. Get the quantity being returned
+                    return_qty = order.quantity if order.quantity else 0
+
+                    # 2. Add quantity back to the product's stock
+                    if return_qty > 0 and order.product_id:
+                        product = product_crud.get_by_id(
+                            session, order.product_id)
+                        if product:
+                            current_stock = product.quantity if product.quantity else 0
+                            product_crud.update(
+                                session,
+                                order.product_id,
+                                {"quantity": current_stock + return_qty},
+                            )
+
+                    # 3. Update return_status to "Returned" and set order quantity to 0
+                    order_history_crud.update(
+                        session,
+                        order.transaction_id,
+                        {"return_status": "Returned", "quantity": 0},
+                    )
+                    updated_count += 1
+
+            if updated_count > 0:
+                session.commit()
+
+        return {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        return {"success": False, "error": str(e), "updated_count": 0}
+
+
+@app.get("/api/stores/locate/{customer_id}")
+def get_store_locations(customer_id: str):
+    """Locate Us agent: fetch nearby stores with distance and map URL for a customer."""
+    try:
+        with get_db_session() as session:
+            from sqlmodel import select as sql_select
+            statement = sql_select(Distance).where(
+                Distance.customer_id == customer_id)
+            results = session.exec(statement).all()
+
+            if not results:
+                return {"success": True, "stores": [], "message": "No store distance data found for this customer."}
+
+            stores = []
+            for row in results:
+                stores.append({
+                    "store_name": row.store_name,
+                    "distance": round(row.distance, 2),
+                    "map_url": row.map_url or "",
+                })
+
+            # Sort by distance ascending
+            stores.sort(key=lambda s: s["distance"])
+
+            return {"success": True, "stores": stores, "count": len(stores)}
+    except Exception as e:
+        return {"success": False, "stores": [], "error": str(e)}
+
+
 class StoreTransactionCreateModel(BaseModel):
     id: int
     customer_id: str
@@ -1531,6 +1798,82 @@ def update_cart_size(update_data: UpdateCartSizeModel):
                     },
                 }
             return {"success": False, "error": "Failed to update size"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class ApplyLoyaltyModel(BaseModel):
+    customer_id: str
+    apply: bool  # True = apply loyalty points, False = remove/unapply
+    cart_total: float  # current cart total before loyalty
+
+
+@app.post("/api/cart/apply-loyalty")
+def apply_loyalty_to_cart(data: ApplyLoyaltyModel):
+    """Apply or remove loyalty points discount on the cart total and update customer loyalty_points."""
+    try:
+        with get_db_session() as session:
+            customer = customer_crud.get_by_id(session, data.customer_id)
+            if not customer:
+                return {"success": False, "error": "Customer not found"}
+
+            available_points = customer.loyalty_points or 0
+
+            if data.apply:
+                # Points to use: min of available points and cart total (1 point = ₹1)
+                points_to_use = min(available_points, int(data.cart_total))
+                new_total = max(data.cart_total - points_to_use, 0)
+                remaining_points = available_points - points_to_use
+
+                # Update customer loyalty_points in DB
+                customer_crud.update(session, data.customer_id, {
+                                     "loyalty_points": remaining_points})
+
+                return {
+                    "success": True,
+                    "applied": True,
+                    "points_used": points_to_use,
+                    "remaining_points": remaining_points,
+                    "new_total": new_total,
+                    "original_total": data.cart_total,
+                }
+            else:
+                # Unapply: we need the frontend to tell us how many points were previously used
+                # Just return current state without deducting
+                return {
+                    "success": True,
+                    "applied": False,
+                    "points_used": 0,
+                    "remaining_points": available_points,
+                    "new_total": data.cart_total,
+                    "original_total": data.cart_total,
+                }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/cart/unapply-loyalty")
+def unapply_loyalty_from_cart(data: ApplyLoyaltyModel):
+    """Restore loyalty points back to customer when unchecking loyalty checkbox."""
+    try:
+        with get_db_session() as session:
+            customer = customer_crud.get_by_id(session, data.customer_id)
+            if not customer:
+                return {"success": False, "error": "Customer not found"}
+
+            # cart_total here is the points_used that need to be restored
+            points_to_restore = int(data.cart_total)
+            current_points = customer.loyalty_points or 0
+            new_points = current_points + points_to_restore
+
+            customer_crud.update(session, data.customer_id, {
+                                 "loyalty_points": new_points})
+
+            return {
+                "success": True,
+                "restored_points": points_to_restore,
+                "remaining_points": new_points,
+            }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1787,6 +2130,8 @@ def _summarize_tool_start(tool_name: str, tool_args: Any) -> str:
         size = args.get("size")
         if size:
             parts.append(f"size:{size}")
+        if args.get("sort_by_rating"):
+            parts.append("sorted by ⭐ rating")
         return " ".join(parts) if parts else "Searching product catalog"
 
     if tool_name == "recommendation_agent":
@@ -1830,6 +2175,9 @@ def _summarize_tool_start(tool_name: str, tool_args: Any) -> str:
 
     if tool_name == "post_purchase_agent":
         return "Preparing post-purchase support"
+
+    if tool_name == "locate_us_agent":
+        return "Locating nearby stores on map"
 
     return "Working…"
 
@@ -1942,6 +2290,12 @@ async def ws_chat(websocket: WebSocket):
             customer_id = payload.get("customer_id")
             user_query = payload.get("message")
             payload_size = payload.get("size")
+
+            # Store loyalty points used if sent by frontend during payment
+            loyalty_points_used = payload.get("loyalty_points_used")
+            if loyalty_points_used is not None and customer_id:
+                from intelligent_agent_graph import set_loyalty_points_used
+                set_loyalty_points_used(customer_id, int(loyalty_points_used))
 
             if not customer_id or not user_query:
                 await websocket.send_json({
@@ -2653,18 +3007,35 @@ async def chat_with_kiosk(chat_message: ChatMessage):
         state = kiosk_sessions.get(
             customer_id) or _init_kiosk_state(customer_id)
 
-        # If a previous kiosk run completed, but the customer still has pending cart items,
-        # reset the kiosk session so users can pay for the new items.
+        # Persist the store_id from the request into the kiosk state so that
+        # welcome_node and payment_method_node can filter cart by this store.
+        request_store_id = getattr(chat_message, "store_id", None) or None
+        if request_store_id:
+            state["kiosk_store_id"] = request_store_id
+
+        kiosk_store_id = state.get("kiosk_store_id") or None
+
+        # If a previous kiosk run completed, but the customer still has pending
+        # offline cart items for this store, reset the kiosk session.
         try:
             with get_db_session() as session:
+                filters = {"customer_id": customer_id,
+                           "status": "pending", "channel": "offline"}
+                operators = {"customer_id": "==",
+                             "status": "==", "channel": "=="}
+                if kiosk_store_id:
+                    filters["store_id"] = kiosk_store_id
+                    operators["store_id"] = "=="
                 pending_items = cart_crud.filter(
                     session,
-                    filters={"customer_id": customer_id, "status": "pending"},
-                    operators={"customer_id": "==", "status": "=="},
+                    filters=filters,
+                    operators=operators,
                     limit=1,
                 )
             if pending_items and state.get("payment_completed"):
                 state = _init_kiosk_state(customer_id)
+                if request_store_id:
+                    state["kiosk_store_id"] = request_store_id
                 # Skip welcome step for this request; frontend already shows the cart.
                 state["welcome_done"] = True
         except Exception:
@@ -2687,12 +3058,16 @@ async def chat_with_kiosk(chat_message: ChatMessage):
                 product_id = product_match.group(1).upper()
                 qty = int(qty_match.group(1)) if qty_match else 1
                 size = size_match.group(1).strip() if size_match else None
+                # Use store_id from the request if provided (passed from store keeper session)
+                request_store_id = getattr(
+                    chat_message, "store_id", None) or None
                 tool_result = kiosk_add_to_cart_agent.invoke(
                     {
                         "product_id": product_id,
                         "quantity": qty,
                         "customer_id": customer_id,
                         "size": size,
+                        "store_id": request_store_id,
                     }
                 )
                 kiosk_sessions[customer_id] = state
@@ -2742,10 +3117,14 @@ async def switch_cart_to_online(request: dict):
         if not customer_id:
             return {"success": False, "error": "Customer ID is required"}
 
+        store_id = request.get("store_id") or None
+
         # Use the tool from store_kiosk_graph
         from store_kiosk_graph import switch_channel_instore_to_online
-        result = switch_channel_instore_to_online.invoke(
-            {"customer_id": customer_id})
+        invoke_args = {"customer_id": customer_id}
+        if store_id:
+            invoke_args["store_id"] = store_id
+        result = switch_channel_instore_to_online.invoke(invoke_args)
 
         # Check if operation was successful
         if "✅" in result:
@@ -2765,6 +3144,80 @@ async def clear_chat_history(customer_id: str):
         return {"success": True, "message": f"Conversation history cleared for {customer_id}"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+# ============ Wishlist Endpoints ============
+
+class WishlistToggleModel(BaseModel):
+    customer_id: str
+    product_id: str
+
+
+@app.post("/api/wishlist/toggle")
+def toggle_wishlist(item: WishlistToggleModel):
+    """Toggle a product in the customer's wishlist. Returns wishlisted=true/false."""
+    with Session(engine) as session:
+        existing = session.exec(
+            select(Wishlist).where(
+                Wishlist.customer_id == item.customer_id,
+                Wishlist.product_id == item.product_id,
+            )
+        ).first()
+        if existing:
+            session.delete(existing)
+            session.commit()
+            return {"wishlisted": False, "product_id": item.product_id}
+        else:
+            new_entry = Wishlist(customer_id=item.customer_id,
+                                 product_id=item.product_id)
+            session.add(new_entry)
+            session.commit()
+            return {"wishlisted": True, "product_id": item.product_id}
+
+
+@app.get("/api/wishlist/{customer_id}")
+def get_wishlist(customer_id: str):
+    """Get all wishlisted product_ids for a customer."""
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Wishlist).where(Wishlist.customer_id == customer_id)
+        ).all()
+        return {"product_ids": [r.product_id for r in rows]}
+
+
+@app.get("/api/wishlist/{customer_id}/products")
+def get_wishlist_products(customer_id: str):
+    """Get full product details for all wishlisted products of a customer."""
+    with Session(engine) as session:
+        wishlist_rows = session.exec(
+            select(Wishlist).where(Wishlist.customer_id == customer_id)
+        ).all()
+        product_ids = [r.product_id for r in wishlist_rows]
+
+        if not product_ids:
+            return {"products": [], "total_count": 0}
+
+        products = []
+        for pid in product_ids:
+            product = get_product_from_db(pid)
+            if product:
+                original_price = product.price
+                discount = product.discount if product.discount else 0
+                discount_price = round(
+                    original_price * (1 - discount / 100), 2
+                ) if discount > 0 else original_price
+                products.append({
+                    "product_id": product.product_id,
+                    "product_name": product.product_name,
+                    "price": original_price,
+                    "discount": discount,
+                    "discount_price": discount_price,
+                    "category": product.category,
+                    "quantity": product.quantity,
+                    "image_reference": product.image_reference,
+                })
+
+        return {"products": products, "total_count": len(products)}
 
 
 @app.post("/api/payload/save")
@@ -2860,130 +3313,74 @@ async def get_payload(customer_id: str):
         return {"success": False, "error": str(e), "payload": None}
 
 
-async def handle_message(body: dict):
-    """
-    Handle incoming webhook events from the WhatsApp API.
-
-    This function processes incoming WhatsApp messages and other events,
-    such as delivery statuses. If the event is a valid message, it gets
-    processed. If the incoming payload is not a recognized WhatsApp event,
-    an error is returned.
-
-    Every message send will trigger 4 HTTP requests to your webhook: message, sent, delivered, read.
-
-    Returns:
-        response: A JSON response with appropriate HTTP status code.
-    """
-    # logging.info(f"request body: {body}")
-
-    # Check if it's a WhatsApp status update
-    if (
-        body.get("entry", [{}])[0]
-        .get("changes", [{}])[0]
-        .get("value", {})
-        .get("statuses")
-    ):
-        logging.info("Received a WhatsApp status update.")
-        return JSONResponse(content={"status": "ok"}, status_code=200)
-
-    try:
-        # if is_valid_whatsapp_message(body):
-        #     process_whatsapp_message(body)
-        send_message(body)
-        return JSONResponse(content={"status": "ok"}, status_code=200)
-        # else:
-        #     # if the request is not a WhatsApp API event, return an error
-        #     raise HTTPException(
-        #         status_code=404,
-        #         detail="Not a WhatsApp API event"
-        #     )
-    except json.JSONDecodeError:
-        logging.error("Failed to decode JSON")
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid JSON provided"
-        )
+# handle_message removed — WhatsApp messages are now processed
+# by the intelligent agent graph in the /webhook POST endpoint below.
 
 
 @app.post("/webhook")
-@signature_required
 async def webhook_post(request: Request):
     """
-    Handle incoming webhook POST requests from WhatsApp.
+    Handle incoming Twilio WhatsApp webhook POST requests.
+    Twilio sends form-encoded data with fields: Body, From, To, etc.
+    Uses the intelligent agent graph (GPT-4o-mini) to process messages
+    and sends rich WhatsApp responses (text + product images) via Twilio.
     """
-    # Get body from request state (stored by decorator)
-    import json
-    # import pdb; pdb.set_trace()
-
+    contact_number = None
     try:
-        body = json.loads(request.state.body)
-        print(body)
-        wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
-        name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
-        contact_number = body["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
+        # Twilio sends application/x-www-form-urlencoded data
+        form_data = await request.form()
+        message_body = (form_data.get("Body") or "").strip()
+        # e.g. "whatsapp:+919339712883"
+        from_number = form_data.get("From", "")
+        to_number = form_data.get("To", "")
 
-        message = body["entry"][0]["changes"][0]["value"]["messages"][0]
-        message_body = message["text"]["body"]
-        wp_data = ChatMessage(customer_id="CUST001",
-                              message=message_body, conversation_history=[])
-        res_data = await chat_with_agent(wp_data)
+        # Strip the "whatsapp:" prefix to get the raw phone number
+        contact_number = from_number.replace("whatsapp:", "").strip()
 
-        async def _intent_20_words_from_json(res_json) -> str:
-            """Use gpt-4o-mini to digest res_data JSON and return its intent in <=20 words."""
-            try:
-                import os
-                from langchain_openai import ChatOpenAI
+        print(
+            f"[Webhook] Twilio POST  From={from_number}  To={to_number}  Body={message_body!r}")
 
-                api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    return ""
-
-                try:
-                    payload_text = json.dumps(res_json, ensure_ascii=False)
-                except Exception:
-                    payload_text = str(res_json)
-
-                llm = ChatOpenAI(model="gpt-4o-mini",
-                                 temperature=0.2, api_key=api_key)
-                prompt = (
-                    "You will receive a JSON object that represents an agent response. "
-                    "Write the intent of the JSON for an end-user in 120 words or fewer. "
-                    "If user is looking for a product,you should return the product name and price also include atleast 3 products. "
-                    "Plain text only. No emojis. No markdown. Output ONLY the sentence.\n\n"
-                    f"JSON:\n{payload_text}"
-                )
-
-                resp = await llm.ainvoke(prompt)
-                text = getattr(resp, "content", resp)
-                text = (text or "").strip()
-            except Exception:
-                return ""
-
-            # Enforce <=120 words even if the model overshoots.
-            words = text.split()
-            if len(words) > 120:
-                text = " ".join(words[:120])
-            return text
-
-        bot_response = await _intent_20_words_from_json(res_data)
-        if not bot_response:
-            # Fallback to existing fields if LLM/key fails
-            bot_response = (
-                res_data.get("responses", {}).get("default")
-                if isinstance(res_data, dict)
-                else ""
+        if not message_body:
+            send_whatsapp_text(
+                contact_number, "Please send a text message so I can help you!")
+            # Return empty TwiML so Twilio doesn't send a duplicate reply
+            return PlainTextResponse(
+                content="<Response></Response>",
+                media_type="application/xml",
+                status_code=200,
             )
-        if not bot_response:
-            bot_response = "OK."
-        print(bot_response)
-        print("********")
-        print(res_data)
-        print("********")
-        print(contact_number)
 
-        wp_payload = get_text_message_input(contact_number, bot_response)
-        send_message(wp_payload)
+        # Run the intelligent WhatsApp agent graph.
+        # This processes the message through the full agentic journey
+        # (GPT-4o-mini, inventory, recommendations, cart, payment, etc.)
+        # and sends rich responses (text + product images) back via Twilio.
+        await run_whatsapp_agent(
+            wa_id=contact_number,
+            message_body=message_body,
+            phone_number=contact_number,
+        )
 
-        return True
+        # Return empty TwiML — responses are sent via Twilio REST API,
+        # not through TwiML reply, to support multiple messages + images.
+        return PlainTextResponse(
+            content="<Response></Response>",
+            media_type="application/xml",
+            status_code=200,
+        )
+
     except Exception as e:
-        pass
+        import traceback
+        logging.error(f"[Webhook] Error processing WhatsApp message: {e}")
+        traceback.print_exc()
+        # Try to send an error fallback to the user
+        try:
+            if contact_number:
+                send_whatsapp_text(
+                    contact_number, "Sorry, something went wrong. Please try again.")
+        except Exception:
+            pass
+        return PlainTextResponse(
+            content="<Response></Response>",
+            media_type="application/xml",
+            status_code=200,
+        )

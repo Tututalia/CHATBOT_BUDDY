@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { json, useNavigate } from "react-router-dom";
+import { json, useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart,
   Bar,
@@ -27,6 +27,7 @@ export default function StoreKeeper() {
   const [dailyOrdersData, setDailyOrdersData] = useState(null);
   const [dailyOrdersTimeRange, setDailyOrdersTimeRange] = useState("weekly");
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     // Check if user is authenticated
@@ -444,9 +445,32 @@ export default function StoreKeeper() {
       <div className="max-w-7xl mx-auto">
         {/* Store Keeper Info Section */}
         <div className="mb-6 p-6 bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 rounded-lg shadow-lg">
-          <h2 className="text-2xl font-bold mb-4 text-white">
-            Store Keeper Dashboard
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-white">
+              Store Keeper Dashboard
+            </h2>
+            {location.pathname === "/store/admin" && (
+              <button
+                onClick={() => navigate("/store")}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/30 transition-all duration-200 text-sm"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Back to Store
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
             <div className="bg-white p-3 rounded-lg shadow-sm">
               <p className="text-gray-600 font-semibold mb-1">Store ID</p>

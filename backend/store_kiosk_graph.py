@@ -53,6 +53,7 @@ def kiosk_add_to_cart_agent(
     quantity: int,
     customer_id: str,
     size: Optional[str] = None,
+    store_id: Optional[str] = None,
 ) -> str:
     """Kiosk-only add-to-cart.
 
@@ -82,7 +83,9 @@ def kiosk_add_to_cart_agent(
         if s:
             normalized_size = s
 
-    store_id = _get_offline_store_id_for_customer(customer_id)
+    # Use the explicitly provided store_id if available, otherwise resolve from cart context
+    if not store_id:
+        store_id = _get_offline_store_id_for_customer(customer_id)
     if not store_id:
         return (
             "❌ I couldn't determine your pickup store for this offline session. "
@@ -161,11 +164,11 @@ def kiosk_add_to_cart_agent(
 
 
 @tool
-def switch_channel_instore_to_online(customer_id: str) -> str:
+def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] = None) -> str:
     """Switch customer's offline cart items to pending channel for later payment.
 
     This allows customers to move their in-store cart to pending so they can pay later.
-    Updates all offline cart items for the customer:
+    Updates offline cart items for the customer (filtered by store_id if provided):
     - Sets store_id to NULL
     - Changes channel from 'offline' to 'pending'
     - Keeps status as 'pending'
@@ -175,11 +178,16 @@ def switch_channel_instore_to_online(customer_id: str) -> str:
 
     try:
         with get_db_session() as session:
-            # Find all offline cart items for this customer
+            # Find offline cart items for this customer, optionally filtered by store
+            filters = {"customer_id": customer_id, "channel": "offline"}
+            operators = {"customer_id": "==", "channel": "=="}
+            if store_id:
+                filters["store_id"] = store_id
+                operators["store_id"] = "=="
             offline_items = cart_crud.filter(
                 session,
-                filters={"customer_id": customer_id, "channel": "offline"},
-                operators={"customer_id": "==", "channel": "=="},
+                filters=filters,
+                operators=operators,
                 limit=100,
             )
 
@@ -223,15 +231,20 @@ class KioskState(TypedDict):
 # ============ Helper: Fetch Pending Offline Order ============
 
 
-def get_pending_offline_orders(customer_id: str) -> list[Cart]:
+def get_pending_offline_orders(customer_id: str, store_id: str | None = None) -> list[Cart]:
     try:
         with get_db_session() as session:
+            filters = {"customer_id": customer_id,
+                       "channel": "offline", "status": "pending"}
+            operators = {"customer_id": "==",
+                         "channel": "==", "status": "=="}
+            if store_id:
+                filters["store_id"] = store_id
+                operators["store_id"] = "=="
             pending = cart_crud.filter(
                 session,
-                filters={"customer_id": customer_id,
-                         "channel": "offline", "status": "pending"},
-                operators={"customer_id": "==",
-                           "channel": "==", "status": "=="},
+                filters=filters,
+                operators=operators,
                 order_by="created_at",
                 order_desc=True,
                 limit=100
@@ -246,7 +259,9 @@ def get_pending_offline_orders(customer_id: str) -> list[Cart]:
 
 def welcome_node(state: KioskState):
     customer_id = state["customer_id"]
-    pending_orders = get_pending_offline_orders(customer_id)
+    kiosk_store_id = state.get("kiosk_store_id") or None
+    pending_orders = get_pending_offline_orders(
+        customer_id, store_id=kiosk_store_id)
     if not pending_orders:
         return {"messages": [AIMessage(content="Your cart is empty. Please contact staff for assistance.")], "order_id": None, "product_id": None}
 
@@ -260,6 +275,7 @@ def welcome_node(state: KioskState):
             product = get_product_by_id(order.product_id)
             store = get_store_by_id(order.store_id) if order.store_id else None
             qty = getattr(order, 'quantity', 1)
+            item_size = getattr(order, 'size', None) or ""
 
             # Calculate discount price
             if product:
@@ -271,10 +287,11 @@ def welcome_node(state: KioskState):
                 total_amount += item_total
 
                 # Format price info with discount
+                size_line = f"\nSize: {item_size}" if item_size else ""
                 if discount > 0:
-                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nOriginal Price: ₹{int(original_price)}\nDiscount: {int(discount)}% off\n**Discounted Price: ₹{discount_price:.2f}**\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
+                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nProduct ID: {order.product_id}{size_line}\nOriginal Price: ₹{int(original_price)}\nDiscount: {int(discount)}% off\n**Discounted Price: ₹{discount_price:.2f}**\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
                 else:
-                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nPrice: ₹{int(original_price)}\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
+                    product_info = f"Product: {product.product_name}\nCategory: {product.category}\nProduct ID: {order.product_id}{size_line}\nPrice: ₹{int(original_price)}\nQuantity: {qty}\nItem Total: ₹{item_total:.2f}\n"
             else:
                 item_total = 0
                 product_info = f"Product ID: {order.product_id}\nQuantity: {qty}\n"
@@ -358,8 +375,9 @@ def payment_method_node(state: KioskState):
                 with get_db_session() as session:
                     if pay_all:
                         # Process all items in cart
+                        kiosk_store_id = state.get("kiosk_store_id") or None
                         pending_orders = get_pending_offline_orders(
-                            customer_id)
+                            customer_id, store_id=kiosk_store_id)
                         if not pending_orders:
                             return {"messages": [AIMessage(content="❌ No items found in cart.")]}
 
@@ -729,7 +747,17 @@ Have a great day! 🎉"""
                     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     qty = getattr(cart_item, 'quantity', 1)
                     size = getattr(cart_item, 'size', None)
-                    total_amount = product.price * qty
+
+                    # Calculate discount price (same logic as welcome_node / fulfillment_node)
+                    original_price = product.price
+                    discount = getattr(product, 'discount', 0) or 0
+                    discount_price = round(
+                        original_price * (1 - discount / 100), 2) if discount > 0 else original_price
+                    item_discounted_total = round(discount_price * qty)
+                    item_discount_amount = round(
+                        (original_price * qty) - item_discounted_total, 2)
+                    # Kiosk flow does not apply loyalty points
+                    final_price = item_discounted_total
 
                     print("[DEBUG] Creating OrderHistory record...")
                     order_history = OrderHistory(
@@ -741,7 +769,10 @@ Have a great day! 🎉"""
                         quantity=qty,
                         size=size,
                         order_dates=now,
-                        loyalty_points=getattr(customer, 'loyalty_points', 0)
+                        loyalty_points=getattr(customer, 'loyalty_points', 0),
+                        discount_amount=item_discount_amount,
+                        loyalty_applied=0,
+                        final_price=final_price
                     )
                     OrderHistoryCRUD.create(session, order_history)
                     print("[DEBUG] OrderHistory record created.")
@@ -759,7 +790,7 @@ Have a great day! 🎉"""
                         store_name=store.store_name if store else "",
                         store_id=curr_store_id,
                         status="Complete",
-                        amount=total_amount,
+                        amount=final_price,
                         address=getattr(customer, 'address', ""),
                         phone=getattr(customer, 'phone', "")
                     )
