@@ -25,6 +25,7 @@ from datetime import datetime
 import os
 import time
 import re
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -128,8 +129,21 @@ def load_products_from_db(
                 keywords = query_lower.split()
 
                 # Filter out common words that don't help with product search
-                common_words = {'show', 'me', 'find', 'search', 'get',
-                                'want', 'looking', 'for', 'a', 'an', 'the', 'some', 'any'}
+                # Includes relational words (husband, son, kid, etc.) that indicate target
+                # gender but are not product search terms
+                common_words = {
+                    'show', 'me', 'find', 'search', 'get',
+                    'want', 'looking', 'for', 'a', 'an', 'the', 'some', 'any',
+                    'my', 'her', 'his', 'their', 'our', 'i',
+                    'husband', 'hubby', 'bf', 'boyfriend', 'wife', 'gf', 'girlfriend',
+                    'son', 'daughter', 'brother', 'bro', 'sister', 'sis',
+                    'dad', 'father', 'papa', 'mom', 'mother', 'mama',
+                    'grandpa', 'grandfather', 'grandma', 'grandmother',
+                    'uncle', 'aunt', 'auntie', 'nephew', 'niece',
+                    'kid', 'kids', 'child', 'children', 'toddler', 'infant', 'baby',
+                    'fiancé', 'fiance', 'fiancée', 'fiancee',
+                    'please', 'pls', 'kindly', 'need', 'like', 'love',
+                }
                 keywords = [k for k in keywords if k not in common_words]
 
                 if keywords:
@@ -312,14 +326,52 @@ def _normalize_inventory_query_key(search_query: str) -> str:
     tokens = [t for t in q.split() if t]
 
     # Drop generic filler words so: "show me some more kurtis" and "kurti" map to same key.
+    # Also drop relational words (husband, kid, son, etc.) since they indicate gender, not product type.
+    # Color words are stripped because color is NOT a structured DB attribute, so
+    # "red kurti" and "blue kurti" should share the same shown-products cache.
+    # Seasonal / contextual words the LLM may inject ("winter", "collection") are also
+    # stripped so the cache key stays category-focused.
     stop = {
         "show", "me", "find", "search", "get", "want", "looking", "for", "a", "an", "the", "some", "any",
         "more", "another", "next", "different", "products", "product", "items", "item", "category", "same", "again",
-        "please", "pls", "kindly",
+        "please", "pls", "kindly", "new", "other", "else", "also", "too", "of", "in", "on", "with", "to", "from", "by",
+        "my", "her", "his", "their", "our", "i",
+        "husband", "hubby", "bf", "boyfriend", "wife", "gf", "girlfriend",
+        "son", "daughter", "brother", "bro", "sister", "sis",
+        "dad", "father", "papa", "mom", "mother", "mama",
+        "grandpa", "grandfather", "grandma", "grandmother",
+        "uncle", "aunt", "auntie", "nephew", "niece",
+        "kid", "kids", "child", "children", "toddler", "infant", "baby",
+        # Color words (not a structured DB attribute)
+        "red", "blue", "green", "yellow", "black", "white", "pink", "purple",
+        "orange", "brown", "grey", "gray", "beige", "navy", "maroon", "teal",
+        "cyan", "magenta", "olive", "coral", "ivory", "cream", "peach",
+        "lavender", "turquoise", "indigo", "violet", "burgundy", "charcoal",
+        "khaki", "tan", "gold", "silver", "multicolor", "multicolour", "multi",
+        # Seasonal / contextual words the LLM may add
+        "winter", "summer", "spring", "autumn", "fall", "monsoon", "rainy",
+        "seasonal", "collection", "collections", "latest", "trending", "popular",
+        "best", "top", "arrivals", "options", "available",
     }
     tokens = [t for t in tokens if t not in stop]
 
-    return " ".join(tokens) if tokens else q.strip()
+    # Simple singularisation so "kurtis" and "kurti" produce the same key.
+    singularised = []
+    for t in tokens:
+        if len(t) > 3:
+            # Handle special -es plurals first (dresses→dress, watches→watch)
+            if (t.endswith('shes') or t.endswith('ches') or
+                    t.endswith('sses') or t.endswith('xes') or t.endswith('zes')):
+                t = t[:-2]
+            elif t.endswith('s') and not t.endswith('ss'):
+                t = t[:-1]  # kurtis→kurti, shirts→shirt, hoodies→hoodie
+        singularised.append(t)
+
+    # Sort alphabetically so word order doesn't matter
+    # ("men shirt" and "shirt men" produce the same key)
+    singularised.sort()
+
+    return " ".join(singularised) if singularised else q.strip()
 
 
 def _product_canonical_id(p: Product) -> str | None:
@@ -445,6 +497,104 @@ def _safe_price_value(p: Product) -> float | None:
         return None
 
 
+def _get_customer_gender(customer_id: str) -> str | None:
+    """Fetch the gender of a customer from the customers table.
+
+    Returns:
+        Normalised gender string ('male' / 'female') or None if not found/empty.
+    """
+    if not customer_id:
+        return None
+    try:
+        customer = get_customer_by_id(customer_id)
+        if customer and customer.gender:
+            return customer.gender.strip().lower() or None
+        return None
+    except Exception as e:
+        print(
+            f"[DEBUG] Failed to fetch customer gender for {customer_id}: {e}")
+        return None
+
+
+def _extract_explicit_gender_from_query(query: str) -> str | None:
+    """Detect if the user explicitly asked for a specific gender in their query.
+
+    Handles both direct gender keywords (men, women, kids) and relational/contextual
+    phrases (my husband, my son, my daughter, my kid, etc.) that imply a target gender.
+
+    Returns:
+        'male' if query mentions men/male/boy/gents or male relations (husband, son, dad, etc.),
+        'female' if query mentions women/female/girl/ladies or female relations (wife, daughter, mom, etc.),
+        'kids' if query mentions kids/children or child relations (my kid, my child, etc.),
+        None if no explicit gender is mentioned.
+    """
+    if not query:
+        return None
+    q = query.lower()
+
+    # --- Relational / contextual gender phrases ---
+    # These must be checked FIRST because "my son" contains "son" but not "men/boy",
+    # and "my kid" should map to 'kids' even though "kid" is also caught below.
+
+    # Kids relations – check before male/female so "my kid" maps to kids, not male/female
+    kids_relation_patterns = re.compile(
+        r"\b(?:my\s+)?(?:kid|kids|child|children|toddler|infant|baby|little\s+one)\b",
+        re.IGNORECASE,
+    )
+    if kids_relation_patterns.search(q):
+        return 'kids'
+
+    # Male relations
+    male_relation_patterns = re.compile(
+        r"\b(?:my\s+)?(?:husband|hubby|bf|boyfriend|son|brother|bro|dad|father|papa|grandpa|grandfather|uncle|nephew|fiancé|fiance)\b",
+        re.IGNORECASE,
+    )
+    if male_relation_patterns.search(q):
+        return 'male'
+
+    # Female relations
+    female_relation_patterns = re.compile(
+        r"\b(?:my\s+)?(?:wife|gf|girlfriend|daughter|sister|sis|mom|mother|mama|grandma|grandmother|aunt|auntie|niece|fiancée|fiancee)\b",
+        re.IGNORECASE,
+    )
+    if female_relation_patterns.search(q):
+        return 'female'
+
+    # --- Direct gender keywords (original logic) ---
+    male_patterns = re.compile(
+        r"\b(?:men(?:'?s)?|male|boy(?:'?s)?|gents|gentleman(?:'?s)?)\b", re.IGNORECASE
+    )
+    female_patterns = re.compile(
+        r"\b(?:women(?:'?s)?|woman(?:'?s)?|female|girl(?:'?s)?|ladies|lady(?:'?s)?)\b", re.IGNORECASE
+    )
+    kids_patterns = re.compile(
+        r"\b(?:kids?(?:'?s)?|children(?:'?s)?|child(?:'?s)?)\b", re.IGNORECASE
+    )
+
+    if male_patterns.search(q):
+        return 'male'
+    if female_patterns.search(q):
+        return 'female'
+    if kids_patterns.search(q):
+        return 'kids'
+    return None
+
+
+def _matching_product_genders(gender_key: str) -> set[str]:
+    """Return the set of product-table gender values that match a given gender key.
+
+    The products table uses 'Men', 'Women', 'Male', 'Female', 'Unisex', 'Kids'.
+    This helper maps a normalised key to the acceptable product gender values.
+    Unisex is intentionally excluded to avoid noisy results.
+    """
+    mapping: dict[str, set[str]] = {
+        'male':   {'Men', 'Male', 'men', 'male'},
+        'female': {'Women', 'Female', 'women', 'female'},
+        'kids':   {'Kids', 'kids'},
+    }
+    return mapping.get(gender_key, set())
+
+
 def format_products_for_recommendation(products: List[Product]) -> str:
     """
     Format a list of products into recommendation JSON structure.
@@ -461,7 +611,7 @@ def format_products_for_recommendation(products: List[Product]) -> str:
             "name": "Recommendation Agent",
             "id": "recommendation_agent",
             "responses": {
-                "default": "❌ No products found matching your query. Please try a different search.",
+                "default": "❌ No products found matching your search. Would you like to try a different product? Please let us know.",
                 "recommendation": []
             }
         })
@@ -577,7 +727,7 @@ def recommendation_agent(inventory_data: str) -> str:
                 "name": "Recommendation Agent",
                 "id": "recommendation_agent",
                 "responses": {
-                    "default": "❌ No products found matching your search. Would you like to try a different search?",
+                    "default": "❌ No products found matching your search. Would you like to try a different product? Please let us know.",
                     "recommendation": []
                 }
             })
@@ -589,7 +739,7 @@ def recommendation_agent(inventory_data: str) -> str:
                 "name": "Recommendation Agent",
                 "id": "recommendation_agent",
                 "responses": {
-                    "default": "❌ No products available at the moment. Please try again later.",
+                    "default": "❌ No products found matching your search. Would you like to try a different product? Please let us know.",
                     "recommendation": []
                 }
             })
@@ -659,12 +809,23 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
     Returns product details (name, category, quantity, price, image) in JSON format.
 
     CUSTOMER TIER-BASED PRODUCT FILTERING:
-    - tier_1 (Premium): Products >₹1500 with <5% discount, with fallbacks for >₹3000
-    - tier_3 (Budget): Products <₹1000 with >15% discount, with fallbacks for high discounts (>10%) or low prices (<₹1100)
+    - tier_1 (Premium): Sorts by lowest discount and highest price — surfaces the most expensive, least discounted products first
+    - tier_3 (Budget): Sorts by highest discount and lowest price — surfaces the cheapest, most discounted products first
     - tier_2 (Middle): No filtering - shows all products
 
+    IMPORTANT - GENDER/RELATION CONTEXT IN search_query:
+    When the user mentions a target person or gender in their query (e.g., "for my kid", "for my husband",
+    "for my wife", "for my son", "for my daughter"), you MUST include those words in the search_query
+    so the system can detect the intended gender. Do NOT strip relational context from the query.
+    Examples:
+      - User says "show me dress for my kid" → search_query="dress for my kid" (NOT just "dress")
+      - User says "jeans for my husband" → search_query="jeans for my husband" (NOT just "jeans")
+      - User says "show me shirts for my son" → search_query="shirts for my son" (NOT just "shirts")
+      - User says "find sarees for my wife" → search_query="sarees for my wife" (NOT just "sarees")
+
     Args:
-        search_query: User's product search query (e.g., "hoodies", "winter wear")
+        search_query: User's product search query - MUST preserve any gender/relation context from the user's
+                      original message (e.g., "dress for my kid", "jeans for my husband", "shirts for my son")
         product_id: Specific product ID to check (optional, use when checking specific product)
         customer_id: Customer ID to personalize recommendations based on their tier
         sort_by_rating: If True, sort results by highest customer rating (from feedback table) first
@@ -778,6 +939,33 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
         # Filter products to only show items with quantity > 0 (in stock)
         products = [p for p in products if p.quantity > 0]
 
+        # ---- Gender-based filtering ----
+        # 1. Check if the user explicitly asked for a specific gender
+        explicit_gender = _extract_explicit_gender_from_query(search_query)
+        if explicit_gender:
+            # User explicitly asked for a gender (e.g. "men's shirts") – use that
+            allowed = _matching_product_genders(explicit_gender)
+            gender_filtered = [p for p in products if (
+                getattr(p, 'gender', '') or '') in allowed]
+            if gender_filtered:
+                products = gender_filtered
+                print(
+                    f"[DEBUG] Explicit gender '{explicit_gender}' requested. Filtered to {len(products)} products.")
+        elif customer_id:
+            # 2. No explicit gender in query – infer from customer profile
+            cust_gender = _get_customer_gender(customer_id)
+            if cust_gender:
+                allowed = _matching_product_genders(cust_gender)
+                gender_filtered = [p for p in products if (
+                    getattr(p, 'gender', '') or '') in allowed]
+                if gender_filtered:
+                    products = gender_filtered
+                    print(
+                        f"[DEBUG] Customer gender '{cust_gender}' inferred. Filtered to {len(products)} products.")
+                else:
+                    print(
+                        f"[DEBUG] No products matched customer gender '{cust_gender}'; showing all results.")
+
         # Apply price band filter (special case). This must happen BEFORE tier segmentation.
         if is_price_band and (min_price is not None or max_price is not None):
             if min_price is not None:
@@ -791,52 +979,37 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
                     if (_safe_price_value(p) is not None and _safe_price_value(p) <= max_price)
                 ]
 
-        # Apply tier-based filtering if customer_id is provided
+        # Apply tier-based sorting/filtering if customer_id is provided
+        # tier_1 (Premium): Sort by highest price, lowest discount (most expensive, least discounted first)
+        # tier_2 (Middle): No filtering - shows all products as-is
+        # tier_3 (Budget): Sort by lowest price, highest discount (cheapest, most discounted first)
+        # If no products survive filtering, fall back to showing whatever is available.
         if customer_id and not is_price_band:
             customer = get_customer_by_id(customer_id)
             if customer and customer.customer_type:
                 customer_tier = customer.customer_type
                 print(f"[DEBUG] Customer {customer_id} tier: {customer_tier}")
 
-                # tier_1 (Premium): Products >₹4000 with <20% discount, fallback >₹3000
                 if customer_tier == "tier_1":
-                    filtered_products = [
-                        p for p in products
-                        if p.price > 1500 and (getattr(p, 'discount', 0) or 0) < 5
-                    ]
-                    if not filtered_products:
-                        # Fallback: Products >₹3000
-                        filtered_products = [
-                            p for p in products if p.price > 3000]
+                    # Premium: prioritise expensive products with little or no discount.
+                    # Sort by discount ascending (prefer 0), then price descending (prefer expensive).
+                    products.sort(
+                        key=lambda p: (
+                            (getattr(p, 'discount', 0) or 0), -(p.price or 0))
+                    )
+                    print(
+                        f"[DEBUG] tier_1 customer - sorted {len(products)} products by lowest discount & highest price")
 
-                    if filtered_products:
-                        products = filtered_products
-                        print(
-                            f"[DEBUG] Filtered {len(products)} premium products for tier_1 customer")
-
-                # tier_3 (Budget): Products <₹1000 with >15% discount, fallbacks for >10% discount or <₹1100
                 elif customer_tier == "tier_3":
-                    filtered_products = [
-                        p for p in products
-                        if p.price < 1000 and (getattr(p, 'discount', 0) or 0) > 15
-                    ]
-                    if not filtered_products:
-                        # Fallback 1: Products with >10% discount
-                        filtered_products = [
-                            p for p in products
-                            if (getattr(p, 'discount', 0) or 0) > 10
-                        ]
-                    if not filtered_products:
-                        # Fallback 2: Products <₹1100
-                        filtered_products = [
-                            p for p in products if p.price < 1100]
+                    # Budget: prioritise cheap products with the biggest discounts.
+                    # Sort by discount descending (prefer high), then price ascending (prefer cheap).
+                    products.sort(
+                        key=lambda p: (-(getattr(p, 'discount', 0)
+                                       or 0), (p.price or 0))
+                    )
+                    print(
+                        f"[DEBUG] tier_3 customer - sorted {len(products)} products by highest discount & lowest price")
 
-                    if filtered_products:
-                        products = filtered_products
-                        print(
-                            f"[DEBUG] Filtered {len(products)} budget products for tier_3 customer")
-
-                # tier_2 (Middle): No filtering - shows all products
                 elif customer_tier == "tier_2":
                     print(
                         f"[DEBUG] tier_2 customer - showing all {len(products)} products (no filtering)")
@@ -862,10 +1035,11 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
 
         # Avoid recommending the same products again for the same customer + query.
         # If the customer asks for "more" items of the same category/query, this surfaces the next items.
+        # initialise here so it's available for the update block below
+        cache_source_query = search_query
         if customer_id:
             # For price-band queries, include band bounds in the key so different bands
             # don't incorrectly share the same "already shown" set.
-            cache_source_query = search_query
             if is_price_band:
                 band_bits = []
                 if min_price is not None:
@@ -903,7 +1077,7 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
             # No matches for the user's query (do not recommend random products)
             return json.dumps({
                 "status": "no_products",
-                "message": f"❌ No products found matching '{search_query}'. Try a different keyword or category.",
+                "message": f"❌ No products found matching '{search_query}'. Would you like to try a different product? Please let us know.",
                 "products": []
             })
 
@@ -936,12 +1110,15 @@ def inventory_agent(search_query: str = None, product_id: str = None, customer_i
         products = products[:4]
 
         # Update shown cache AFTER selecting the 4 items.
+        # Re-use the same cache_source_query derived during the lookup phase
+        # so the cache key is guaranteed to match.
         if customer_id:
-            query_key = _normalize_inventory_query_key(search_query)
-            if query_key:
-                cache_key = (customer_id, query_key)
+            update_query_key = _normalize_inventory_query_key(
+                cache_source_query)
+            if update_query_key:
+                update_cache_key = (customer_id, update_query_key)
                 shown = _SHOWN_PRODUCT_IDS_BY_CUSTOMER_AND_QUERY.setdefault(
-                    cache_key, set())
+                    update_cache_key, set())
                 for p in products:
                     pid = _product_canonical_id(p)
                     if pid:
@@ -1475,7 +1652,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
     # Always return the fulfillment agent message in a dict with 'response' key for frontend
     if purchase_type.lower() == "online":
         print("⏳ Confirming your order...")
-        time.sleep(2.5)
+        time.sleep(0.05)
         delivery_date = "3-5 business days"
         result = f"📦 **Order Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
@@ -1514,8 +1691,10 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                     })
         except Exception as e:
             print(f"Warning: failed to update cart for offline: {e}")
+        store_id = store_details.store_id if store_details else "N/A"
         result = f"🏪 **In-Store Pickup Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
+        result += f"Store ID: {store_id}\n"
         result += f"Total Items: {len(cart_summary)}\n"
         result += f"Total Amount: ₹{payable_amount:,}\n"
         result += f"Pickup Store: {store_display_name}\n"
@@ -1531,6 +1710,65 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         result += "Thank you for choosing us! Have a great day! 🛍️\n\n"
         result += "[SYSTEM: CONVERSATION_COMPLETE - Offline store pickup. Transfer to in-store kiosk. END conversation.]"
         response_payload["response"] = result
+
+        # --- Send WhatsApp confirmation only for CUST038 ---
+        if customer_id == "CUST008":
+            try:
+                from intelligent_whatsapp_graph import send_whatsapp_text
+                wa_phone = "+919339712883"
+                print(
+                    f"[Fulfillment] 📱 Sending WhatsApp pickup confirmation to {wa_phone} for CUST038...")
+                customer = get_customer_by_id(customer_id)
+                customer_name = getattr(
+                    customer, 'customer_name', 'Valued Customer') if customer else 'Valued Customer'
+                items_text = ""
+                for idx, item in enumerate(cart_summary, 1):
+                    items_text += f"   {idx}. {item['product_name']} × {item['quantity']} — ₹{int(item['price'] * item['quantity']):,}\n"
+
+                wa_msg = (
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🛍️  *RetailBuddy — Pickup Confirmed*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"Hi *{customer_name}*,\n\n"
+                    f"Great choice! Your in-store pickup has been\n"
+                    f"confirmed and your order is being prepared.\n\n"
+                    f"📋  *Order Details*\n"
+                    f"┌──────────────────────\n"
+                    f"│  🆔  Order ID:    *{order_id}*\n"
+                    f"│  🏷️  Store ID:    *{store_id}*\n"
+                    f"│  📦  Total Items: *{len(cart_summary)}*\n"
+                    f"│  💰  Amount:      *₹{payable_amount:,}*\n"
+                    f"└──────────────────────\n\n"
+                    f"🏬  *Pickup Store*\n"
+                    f"    {store_display_name}\n\n"
+                    f"📍  *Store Address*\n"
+                    f"    {store_address}\n\n"
+                    f"⏰  *Status:* Ready for pickup in 2 hours\n\n"
+                )
+                if items_text:
+                    wa_msg += (
+                        f"🧾  *Your Items*\n"
+                        f"{items_text}\n"
+                    )
+                wa_msg += (
+                    f"💡 _Show your Order ID at the store kiosk_\n"
+                    f"   _to collect your items._\n\n"
+                    f"Thank you for shopping with us! 😊\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━"
+                )
+
+                send_whatsapp_text(wa_phone, wa_msg)
+                print(
+                    f"[Fulfillment] ✅ WhatsApp pickup confirmation sent to {wa_phone} for order {order_id} (CUST038)")
+            except Exception as wa_err:
+                print(
+                    f"[Fulfillment] ❌ Failed to send WhatsApp pickup confirmation: {wa_err}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(
+                f"[Fulfillment] Skipping WhatsApp notification — customer_id is '{customer_id}', not CUST001")
+
     return response_payload
 
 
@@ -1550,7 +1788,7 @@ def loyalty_agent(order_id: str, customer_id: str) -> str:
     """
     # Add delay before showing loyalty rewards
     print("⏳ Calculating your rewards...")
-    time.sleep(2.5)
+    time.sleep(0.05)
 
     # Calculate total loyalty points from all order items based on product loyalty_points
     try:
@@ -1645,9 +1883,9 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
     Returns:
         Feedback link and support information
     """
-    # Add 2-3 seconds delay before showing post-purchase services
+    # Add 0.5 seconds delay before showing post-purchase services
     print("⏳ Processing your request...")
-    time.sleep(2.5)
+    time.sleep(0.05)
 
     # === DB operations: Add to order_history, store_keeper_transaction, and delete from cart ===
     try:
@@ -1868,19 +2106,192 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
 @tool
 def upsell_agent(customer_id: str) -> str:
     """
-    Boosts sales by recommending attractive accessory products after the customer views their cart.
-    This agent is triggered AUTONOMOUSLY after view_cart_agent completes.
-    It randomly selects an accessory category (belts, shoes, watches, wallets) and
-    returns a search query for inventory_agent to follow the normal recommendation path.
+    Boosts sales by recommending complementary products based on what the customer
+    already has in their cart. This agent is triggered AUTONOMOUSLY after
+    view_cart_agent completes. It inspects the cart, maps each product's category
+    to a list of related categories, picks one at random, and returns a search
+    query for inventory_agent to follow the normal recommendation path.
 
     Args:
         customer_id: The customer ID
 
     Returns:
-        JSON with a random accessory search query for inventory_agent
+        JSON with a context-aware search query for inventory_agent
     """
-    accessory_categories = ["belts", "shoes", "watches", "wallets"]
-    selected = random.choice(accessory_categories)
+    # Gender-specific mappings so female cart items only suggest female-available
+    # categories, male cart items only suggest male-available ones, etc.
+    # Built from actual categories present in the products table per gender.
+
+    # Female / Women categories available in DB:
+    #   Accessories, Bottomwear, Dress, Ethnic, Footwear, Gown, Jacket, Kurti,
+    #   Kurti Set, Skirt, Top, Co-ord Set, Costume Jewellery, Dresses, Ethnic Wear,
+    #   Handbags & Bags, Heels, Boots, Jeans, Kurtis, Trousers
+    _female_related = {
+        "Top": ["Skirt", "Jeans", "Footwear", "Accessories", "Costume Jewellery", "Heels"],
+        "Skirt": ["Top", "Footwear", "Costume Jewellery", "Accessories", "Heels"],
+        "Dress": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
+        "Dresses": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
+        "Gown": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Perfume"],
+        "Ethnic": ["Costume Jewellery", "Footwear", "Accessories", "Kurti", "Perfume"],
+        "Ethnic Wear": ["Costume Jewellery", "Footwear", "Accessories", "Kurti", "Perfume"],
+        "Kurti": ["Footwear", "Costume Jewellery", "Accessories", "Bottomwear", "Jeans"],
+        "Kurtis": ["Footwear", "Costume Jewellery", "Accessories", "Bottomwear", "Jeans"],
+        "Kurti Set": ["Footwear", "Costume Jewellery", "Accessories", "Perfume", "Heels"],
+        "Co-ord Set": ["Footwear", "Costume Jewellery", "Accessories", "Perfume", "Heels"],
+        "Jacket": ["Top", "Jeans", "Boots", "Accessories", "Costume Jewellery"],
+        "Bottomwear": ["Top", "Kurti", "Footwear", "Accessories", "Costume Jewellery"],
+        "Jeans": ["Top", "Accessories", "Heels", "Footwear", "Costume Jewellery"],
+        "Trousers": ["Top", "Kurti", "Footwear", "Accessories", "Costume Jewellery"],
+        "Footwear": ["Dress", "Top", "Accessories", "Costume Jewellery", "Handbags & Bags"],
+        "Heels": ["Dress", "Gown", "Top", "Costume Jewellery", "Accessories"],
+        "Boots": ["Jeans", "Jacket", "Top", "Accessories", "Costume Jewellery"],
+        "Accessories": ["Dress", "Top", "Costume Jewellery", "Perfume", "Kurti"],
+        "Costume Jewellery": ["Dress", "Kurti", "Ethnic", "Gown", "Top"],
+        "Handbags & Bags": ["Dress", "Top", "Footwear", "Accessories", "Costume Jewellery"],
+        "Perfume": ["Dress", "Accessories", "Costume Jewellery", "Kurti", "Top"],
+    }
+
+    # Male / Men categories available in DB:
+    #   Footwear, Jacket, Jeans, Kurta, Polo, Shirt, Shorts, Sweater,
+    #   Sweatshirt, Trousers, Belt, Belts, Casual Shoes, Formal Shoes,
+    #   Hoodie, Pants, Shoes, Sneakers, Socks, Sports Shoes, Tshirt, Wallet, Wallets
+    _male_related = {
+        "T-Shirt": ["Jeans", "Shorts", "Footwear", "Watches", "Wallet"],
+        "Tshirt": ["Jeans", "Shorts", "Footwear", "Watches", "Wallet"],
+        "Shirt": ["Trousers", "Belt", "Shoes", "Watches", "Wallet"],
+        "Polo": ["Jeans", "Shorts", "Shoes", "Belt", "Watches"],
+        "Hoodie": ["Track Pants", "Jeans", "Sneakers", "Wallet"],
+        "Sweater": ["Jeans", "Trousers", "Shoes", "Watches", "Shirt"],
+        "Sweatshirt": ["Track Pants", "Jeans", "Sneakers", "Wallet"],
+        "Jacket": ["Shirt", "Jeans", "Shoes", "Belt", "Watches"],
+        "Kurta": ["Footwear", "Wallet", "Watches", "Perfume", "Belt"],
+        "Jeans": ["T-Shirt", "Shirt", "Belt", "Shoes", "Watches"],
+        "Pants": ["Shirt", "Belt", "Shoes", "Wallet", "Watches"],
+        "Trousers": ["Shirt", "Belt", "Shoes", "Wallet", "Watches"],
+        "Shorts": ["T-Shirt", "Polo", "Sneakers", "Watches"],
+        "Footwear": ["Jeans", "Shirt", "Belt", "Wallet", "Watches"],
+        "Shoes": ["Jeans", "Shirt", "Belt", "Wallet", "Watches"],
+        "Sneakers": ["Jeans", "Tshirt", "Shorts", "Watches", "Wallet"],
+        "Casual Shoes": ["Jeans", "Shirt", "Belt", "Wallet", "Watches"],
+        "Formal Shoes": ["Trousers", "Shirt", "Belt", "Wallet", "Watches"],
+        "Sports Shoes": ["Shorts", "Tshirt", "Track Pants", "Watches"],
+        "Socks": ["Shoes", "Sneakers", "Jeans", "Shorts", "Wallet"],
+        "Belt": ["Shirt", "Trousers", "Jeans", "Shoes", "Wallet"],
+        "Belts": ["Shirt", "Trousers", "Jeans", "Shoes", "Wallet"],
+        "Wallet": ["Belt", "Shoes", "Watches", "Shirt", "Perfume"],
+        "Wallets": ["Belt", "Shoes", "Watches", "Shirt", "Perfume"],
+        "Watches": ["Shirt", "Belt", "Wallet", "Shoes", "Perfume"],
+        "Perfume": ["Shirt", "Wallet", "Watches", "Belt", "Shoes"],
+    }
+
+    # Unisex categories available in DB:
+    #   Accessories, Activewear, Footwear, Hoodie, Jacket, Jeans, Perfume,
+    #   Shorts, T-Shirt, Track Pants, Watches
+    _unisex_related = {
+        "T-Shirt": ["Jeans", "Shorts", "Footwear", "Watches", "Accessories"],
+        "Hoodie": ["Track Pants", "Jeans", "Footwear", "Accessories"],
+        "Jacket": ["Jeans", "T-Shirt", "Footwear", "Accessories", "Watches"],
+        "Jeans": ["T-Shirt", "Footwear", "Accessories", "Watches"],
+        "Shorts": ["T-Shirt", "Footwear", "Watches", "Activewear"],
+        "Track Pants": ["Hoodie", "T-Shirt", "Footwear", "Activewear"],
+        "Activewear": ["Footwear", "Shorts", "Track Pants", "Accessories"],
+        "Footwear": ["Jeans", "Accessories", "Watches", "T-Shirt"],
+        "Accessories": ["T-Shirt", "Jeans", "Perfume", "Watches"],
+        "Watches": ["T-Shirt", "Accessories", "Perfume", "Footwear"],
+        "Perfume": ["Watches", "Accessories", "T-Shirt", "Footwear"],
+    }
+
+    # Kids categories
+    _kids_related = {
+        "Kids Dress": ["Footwear", "Accessories"],
+        "Footwear": ["Kids Dress", "Accessories"],
+        "Accessories": ["Kids Dress", "Footwear"],
+    }
+
+    # Gender fallbacks – only categories that actually exist for that gender
+    _fallback_by_gender = {
+        "female": ["Accessories", "Costume Jewellery", "Footwear", "Heels"],
+        "male":   ["Belt", "Shoes", "Watches", "Wallet"],
+        "kids":   ["Footwear", "Accessories"],
+        "unisex": ["Accessories", "Watches", "Footwear", "Perfume"],
+    }
+
+    # Map gender strings from the products table to the right mapping
+    _gender_to_map = {
+        "female": _female_related,
+        "women":  _female_related,
+        "male":   _male_related,
+        "men":    _male_related,
+        "unisex": _unisex_related,
+        "kids":   _kids_related,
+    }
+
+    # Default fallback
+    fallback_categories = ["Accessories", "Watches", "Footwear", "Perfume"]
+
+    # --- Inspect the customer's cart to derive gender-aware recommendations ---
+    candidate_categories = []
+    detected_gender = None          # track dominant gender from cart items
+    try:
+        with get_db_session() as session:
+            cart_items = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "status": "pending"},
+                operators={"customer_id": "==", "status": "=="},
+                limit=50,
+            )
+            if cart_items:
+                gender_counts: dict[str, int] = {}
+                for item in cart_items:
+                    product = get_product_by_id(item.product_id)
+                    if not product:
+                        continue
+
+                    # Determine the gender of this product
+                    prod_gender = (getattr(product, "gender", "")
+                                   or "").strip().lower()
+                    if prod_gender:
+                        gender_counts[prod_gender] = gender_counts.get(
+                            prod_gender, 0) + 1
+
+                    # Pick the right mapping for this product's gender
+                    mapping = _gender_to_map.get(prod_gender, _unisex_related)
+                    mapping_lower = {k.lower(): v for k, v in mapping.items()}
+
+                    cat = (getattr(product, "category", "") or "").strip()
+                    name = (getattr(product, "product_name", "") or "").strip()
+                    matched = mapping_lower.get(
+                        cat.lower()) or mapping_lower.get(name.lower())
+                    if matched:
+                        candidate_categories.extend(matched)
+
+                # Determine dominant gender from cart
+                if gender_counts:
+                    # Prefer female/male over unisex when tied
+                    dominant = max(gender_counts, key=lambda g: (
+                        gender_counts[g],
+                        0 if g == "unisex" else 1
+                    ))
+                    # Normalise to our keys
+                    if dominant in ("female", "women"):
+                        detected_gender = "female"
+                    elif dominant in ("male", "men"):
+                        detected_gender = "male"
+                    elif dominant == "kids":
+                        detected_gender = "kids"
+                    else:
+                        detected_gender = "unisex"
+    except Exception as e:
+        print(f"[UPSELL] Error reading cart for {customer_id}: {e}")
+
+    # De-duplicate while preserving randomness, then pick one
+    if candidate_categories:
+        unique_candidates = list(set(candidate_categories))
+        selected = random.choice(unique_candidates)
+    else:
+        fb = _fallback_by_gender.get(detected_gender, fallback_categories)
+        selected = random.choice(fb)
+
     search_query = f"show me {selected}"
 
     print(
@@ -1955,6 +2366,11 @@ CRITICAL WORKFLOW - FOLLOW THIS EXACT SEQUENCE:
 
 **STEP 1: PRODUCT SEARCH & DISCOVERY**
 - When user asks for products (e.g., "show me hoodies", "looking for shirts"), call `inventory_agent` with search_query AND customer_id parameters
+- **CRITICAL - PRESERVE GENDER/RELATION CONTEXT**: If the user mentions WHO the product is for (e.g., "for my kid", "for my husband", "for my son", "for my wife", "for my daughter"), you MUST include those words in search_query. Do NOT strip them.
+  * ✅ CORRECT: inventory_agent(search_query="dress for my kid", customer_id="...")
+  * ❌ WRONG: inventory_agent(search_query="dress", customer_id="...") ← loses gender context!
+  * ✅ CORRECT: inventory_agent(search_query="jeans for my husband", customer_id="...")
+  * ❌ WRONG: inventory_agent(search_query="jeans", customer_id="...") ← loses gender context!
 - **RATING-BASED SEARCH**: If the user asks for "best rated", "top rated", "highest rated", "most popular", or "best reviewed" products, pass `sort_by_rating=True` to `inventory_agent`. This sorts results by customer ratings from the feedback table (highest first). Example: user says "show me best rated shirts" → call `inventory_agent(search_query="shirts", customer_id="...", sort_by_rating=True)`
 - **MANDATORY**: IMMEDIATELY call `recommendation_agent` passing the COMPLETE JSON RESPONSE from inventory_agent
 - **CRITICAL RULE**: EVERY `inventory_agent(search_query=X)` call MUST be followed by `recommendation_agent(inventory_data=<FULL_JSON_FROM_INVENTORY_AGENT>)`

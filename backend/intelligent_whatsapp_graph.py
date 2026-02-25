@@ -326,7 +326,7 @@ def _resolve_customer_id_from_phone(phone: str) -> str:
         logging.error(f"[WA] Error resolving customer from phone {phone}: {e}")
 
     # Default fallback
-    return "CUST001"
+    return "CUST008"
 
 
 async def run_whatsapp_agent(wa_id: str, message_body: str, phone_number: str | None = None) -> dict:

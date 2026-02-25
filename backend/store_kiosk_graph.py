@@ -206,6 +206,75 @@ def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] =
 
             session.commit()
 
+            # --- Send WhatsApp notification only for CUST008 ---
+            if customer_id == "CUST008":
+                try:
+                    from intelligent_whatsapp_graph import send_whatsapp_text
+                    import logging
+
+                    wa_phone = "+919339712883"
+                    print(
+                        f"[SwitchChannel] 📱 Sending WhatsApp cart-switch notification to {wa_phone} for CUST038...")
+
+                    # Fetch customer name
+                    from intelligent_agent_graph import get_customer_by_id
+                    customer = get_customer_by_id(customer_id)
+                    customer_name = getattr(
+                        customer, 'customer_name', 'Valued Customer') if customer else 'Valued Customer'
+
+                    # Build item details
+                    items_text = ""
+                    from intelligent_agent_graph import get_product_by_id
+                    total_amount = 0
+                    for idx, item in enumerate(offline_items, 1):
+                        product = get_product_by_id(item.product_id)
+                        if product:
+                            qty = getattr(item, 'quantity', 1)
+                            discount = getattr(product, 'discount', 0) or 0
+                            price = round(
+                                product.price * (1 - discount / 100), 2) if discount > 0 else product.price
+                            item_total = price * qty
+                            total_amount += item_total
+                            items_text += f"   {idx}. {product.product_name} × {qty} — ₹{int(item_total):,}\n"
+                        else:
+                            items_text += f"   {idx}. {item.product_id} × {getattr(item, 'quantity', 1)}\n"
+
+                    total_amount = round(total_amount)
+
+                    wa_msg = (
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🛒  *RetailBuddy — Cart Moved Online*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"Hi *{customer_name}*,\n\n"
+                        f"Your in-store cart has been successfully\n"
+                        f"moved to your online account! 🎉\n\n"
+                        f"📋  *Cart Summary*\n"
+                        f"┌──────────────────────\n"
+                        f"│  📦  Items Moved:  *{updated_count}*\n"
+                        f"│  💰  Total Value:  *₹{total_amount:,}*\n"
+                        f"└──────────────────────\n\n"
+                    )
+                    if items_text:
+                        wa_msg += (
+                            f"🧾  *Your Items*\n"
+                            f"{items_text}\n"
+                        )
+                    wa_msg += (
+                        f"💡 _You can now complete your purchase_\n"
+                        f"   _anytime from the comfort of your home._\n\n"
+                        f"Happy Shopping! 🛍️\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━"
+                    )
+
+                    send_whatsapp_text(wa_phone, wa_msg)
+                    print(
+                        f"[SwitchChannel] ✅ WhatsApp cart-switch notification sent to {wa_phone} (CUST011)")
+                except Exception as wa_err:
+                    print(
+                        f"[SwitchChannel] ❌ Failed to send WhatsApp cart-switch notification: {wa_err}")
+                    import traceback
+                    traceback.print_exc()
+
             return (
                 f"✅ Successfully switched {updated_count} item(s) from in-store to pending cart. "
                 f"You can now pay for these items later at your convenience."

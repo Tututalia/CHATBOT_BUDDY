@@ -22,6 +22,7 @@ export default function Admin() {
   const [currentPage, setCurrentPage] = useState(1);
   const transactionsPerPage = 10;
   const [aiInsights, setAiInsights] = useState(null);
+  const [aiInsightsData, setAiInsightsData] = useState(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [showInsights, setShowInsights] = useState(false);
 
@@ -269,12 +270,15 @@ export default function Admin() {
       if (data.error) {
         console.error("Error fetching AI insights:", data.error);
         setAiInsights(null);
+        setAiInsightsData(null);
       } else {
         setAiInsights(data.insights);
+        setAiInsightsData(data);
       }
     } catch (error) {
       console.error("Error fetching AI insights:", error);
       setAiInsights(null);
+      setAiInsightsData(null);
     } finally {
       setInsightsLoading(false);
     }
@@ -588,13 +592,13 @@ export default function Admin() {
                     Generating AI insights...
                   </p>
                   <p className="text-gray-400 text-sm mt-2">
-                    Analyzing admin dashboard data
+                    Analyzing store performance data
                   </p>
                 </div>
               </div>
-            ) : aiInsights ? (
+            ) : aiInsights && aiInsightsData ? (
               <>
-                {/* Performance Overview */}
+                {/* ── 1. Performance Overview ── */}
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border-l-4 border-indigo-500 shadow-md">
                   <div className="flex items-start gap-3">
                     <div className="bg-indigo-500 p-2 rounded-lg mt-1">
@@ -623,12 +627,80 @@ export default function Admin() {
                   </div>
                 </div>
 
-                {/* Key Insights */}
-                {aiInsights.key_insights &&
-                  aiInsights.key_insights.length > 0 && (
-                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl border-l-4 border-green-500 shadow-md">
-                      <div className="flex items-start gap-3 mb-4">
-                        <div className="bg-green-500 p-2 rounded-lg mt-1">
+                {/* ── 2. Trend Analysis ── */}
+                {aiInsights.trend_analysis && (
+                  <div className="bg-gradient-to-r from-purple-50 to-violet-50 p-6 rounded-xl border-l-4 border-purple-500 shadow-md">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="bg-purple-500 p-2 rounded-lg mt-1">
+                        <svg
+                          className="w-6 h-6 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+                          />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-purple-900 mb-1">
+                          Trend Analysis
+                        </h3>
+                        <span
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+                            aiInsights.trend_analysis.direction === "growth"
+                              ? "bg-green-100 text-green-700"
+                              : aiInsights.trend_analysis.direction ===
+                                  "decline"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {aiInsights.trend_analysis.direction === "growth"
+                            ? "↑ Growth"
+                            : aiInsights.trend_analysis.direction === "decline"
+                              ? "↓ Decline"
+                              : "→ Stable"}
+                        </span>
+                        <p className="text-gray-700 mt-2 leading-relaxed">
+                          {aiInsights.trend_analysis.summary}
+                        </p>
+                        {aiInsights.trend_analysis.key_factors &&
+                          aiInsights.trend_analysis.key_factors.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              <p className="text-purple-800 font-semibold text-sm">
+                                Key Factors:
+                              </p>
+                              {aiInsights.trend_analysis.key_factors.map(
+                                (factor, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-2 text-sm text-gray-600"
+                                  >
+                                    <span className="text-purple-500 mt-0.5">
+                                      •
+                                    </span>
+                                    <span>{factor}</span>
+                                  </div>
+                                ),
+                              )}
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 3. Store Performance Overview Grid ── */}
+                {aiInsightsData.store_performance &&
+                  aiInsightsData.store_performance.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="bg-gradient-to-br from-indigo-600 to-blue-500 p-2 rounded-lg">
                           <svg
                             className="w-6 h-6 text-white"
                             fill="none"
@@ -639,42 +711,106 @@ export default function Admin() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M13 10V3L4 14h7v7l9-11h-7z"
+                              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
                             />
                           </svg>
                         </div>
                         <div>
-                          <h3 className="text-lg font-bold text-green-900">
-                            Key Insights
+                          <h3 className="text-xl font-bold text-gray-800">
+                            Store Performance Overview
                           </h3>
-                          <p className="text-green-700 text-sm">
-                            Critical findings from your data
+                          <p className="text-gray-500 text-sm">
+                            {aiInsightsData.store_performance.length} stores
+                            analyzed • {aiInsightsData.time_period}
                           </p>
                         </div>
                       </div>
-                      <div className="space-y-3 ml-11">
-                        {aiInsights.key_insights.map((insight, idx) => (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {aiInsightsData.store_performance.map((store, idx) => (
                           <div
                             key={idx}
-                            className="bg-white p-4 rounded-lg shadow-sm border border-green-200"
+                            className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden hover:shadow-lg transition-shadow"
                           >
-                            <div className="flex items-start gap-3">
-                              <div className="bg-green-100 p-1.5 rounded-full mt-0.5">
-                                <svg
-                                  className="w-4 h-4 text-green-600"
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
+                            <div
+                              className={`px-4 py-3 ${
+                                store.rating === "EXCELLENT"
+                                  ? "bg-gradient-to-r from-green-500 to-emerald-500"
+                                  : store.rating === "GOOD"
+                                    ? "bg-gradient-to-r from-blue-500 to-indigo-500"
+                                    : store.rating === "AVERAGE"
+                                      ? "bg-gradient-to-r from-yellow-500 to-amber-500"
+                                      : "bg-gradient-to-r from-red-500 to-rose-500"
+                              }`}
+                            >
+                              <h4 className="text-white font-bold text-sm truncate">
+                                {store.store_name}
+                              </h4>
+                              <div className="flex items-center justify-between mt-1">
+                                <span className="text-white/80 text-xs">
+                                  Manager: {store.manager}
+                                </span>
+                                <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-bold">
+                                  {store.rating}
+                                </span>
                               </div>
-                              <p className="text-gray-700 text-sm flex-1">
-                                {insight}
-                              </p>
+                            </div>
+                            <div className="p-4 grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-gray-400 text-xs uppercase tracking-wide">
+                                  Revenue
+                                </p>
+                                <p className="text-gray-800 font-bold text-sm">
+                                  ₹{store.revenue.toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs uppercase tracking-wide">
+                                  Orders
+                                </p>
+                                <p className="text-gray-800 font-bold text-sm">
+                                  {store.orders.toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs uppercase tracking-wide">
+                                  AOV
+                                </p>
+                                <p className="text-gray-800 font-bold text-sm">
+                                  ₹{store.aov.toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs uppercase tracking-wide">
+                                  Customers
+                                </p>
+                                <p className="text-gray-800 font-bold text-sm">
+                                  {store.customers}
+                                </p>
+                              </div>
+                              <div className="col-span-2">
+                                <p className="text-gray-400 text-xs uppercase tracking-wide">
+                                  Success Rate
+                                </p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                    <div
+                                      className={`h-2 rounded-full ${
+                                        store.success_rate >= 80
+                                          ? "bg-green-500"
+                                          : store.success_rate >= 50
+                                            ? "bg-yellow-500"
+                                            : "bg-red-500"
+                                      }`}
+                                      style={{
+                                        width: `${Math.min(store.success_rate, 100)}%`,
+                                      }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-xs font-semibold text-gray-600">
+                                    {store.success_rate}%
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -682,72 +818,186 @@ export default function Admin() {
                     </div>
                   )}
 
-                {/* Recommendations */}
-                {aiInsights.recommendations &&
-                  aiInsights.recommendations.length > 0 && (
-                    <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-6 rounded-xl border-l-4 border-amber-500 shadow-md">
-                      <div className="flex items-start gap-3 mb-4">
-                        <div className="bg-amber-500 p-2 rounded-lg mt-1">
-                          <svg
-                            className="w-6 h-6 text-white"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                            />
-                          </svg>
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-amber-900">
-                            Recommendations
-                          </h3>
-                          <p className="text-amber-700 text-sm">
-                            Actions to optimize performance
+                {/* ── 4. Top Performer vs Needs Attention ── */}
+                {aiInsightsData.top_performer &&
+                  aiInsightsData.needs_attention && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Top Performer */}
+                      <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl shadow-md border border-green-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-green-600 to-emerald-500 px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <svg
+                              className="w-6 h-6 text-yellow-300"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                            <h3 className="text-white font-bold text-lg">
+                              Top Performer
+                            </h3>
+                          </div>
+                          <p className="text-white font-semibold text-xl mt-1">
+                            {aiInsightsData.top_performer.store_name}
+                          </p>
+                          <p className="text-green-100 text-sm">
+                            Manager: {aiInsightsData.top_performer.manager}
                           </p>
                         </div>
-                      </div>
-                      <div className="space-y-3 ml-11">
-                        {aiInsights.recommendations.map((rec, idx) => (
-                          <div
-                            key={idx}
-                            className="bg-white p-4 rounded-lg shadow-sm border border-amber-200"
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className="bg-amber-100 p-1.5 rounded-full mt-0.5">
-                                <svg
-                                  className="w-4 h-4 text-amber-600"
-                                  fill="currentColor"
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                                  <path
-                                    fillRule="evenodd"
-                                    d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-                                    clipRule="evenodd"
-                                  />
-                                </svg>
-                              </div>
-                              <p className="text-gray-700 text-sm flex-1">
-                                {rec}
-                              </p>
-                            </div>
+                        <div className="p-5 space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Revenue
+                            </span>
+                            <span className="text-green-700 font-bold">
+                              ₹
+                              {aiInsightsData.top_performer.revenue.toLocaleString()}
+                            </span>
                           </div>
-                        ))}
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Orders
+                            </span>
+                            <span className="text-green-700 font-bold">
+                              {aiInsightsData.top_performer.orders.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Success Rate
+                            </span>
+                            <span className="text-green-700 font-bold">
+                              {aiInsightsData.top_performer.success_rate}%
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Customers
+                            </span>
+                            <span className="text-green-700 font-bold">
+                              {aiInsightsData.top_performer.customers}
+                            </span>
+                          </div>
+                          {aiInsights.top_performer_success_factors &&
+                            aiInsights.top_performer_success_factors.length >
+                              0 && (
+                              <div className="mt-3 border-t border-green-200 pt-3">
+                                <p className="text-green-800 font-semibold text-sm mb-2">
+                                  Success Factors:
+                                </p>
+                                {aiInsights.top_performer_success_factors.map(
+                                  (f, i) => (
+                                    <div
+                                      key={i}
+                                      className="flex items-start gap-2 text-sm text-gray-600 mb-1"
+                                    >
+                                      <span className="text-green-500 mt-0.5">
+                                        ✓
+                                      </span>
+                                      <span>{f}</span>
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                        </div>
+                      </div>
+
+                      {/* Needs Attention */}
+                      <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl shadow-md border border-red-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-red-600 to-orange-500 px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <svg
+                              className="w-6 h-6 text-yellow-200"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+                              />
+                            </svg>
+                            <h3 className="text-white font-bold text-lg">
+                              Needs Attention
+                            </h3>
+                          </div>
+                          <p className="text-white font-semibold text-xl mt-1">
+                            {aiInsightsData.needs_attention.store_name}
+                          </p>
+                          <p className="text-red-100 text-sm">
+                            Manager: {aiInsightsData.needs_attention.manager}
+                          </p>
+                        </div>
+                        <div className="p-5 space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Revenue
+                            </span>
+                            <span className="text-red-700 font-bold">
+                              ₹
+                              {aiInsightsData.needs_attention.revenue.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Orders
+                            </span>
+                            <span className="text-red-700 font-bold">
+                              {aiInsightsData.needs_attention.orders.toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Success Rate
+                            </span>
+                            <span className="text-red-700 font-bold">
+                              {aiInsightsData.needs_attention.success_rate}%
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-500 text-sm">
+                              Customers
+                            </span>
+                            <span className="text-red-700 font-bold">
+                              {aiInsightsData.needs_attention.customers}
+                            </span>
+                          </div>
+                          {aiInsights.needs_attention_improvement_areas &&
+                            aiInsights.needs_attention_improvement_areas
+                              .length > 0 && (
+                              <div className="mt-3 border-t border-red-200 pt-3">
+                                <p className="text-red-800 font-semibold text-sm mb-2">
+                                  Improvement Areas:
+                                </p>
+                                {aiInsights.needs_attention_improvement_areas.map(
+                                  (f, i) => (
+                                    <div
+                                      key={i}
+                                      className="flex items-start gap-2 text-sm text-gray-600 mb-1"
+                                    >
+                                      <span className="text-red-500 mt-0.5">
+                                        !
+                                      </span>
+                                      <span>{f}</span>
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            )}
+                        </div>
                       </div>
                     </div>
                   )}
 
-                {/* Opportunities */}
-                {aiInsights.opportunities &&
-                  aiInsights.opportunities.length > 0 && (
-                    <div className="bg-gradient-to-r from-teal-50 to-cyan-50 p-6 rounded-xl border-l-4 border-teal-500 shadow-md">
-                      <div className="flex items-start gap-3 mb-4">
-                        <div className="bg-teal-500 p-2 rounded-lg mt-1">
+                {/* ── 5. Critical: Poor Performing Stores ── */}
+                {aiInsightsData.poor_stores &&
+                  aiInsightsData.poor_stores.length > 0 && (
+                    <div className="bg-gradient-to-r from-red-50 to-orange-50 p-6 rounded-xl border-l-4 border-red-500 shadow-md">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="bg-red-500 p-2 rounded-lg">
                           <svg
                             className="w-6 h-6 text-white"
                             fill="none"
@@ -758,52 +1008,209 @@ export default function Admin() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+                              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                             />
                           </svg>
                         </div>
                         <div>
-                          <h3 className="text-lg font-bold text-teal-900">
-                            Growth Opportunities
+                          <h3 className="text-xl font-bold text-red-900">
+                            Critical: Poor Performing Stores
                           </h3>
-                          <p className="text-teal-700 text-sm">
-                            Areas with potential for improvement
+                          <p className="text-red-600 text-sm font-medium">
+                            ⚠ URGENT ATTENTION REQUIRED —{" "}
+                            {aiInsightsData.poor_stores.length} store(s)
                           </p>
                         </div>
                       </div>
-                      <div className="space-y-3 ml-11">
-                        {aiInsights.opportunities.map((opp, idx) => (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {aiInsightsData.poor_stores.map((store, idx) => (
                           <div
                             key={idx}
-                            className="bg-white p-4 rounded-lg shadow-sm border border-teal-200"
+                            className="bg-white rounded-xl border-2 border-red-200 shadow-sm overflow-hidden"
                           >
-                            <h4 className="font-semibold text-teal-900 mb-2">
-                              {opp.area}
-                            </h4>
-                            <p className="text-gray-700 text-sm mb-3">
-                              {opp.suggestion}
-                            </p>
-                            <div className="flex items-center gap-2 text-teal-700">
+                            <div className="bg-red-100 px-4 py-3 border-b border-red-200">
+                              <h4 className="text-red-900 font-bold text-sm">
+                                {store.store_name}
+                              </h4>
+                              <p className="text-red-600 text-xs">
+                                Manager: {store.manager}
+                              </p>
+                            </div>
+                            <div className="p-4 grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-gray-400 text-xs">Revenue</p>
+                                <p className="text-red-700 font-bold text-sm">
+                                  ₹{store.revenue.toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs">
+                                  Success Rate
+                                </p>
+                                <p className="text-red-700 font-bold text-sm">
+                                  {store.success_rate}%
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs">Orders</p>
+                                <p className="text-red-700 font-bold text-sm">
+                                  {store.orders.toLocaleString()}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400 text-xs">
+                                  Customers
+                                </p>
+                                <p className="text-red-700 font-bold text-sm">
+                                  {store.customers}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Immediate Actions for Poor Stores */}
+                      {aiInsights.poor_store_actions &&
+                        aiInsights.poor_store_actions.length > 0 && (
+                          <div className="mt-5 bg-white rounded-xl p-5 border border-red-200">
+                            <h4 className="text-red-900 font-bold mb-3 flex items-center gap-2">
                               <svg
-                                className="w-5 h-5"
+                                className="w-5 h-5 text-red-600"
                                 fill="currentColor"
                                 viewBox="0 0 20 20"
                               >
                                 <path
                                   fillRule="evenodd"
-                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
                                   clipRule="evenodd"
                                 />
                               </svg>
-                              <span className="font-semibold text-sm">
-                                {opp.potential_savings}
-                              </span>
+                              Strategic Recommendations for Poor Performing
+                              Stores
+                            </h4>
+                            <div className="space-y-2">
+                              {aiInsights.poor_store_actions.map(
+                                (action, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="flex items-start gap-3 p-3 bg-red-50 rounded-lg"
+                                  >
+                                    <span className="bg-red-500 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full flex-shrink-0 mt-0.5">
+                                      {idx + 1}
+                                    </span>
+                                    <p className="text-gray-700 text-sm">
+                                      {action}
+                                    </p>
+                                  </div>
+                                ),
+                              )}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                        )}
                     </div>
                   )}
+
+                {/* ── 6. AI Business Insights ── */}
+                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-xl border-l-4 border-indigo-500 shadow-md">
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="bg-gradient-to-br from-indigo-600 to-purple-600 p-2 rounded-lg">
+                      <svg
+                        className="w-6 h-6 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                        />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-indigo-900">
+                        AI Business Insights
+                      </h3>
+                      <p className="text-indigo-600 text-sm">
+                        Powered by GPT-4o-mini
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* Market Opportunities */}
+                    {aiInsights.market_opportunities &&
+                      aiInsights.market_opportunities.length > 0 && (
+                        <div className="bg-white rounded-xl p-5 border border-indigo-200 shadow-sm">
+                          <h4 className="text-indigo-900 font-bold mb-3 flex items-center gap-2">
+                            <svg
+                              className="w-5 h-5 text-indigo-600"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            Market Opportunities
+                          </h4>
+                          <div className="space-y-2">
+                            {aiInsights.market_opportunities.map((opp, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-start gap-2 text-sm text-gray-700"
+                              >
+                                <span className="text-indigo-500 mt-0.5 font-bold">
+                                  →
+                                </span>
+                                <span>{opp}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* Strategic Focus Areas */}
+                    {aiInsights.strategic_focus_areas &&
+                      aiInsights.strategic_focus_areas.length > 0 && (
+                        <div className="bg-white rounded-xl p-5 border border-purple-200 shadow-sm">
+                          <h4 className="text-purple-900 font-bold mb-3 flex items-center gap-2">
+                            <svg
+                              className="w-5 h-5 text-purple-600"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M6 6V5a3 3 0 013-3h2a3 3 0 013 3v1h2a2 2 0 012 2v3.57A22.952 22.952 0 0110 13a22.95 22.95 0 01-8-1.43V8a2 2 0 012-2h2zm2-1a1 1 0 011-1h2a1 1 0 011 1v1H8V5zm-3 7.57V16a2 2 0 002 2h6a2 2 0 002-2v-3.43A24.92 24.92 0 0110 15a24.92 24.92 0 01-5-1.43z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                            Strategic Focus Areas
+                          </h4>
+                          <div className="space-y-2">
+                            {aiInsights.strategic_focus_areas.map(
+                              (area, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-start gap-2 text-sm text-gray-700"
+                                >
+                                  <span className="bg-purple-100 text-purple-700 text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full flex-shrink-0 mt-0.5">
+                                    {idx + 1}
+                                  </span>
+                                  <span>{area}</span>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        </div>
+                      )}
+                  </div>
+                </div>
 
                 {/* Refresh Button */}
                 <div className="flex justify-center pt-4">

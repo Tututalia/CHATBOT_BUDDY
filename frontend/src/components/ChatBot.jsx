@@ -75,6 +75,38 @@ export default function ChatBot({ customerId }) {
   const [loyaltyProcessing, setLoyaltyProcessing] = useState(false);
   const [paymentFailModal, setPaymentFailModal] = useState({ open: false });
   const [wishlistedIds, setWishlistedIds] = useState(new Set());
+  const [cartCount, setCartCount] = useState(0);
+  const [cartBlink, setCartBlink] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
+  // Fetch cart count from backend
+  const fetchCartCount = async () => {
+    if (!customerId) return;
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/cart/pending/${customerId}`,
+      );
+      const data = await res.json();
+      setCartCount(data.total_items || 0);
+    } catch (err) {
+      console.error("Error fetching cart count:", err);
+    }
+  };
+
+  // Trigger blink animation whenever cartCount changes
+  useEffect(() => {
+    if (cartCount > 0) {
+      setCartBlink(true);
+      const timer = setTimeout(() => setCartBlink(false), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [cartCount]);
 
   // Load wishlist on mount / when customerId changes
   useEffect(() => {
@@ -209,7 +241,8 @@ export default function ChatBot({ customerId }) {
       !contentHandled &&
       response.responses &&
       response.responses.recommendation &&
-      Array.isArray(response.responses.recommendation)
+      Array.isArray(response.responses.recommendation) &&
+      response.responses.recommendation.length > 0
     ) {
       // Track last recommendations for downstream UI (e.g., add-to-cart confirmation)
       setLastRecommendations(response.responses.recommendation);
@@ -219,6 +252,23 @@ export default function ChatBot({ customerId }) {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, productCardsMessage]);
+      contentHandled = true;
+    }
+
+    // Handle empty recommendations (no products found) — show the default text message
+    if (
+      !contentHandled &&
+      response.responses &&
+      response.responses.default &&
+      (!response.responses.recommendation ||
+        response.responses.recommendation.length === 0)
+    ) {
+      const aiMessage = {
+        type: "ai",
+        text: response.responses.default,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
       contentHandled = true;
     }
 
@@ -337,6 +387,13 @@ export default function ChatBot({ customerId }) {
   useEffect(() => {
     if (!isOpen) setIsQuickActionsOpen(false);
   }, [isOpen]);
+
+  // Fetch cart count when chatbot opens or customerId changes
+  useEffect(() => {
+    if (isOpen && customerId) {
+      fetchCartCount();
+    }
+  }, [isOpen, customerId]);
 
   // Silent return-monitoring agent: runs when chatbot opens (batch for all customers)
   useEffect(() => {
@@ -484,6 +541,30 @@ export default function ChatBot({ customerId }) {
               isWelcomeCard: true,
             },
           ]);
+        }
+
+        // Check for pending cart items and show reminder
+        try {
+          const cartRes = await fetch(
+            `http://localhost:8000/api/cart/pending/${customerId}`,
+          );
+          const cartData = await cartRes.json();
+          if (cartData.cart_items && cartData.cart_items.length > 0) {
+            setTimeout(() => {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  type: "pendingCartReminder",
+                  cartItems: cartData.cart_items,
+                  total_items: cartData.total_items,
+                  total_amount: cartData.total_amount,
+                  timestamp: new Date(),
+                },
+              ]);
+            }, 600);
+          }
+        } catch (cartErr) {
+          console.error("Error checking pending cart:", cartErr);
         }
       } catch (error) {
         console.error("Error initializing chat:", error);
@@ -1011,7 +1092,8 @@ export default function ChatBot({ customerId }) {
             setTimeout(() => {
               const upsellHeaderMessage = {
                 type: "ai",
-                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
+                isUpsellHeader: true,
+                text: `🔥🎯 **Great choice!** We handpicked these **${upsellCategory}** just for you — they'd go perfectly with your picks! 👇✨`,
                 timestamp: new Date(),
               };
               setMessages((prev) => [...prev, upsellHeaderMessage]);
@@ -1139,6 +1221,7 @@ export default function ChatBot({ customerId }) {
       setMessages((prev) => [...prev, errorMessage]);
     }
     setIsLoading(false);
+    fetchCartCount();
   };
 
   const formatOrderDate = (rawDate) => {
@@ -1508,6 +1591,9 @@ export default function ChatBot({ customerId }) {
       const pickupOrderIdMatch = cleanedText.match(
         /Order\s*ID\s*:\s*([A-Za-z0-9_-]+)/i,
       );
+      const pickupStoreIdMatch = cleanedText.match(
+        /Store\s*ID\s*:\s*([A-Za-z0-9_-]+)/i,
+      );
       const pickupTotalItemsMatch = cleanedText.match(
         /Total\s*Items\s*:\s*(\d+)/i,
       );
@@ -1536,6 +1622,7 @@ export default function ChatBot({ customerId }) {
       sections.storePickupConfirmation = {
         title: "In-Store Pickup Confirmed!",
         order_id: pickupOrderIdMatch ? pickupOrderIdMatch[1] : "N/A",
+        store_id: pickupStoreIdMatch ? pickupStoreIdMatch[1] : "N/A",
         total_items: pickupTotalItemsMatch
           ? parseInt(pickupTotalItemsMatch[1], 10)
           : null,
@@ -1684,10 +1771,55 @@ export default function ChatBot({ customerId }) {
   };
 
   // Handle purchase method button clicks
-  const handlePurchaseMethodClick = (method) => {
+  const handlePurchaseMethodClick = async (method) => {
     if (method === "Buy Online") {
-      setInputValue("I want to buy online");
-      setTimeout(() => sendMessage(), 100);
+      const onlineText = "I want to buy online";
+      const userMsg = {
+        type: "user",
+        text: onlineText,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInputValue("");
+      setIsLoading(true);
+      try {
+        const data = await chatWithAgentViaWebSocket(customerId, onlineText);
+        if (
+          data.agent_calls &&
+          data.agent_calls.includes("payment_agent") &&
+          data.agent_calls.length === 1
+        ) {
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.type === "paymentMethods") return prev;
+            return [
+              ...prev,
+              {
+                type: "paymentMethods",
+                text: data.response,
+                timestamp: new Date(),
+              },
+            ];
+          });
+        } else if (data.response) {
+          setMessages((prev) => [
+            ...prev,
+            { type: "ai", text: data.response, timestamp: new Date() },
+          ]);
+        }
+      } catch (err) {
+        console.error("Error in Buy Online:", err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "ai",
+            text: "Sorry, I encountered an error. Please try again.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
     } else if (method === "Nearest Store") {
       const userMessage = {
         type: "user",
@@ -2182,6 +2314,8 @@ export default function ChatBot({ customerId }) {
       c.includes("perfume") ||
       c.includes("wallet") ||
       c.includes("costume jewellery") ||
+      c.includes("Handbags & Bags") ||
+      c.includes("bags") ||
       c.includes("costume jewelry")
     );
   };
@@ -2189,7 +2323,20 @@ export default function ChatBot({ customerId }) {
   const isFootwear = (product) => {
     const category = (product && product.category) || "";
     const c = String(category).toLowerCase();
-    return c.includes("footwear") || c.includes("shoes") || c.includes("shoe");
+    return (
+      c.includes("footwear") ||
+      c.includes("shoes") ||
+      c.includes("shoe") ||
+      c.includes("Sneakers") ||
+      c.includes("sandals") ||
+      c.includes("Boots") ||
+      c.includes("boots") ||
+      c.includes("Heels") ||
+      c.includes("Formal Shoes") ||
+      c.includes("Casual Shoes") ||
+      c.includes("Sports Shoes") ||
+      c.includes("heels")
+    );
   };
 
   const getDefaultSize = (product) => {
@@ -2240,6 +2387,7 @@ export default function ChatBot({ customerId }) {
 
       // Silently refresh cart display without adding messages
       handleViewCart(true);
+      fetchCartCount();
     } catch (error) {
       console.error("Error removing from cart:", error);
 
@@ -2343,6 +2491,7 @@ export default function ChatBot({ customerId }) {
             return message;
           });
         });
+        fetchCartCount();
       } else {
         const errorMessage = {
           type: "ai",
@@ -2482,12 +2631,53 @@ export default function ChatBot({ customerId }) {
 
     setIsLoading(true);
 
+    // Emit timeline entry for View Cart Agent
+    const cartKey = `${Date.now()}:view_cart_agent`;
+    if (!silent) {
+      ensureTimelineEntry({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        status: "in_progress",
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        line: `${formatLocalTime()} Master Orchestrator → View Cart Agent`,
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        line: `${formatLocalTime()} Fetching pending cart items`,
+      });
+    }
+
     try {
-      const data = await chatWithAgentViaWebSocket(
-        customerId,
-        "please show my items in the cart",
+      // Direct REST call for fast cart loading (bypasses LLM pipeline)
+      const response = await fetch(
+        `http://localhost:8000/api/cart/pending/${customerId}`,
       );
+      const data = await response.json();
       console.log("Cart data:", data);
+      setCartCount(data.total_items || 0);
+
+      if (!silent) {
+        appendTimelineLog({
+          key: cartKey,
+          tool: "view_cart_agent",
+          agentLabel: "View Cart Agent",
+          line: `${formatLocalTime()} ✅ Found ${data.total_items || 0} item(s) in cart`,
+        });
+        appendTimelineLog({
+          key: cartKey,
+          tool: "view_cart_agent",
+          agentLabel: "View Cart Agent",
+          line: `${formatLocalTime()} View Cart Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: cartKey, status: "completed" });
+      }
       // If backend returns cart items, display as product cards
       if (
         data.cart_items &&
@@ -2525,44 +2715,138 @@ export default function ChatBot({ customerId }) {
           console.log("not silent", cartCardsMessage);
           setMessages((prev) => [...prev, cartCardsMessage]);
 
-          // Render autonomous upsell recommendations if present
-          if (
-            data.upsell &&
-            data.upsell.responses &&
-            data.upsell.responses.recommendation &&
-            data.upsell.responses.recommendation.length > 0
-          ) {
-            const upsellCategory = data.upsell.upsell_category || "accessories";
-            setLastRecommendations(data.upsell.responses.recommendation);
-            fetchReviewsByProductIds(
-              data.upsell.responses.recommendation.map((p) => p?.product_id),
-            );
-            setTimeout(() => {
-              const upsellHeaderMessage = {
-                type: "ai",
-                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, upsellHeaderMessage]);
+          // Trigger autonomous upsell chain via REST (non-blocking)
+          (async () => {
+            try {
+              // Timeline: Upsell Agent
+              const upsellKey = `${Date.now()}:upsell_agent`;
+              ensureTimelineEntry({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                status: "in_progress",
+              });
+              appendTimelineLog({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                line: `${formatLocalTime()} View Cart Agent → Upsell Agent`,
+              });
+              appendTimelineLog({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                line: `${formatLocalTime()} Analyzing cart for cross-sell opportunities`,
+              });
 
-              const upsellCardsMessage = {
-                type: "productCards",
-                productCards: data.upsell.responses.recommendation,
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, upsellCardsMessage]);
-            }, 400);
-          } else {
-            // Add follow-up message asking about next steps (only if no upsell)
-            setTimeout(() => {
-              const followUpMessage = {
-                type: "ai",
-                text: "Would you like to proceed with the payment or want to add more products? 🛒",
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, followUpMessage]);
-            }, 300);
-          }
+              const upsellRes = await fetch(
+                `http://localhost:8000/api/cart/upsell/${customerId}`,
+              );
+              const upsellData = await upsellRes.json();
+
+              endTimelineEntry({ key: upsellKey, status: "completed" });
+
+              if (
+                upsellData.upsell &&
+                upsellData.upsell.responses &&
+                upsellData.upsell.responses.recommendation &&
+                upsellData.upsell.responses.recommendation.length > 0
+              ) {
+                // Timeline: Inventory Agent (upsell search)
+                const invKey = `${Date.now()}:inventory_agent_upsell`;
+                ensureTimelineEntry({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  status: "in_progress",
+                });
+                appendTimelineLog({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  line: `${formatLocalTime()} Upsell Agent → Inventory Agent`,
+                });
+                appendTimelineLog({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  line: `${formatLocalTime()} ✅ Found ${upsellData.upsell.responses.recommendation.length} upsell product(s)`,
+                });
+                endTimelineEntry({ key: invKey, status: "completed" });
+
+                // Timeline: Recommendation Agent
+                const recKey = `${Date.now()}:recommendation_agent_upsell`;
+                ensureTimelineEntry({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  status: "in_progress",
+                });
+                appendTimelineLog({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  line: `${formatLocalTime()} Inventory Agent → Recommendation Agent`,
+                });
+                appendTimelineLog({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  line: `${formatLocalTime()} ✅ Prepared upsell recommendations`,
+                });
+                endTimelineEntry({ key: recKey, status: "completed" });
+
+                const upsellCategory =
+                  upsellData.upsell.upsell_category || "accessories";
+                setLastRecommendations(
+                  upsellData.upsell.responses.recommendation,
+                );
+                fetchReviewsByProductIds(
+                  upsellData.upsell.responses.recommendation.map(
+                    (p) => p?.product_id,
+                  ),
+                );
+
+                setTimeout(() => {
+                  const upsellHeaderMessage = {
+                    type: "ai",
+                    isUpsellHeader: true,
+                    text: `🔥🎯 **Great choice!** We handpicked these **${upsellCategory}** just for you — they'd go perfectly with your picks! 👇✨`,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, upsellHeaderMessage]);
+
+                  const upsellCardsMessage = {
+                    type: "productCards",
+                    productCards: upsellData.upsell.responses.recommendation,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, upsellCardsMessage]);
+                }, 400);
+              } else {
+                // No upsell results — show follow-up
+                setTimeout(() => {
+                  const followUpMessage = {
+                    type: "ai",
+                    text: "Would you like to proceed with the payment or want to add more products? 🛒",
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, followUpMessage]);
+                }, 300);
+              }
+            } catch (upsellErr) {
+              console.error("Upsell fetch error:", upsellErr);
+              // Fallback follow-up on upsell failure
+              setTimeout(() => {
+                const followUpMessage = {
+                  type: "ai",
+                  text: "Would you like to proceed with the payment or want to add more products? 🛒",
+                  timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, followUpMessage]);
+              }, 300);
+            }
+          })();
         }
       } else {
         const aiMessage = {
@@ -2674,48 +2958,147 @@ export default function ChatBot({ customerId }) {
 
     // Don't add if quantity is 0 or undefined
     if (!quantity || quantity === 0) {
-      return;
+      return false;
     }
 
-    // Only show user message if it's not a bulk add
-    if (!isBulkAdd) {
-      const userMessage = {
-        type: "user",
-        text: `Add ${quantity} x ${product.product_name} to cart`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-      setInputValue("");
-      setIsLoading(true);
+    const selectedSize = isAccessories(product)
+      ? null
+      : productSizes[product.product_id] || getDefaultSize(product);
+
+    // ─── Bulk Add: direct REST call for reliable, deterministic cart insertion ───
+    if (isBulkAdd) {
+      // Emit timeline entry for this product
+      const cartKey = `${Date.now()}:add_to_cart_agent:${product.product_id}`;
+      ensureTimelineEntry({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        status: "in_progress",
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        line: `${formatLocalTime()} Master Orchestrator → Add to Cart Agent`,
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        line: `${formatLocalTime()} Adding ${quantity}x ${product.product_name} (${product.product_id})`,
+      });
+
+      try {
+        const response = await fetch("http://localhost:8000/api/cart/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            product_id: product.product_id,
+            quantity,
+            customer_id: customerId,
+            size: selectedSize || null,
+          }),
+        });
+
+        if (!response.ok) {
+          console.error("Bulk add-to-cart failed: HTTP", response.status);
+          appendTimelineLog({
+            key: cartKey,
+            tool: "add_to_cart_agent",
+            agentLabel: "Add to Cart Agent",
+            line: `${formatLocalTime()} ❌ Failed to add ${product.product_name}`,
+          });
+          endTimelineEntry({ key: cartKey, status: "error" });
+          return false;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+          console.error("Bulk add-to-cart failed:", data.error);
+          appendTimelineLog({
+            key: cartKey,
+            tool: "add_to_cart_agent",
+            agentLabel: "Add to Cart Agent",
+            line: `${formatLocalTime()} ❌ ${data.error || "Failed to add item"}`,
+          });
+          endTimelineEntry({ key: cartKey, status: "error" });
+          return false;
+        }
+
+        // Log success and close timeline entry
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} ✅ Added ${quantity}x ${product.product_name} to cart`,
+        });
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} Add to Cart Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: cartKey, status: "completed" });
+
+        // Reset quantity for this product
+        setProductQuantities((prev) => {
+          const updated = { ...prev };
+          delete updated[product.product_id];
+          return updated;
+        });
+
+        // Reset size for this product
+        setProductSizes((prev) => {
+          const updated = { ...prev };
+          delete updated[product.product_id];
+          return updated;
+        });
+
+        fetchCartCount();
+        return true;
+      } catch (error) {
+        console.error("Bulk add-to-cart error:", error);
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} ❌ Network error adding ${product.product_name}`,
+        });
+        endTimelineEntry({ key: cartKey, status: "error" });
+        return false;
+      }
     }
+
+    // ─── Individual Add: WebSocket / LLM agent pipeline (preserves timeline) ───
+    const userMessage = {
+      type: "user",
+      text: `Add ${quantity} x ${product.product_name} to cart`,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setIsLoading(true);
 
     try {
-      const selectedSize = isAccessories(product)
-        ? undefined
-        : productSizes[product.product_id] || getDefaultSize(product);
-
       const data = await chatWithAgentViaWebSocket(
         customerId,
         `Add ${quantity} units of product ${product.product_id} to cart`,
         selectedSize ? { size: selectedSize } : undefined,
       );
 
-      // Only show success message if it's not a bulk add
-      if (!isBulkAdd) {
-        const aiMessage = {
-          type: "ai",
-          text: data.response || "Item added to cart successfully!",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, aiMessage]);
+      const aiMessage = {
+        type: "ai",
+        text: data.response || "Item added to cart successfully!",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
 
-        // Add View Cart button after successful add to cart
-        const viewCartMessage = {
-          type: "viewCartPrompt",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, viewCartMessage]);
-      }
+      // Add View Cart button after successful add to cart
+      const viewCartMessage = {
+        type: "viewCartPrompt",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, viewCartMessage]);
 
       // Reset quantity for this product
       setProductQuantities((prev) => {
@@ -2731,27 +3114,97 @@ export default function ChatBot({ customerId }) {
         return updated;
       });
 
+      fetchCartCount();
       return true; // Success
     } catch (error) {
       console.error("Error adding to cart:", error);
 
-      // Only show error message if it's not a bulk add
-      if (!isBulkAdd) {
-        const errorMessage = {
-          type: "ai",
-          text: "Sorry, there was an error adding the item to cart. Please try again.",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-        setIsLoading(false);
-      }
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error adding the item to cart. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+      setIsLoading(false);
 
       return false; // Failure
     }
+  };
 
-    if (!isBulkAdd) {
-      setIsLoading(false);
+  // ============ Voice Recording (Speech-to-Text) ============
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all tracks to release the microphone
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+
+        if (audioBlob.size === 0) return;
+
+        setIsTranscribing(true);
+        try {
+          const formData = new FormData();
+          formData.append("audio", audioBlob, "recording.webm");
+
+          const res = await fetch("http://localhost:8000/api/speech-to-text", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) {
+              setInputValue((prev) =>
+                prev ? prev + " " + data.text : data.text,
+              );
+            }
+          } else {
+            console.error("Speech-to-text failed:", res.status);
+          }
+        } catch (err) {
+          console.error("Speech-to-text error:", err);
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      alert(
+        "Microphone access is required for voice input. Please allow microphone permission.",
+      );
     }
+  };
+
+  const stopRecording = () => {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
   };
 
   const clearChat = () => {
@@ -2775,6 +3228,34 @@ export default function ChatBot({ customerId }) {
 
   return (
     <>
+      {/* Image Zoom Overlay */}
+      {zoomedImage && (
+        <div
+          className="image-zoom-overlay"
+          onClick={() => setZoomedImage(null)}
+        >
+          <div className="image-zoom-container">
+            <img
+              src={zoomedImage.src}
+              alt={zoomedImage.alt}
+              className="image-zoom-img"
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomedImage(null);
+              }}
+            />
+            <div className="image-zoom-caption">{zoomedImage.alt}</div>
+            <button
+              className="image-zoom-close"
+              onClick={() => setZoomedImage(null)}
+              aria-label="Close zoom"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Chatbot Icon */}
       <div className="chatbot-icon" onClick={toggleChatbot}>
         <div className="bot-avatar">
@@ -3011,6 +3492,23 @@ export default function ChatBot({ customerId }) {
                   </div>
                 </div>
                 <div className="header-actions">
+                  <button
+                    className="header-cart-icon-btn"
+                    onClick={() => handleViewCart(false)}
+                    disabled={isLoading}
+                    title="View Cart"
+                  >
+                    <img
+                      className="header-cart-img"
+                      src="/images/shopping-cart.png"
+                      alt="Cart"
+                    />
+                    <span
+                      className={`header-cart-badge${cartBlink ? " blink" : ""}`}
+                    >
+                      {cartCount}
+                    </span>
+                  </button>
                   <div className="action-tools">
                     <button
                       className="action-tool-btn quick-actions-toggle"
@@ -3040,15 +3538,81 @@ export default function ChatBot({ customerId }) {
                         <span
                           className="quick-actions-separator"
                           aria-hidden="true"
-                        >
-                          →
-                        </span>
+                        ></span>
                         <button
                           className="action-tool-btn quick-action-payment"
-                          onClick={() => {
+                          onClick={async () => {
                             setIsQuickActionsOpen(false);
-                            setInputValue("proceed");
-                            setTimeout(() => sendMessage(), 0);
+                            const proceedText = "proceed";
+                            const userMsg = {
+                              type: "user",
+                              text: proceedText,
+                              timestamp: new Date(),
+                            };
+                            setMessages((prev) => [...prev, userMsg]);
+                            setInputValue("");
+                            setIsLoading(true);
+                            try {
+                              const data = await chatWithAgentViaWebSocket(
+                                customerId,
+                                proceedText,
+                              );
+                              if (
+                                data.agent_calls &&
+                                data.agent_calls.includes(
+                                  "choose_channel_agent",
+                                )
+                              ) {
+                                const purchaseMethodsMessage = {
+                                  type: "purchaseMethods",
+                                  text: data.response,
+                                  timestamp: new Date(),
+                                };
+                                setMessages((prev) => [
+                                  ...prev,
+                                  purchaseMethodsMessage,
+                                ]);
+                              } else if (
+                                data.agent_calls &&
+                                data.agent_calls.includes("payment_agent") &&
+                                data.agent_calls.length === 1
+                              ) {
+                                setMessages((prev) => {
+                                  const lastMessage = prev[prev.length - 1];
+                                  if (lastMessage?.type === "paymentMethods")
+                                    return prev;
+                                  return [
+                                    ...prev,
+                                    {
+                                      type: "paymentMethods",
+                                      text: data.response,
+                                      timestamp: new Date(),
+                                    },
+                                  ];
+                                });
+                              } else if (data.response) {
+                                setMessages((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "ai",
+                                    text: data.response,
+                                    timestamp: new Date(),
+                                  },
+                                ]);
+                              }
+                            } catch (err) {
+                              console.error("Error in Go For Payment:", err);
+                              setMessages((prev) => [
+                                ...prev,
+                                {
+                                  type: "ai",
+                                  text: "Sorry, I encountered an error. Please try again.",
+                                  timestamp: new Date(),
+                                },
+                              ]);
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}
                           disabled={isLoading}
                           title="Go For Payment"
@@ -3059,9 +3623,7 @@ export default function ChatBot({ customerId }) {
                         <span
                           className="quick-actions-separator"
                           aria-hidden="true"
-                        >
-                          →
-                        </span>
+                        ></span>
                         <button
                           className="action-tool-btn quick-action-support"
                           onClick={() => {
@@ -3768,6 +4330,17 @@ export default function ChatBot({ customerId }) {
                                   </div>
                                   <div className="pickup-detail-item">
                                     <span className="detail-label">
+                                      Store ID
+                                    </span>
+                                    <span className="detail-value">
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .store_id
+                                      }
+                                    </span>
+                                  </div>
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
                                       Total Amount
                                     </span>
                                     <span className="detail-value amount orange">
@@ -4020,7 +4593,11 @@ export default function ChatBot({ customerId }) {
                             !structuredData.storePickupConfirmation &&
                             !structuredData.loyaltyRewards &&
                             !structuredData.postPurchaseSupport && (
-                              <div className="message-text">{displayText}</div>
+                              <div
+                                className={`message-text${message.isUpsellHeader ? " upsell-header-text" : ""}`}
+                              >
+                                {displayText}
+                              </div>
                             )}
 
                           {/* Render Purchase Methods */}
@@ -4867,26 +5444,34 @@ export default function ChatBot({ customerId }) {
                                             userMessage,
                                           ]);
 
-                                          // Add products sequentially to avoid race conditions
+                                          // Add products sequentially via direct REST API
                                           let successCount = 0;
+                                          const failedProducts = [];
                                           for (const product of productsToAdd) {
                                             const success =
                                               await handleAddToCart(
                                                 product,
                                                 true,
                                               );
-                                            if (success) successCount++;
-                                            // Small delay between additions
-                                            await new Promise((resolve) =>
-                                              setTimeout(resolve, 500),
-                                            );
+                                            if (success) {
+                                              successCount++;
+                                            } else {
+                                              failedProducts.push(
+                                                product.product_name,
+                                              );
+                                            }
                                           }
 
                                           // Show single summary message
                                           if (successCount > 0) {
+                                            let summaryText =
+                                              successCount ===
+                                              productsToAdd.length
+                                                ? `All ${successCount} product(s) have been added to cart successfully. You can now proceed to pay.`
+                                                : `${successCount} of ${productsToAdd.length} product(s) added to cart. Failed: ${failedProducts.join(", ")}. You can try adding the failed items again.`;
                                             const aiMessage = {
                                               type: "ai",
-                                              text: `Products have been added to cart successfully. You can now proceed to pay.`,
+                                              text: summaryText,
                                               timestamp: new Date(),
                                             };
                                             setMessages((prev) => [
@@ -4949,7 +5534,16 @@ export default function ChatBot({ customerId }) {
                                               "/images/placeholder.png"
                                             }
                                             alt={product.product_name}
-                                            className="product-image"
+                                            className="product-image zoomable-image"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setZoomedImage({
+                                                src:
+                                                  product.image_reference ||
+                                                  "/images/placeholder.png",
+                                                alt: product.product_name,
+                                              });
+                                            }}
                                             onError={(e) => {
                                               e.target.src =
                                                 "/images/placeholder.png";
@@ -5105,6 +5699,76 @@ export default function ChatBot({ customerId }) {
                                     );
                                   })}
                                 </div>
+                              </div>
+                            )}
+
+                          {/* Pending cart reminder on chatbot open */}
+                          {message.type === "pendingCartReminder" &&
+                            message.cartItems &&
+                            message.cartItems.length > 0 && (
+                              <div className="pending-cart-reminder">
+                                <div className="pending-cart-reminder-header">
+                                  <span className="pending-cart-reminder-icon">
+                                    🛍️
+                                  </span>
+                                  <div className="pending-cart-reminder-text">
+                                    <h4>
+                                      Your handpicked favorites are waiting!
+                                    </h4>
+                                    <p>
+                                      You've got{" "}
+                                      <strong>
+                                        {message.total_items} amazing{" "}
+                                        {message.total_items === 1
+                                          ? "item"
+                                          : "items"}
+                                      </strong>{" "}
+                                      in your cart worth{" "}
+                                      <strong>
+                                        ₹
+                                        {Math.round(
+                                          message.total_amount,
+                                        ).toLocaleString()}
+                                      </strong>{" "}
+                                      — don't let them slip away!
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="pending-cart-reminder-items">
+                                  {message.cartItems.slice(0, 4).map((item) => (
+                                    <div
+                                      key={item.order_id || item.product_id}
+                                      className="pending-cart-mini-item"
+                                    >
+                                      <img
+                                        src={
+                                          item.image_reference ||
+                                          "/images/placeholder.png"
+                                        }
+                                        alt={item.product_name}
+                                        className="pending-cart-mini-img"
+                                        onError={(e) => {
+                                          e.target.src =
+                                            "/images/placeholder.png";
+                                        }}
+                                      />
+                                      <span className="pending-cart-mini-name">
+                                        {item.product_name}
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {message.cartItems.length > 4 && (
+                                    <div className="pending-cart-mini-more">
+                                      +{message.cartItems.length - 4} more
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  className="pending-cart-checkout-btn"
+                                  onClick={() => handleViewCart()}
+                                >
+                                  🛒 View Cart &amp; Checkout
+                                </button>
                               </div>
                             )}
 
@@ -5392,6 +6056,98 @@ export default function ChatBot({ customerId }) {
                                   <p className="proceed-prompt">
                                     Would you like to proceed to payment? 🛍️
                                   </p>
+                                  <div className="cart-go-payment-wrapper">
+                                    <button
+                                      className="cart-go-payment-btn"
+                                      disabled={isLoading}
+                                      onClick={async () => {
+                                        const proceedText = "proceed";
+                                        const userMsg = {
+                                          type: "user",
+                                          text: proceedText,
+                                          timestamp: new Date(),
+                                        };
+                                        setMessages((prev) => [
+                                          ...prev,
+                                          userMsg,
+                                        ]);
+                                        setInputValue("");
+                                        setIsLoading(true);
+                                        try {
+                                          const data =
+                                            await chatWithAgentViaWebSocket(
+                                              customerId,
+                                              proceedText,
+                                            );
+                                          if (
+                                            data.agent_calls &&
+                                            data.agent_calls.includes(
+                                              "choose_channel_agent",
+                                            )
+                                          ) {
+                                            setMessages((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "purchaseMethods",
+                                                text: data.response,
+                                                timestamp: new Date(),
+                                              },
+                                            ]);
+                                          } else if (
+                                            data.agent_calls &&
+                                            data.agent_calls.includes(
+                                              "payment_agent",
+                                            ) &&
+                                            data.agent_calls.length === 1
+                                          ) {
+                                            setMessages((prev) => {
+                                              const lastMessage =
+                                                prev[prev.length - 1];
+                                              if (
+                                                lastMessage?.type ===
+                                                "paymentMethods"
+                                              )
+                                                return prev;
+                                              return [
+                                                ...prev,
+                                                {
+                                                  type: "paymentMethods",
+                                                  text: data.response,
+                                                  timestamp: new Date(),
+                                                },
+                                              ];
+                                            });
+                                          } else if (data.response) {
+                                            setMessages((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "ai",
+                                                text: data.response,
+                                                timestamp: new Date(),
+                                              },
+                                            ]);
+                                          }
+                                        } catch (err) {
+                                          console.error(
+                                            "Error in Go For Payment:",
+                                            err,
+                                          );
+                                          setMessages((prev) => [
+                                            ...prev,
+                                            {
+                                              type: "ai",
+                                              text: "Sorry, I encountered an error. Please try again.",
+                                              timestamp: new Date(),
+                                            },
+                                          ]);
+                                        } finally {
+                                          setIsLoading(false);
+                                        }
+                                      }}
+                                    >
+                                      💳 Go For Payment
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -5523,7 +6279,14 @@ export default function ChatBot({ customerId }) {
                                     <img
                                       src={product.image_reference || "/images/placeholder.png"}
                                       alt={product.product_name}
-                                      className="product-image"
+                                      className="product-image zoomable-image"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setZoomedImage({
+                                          src: product.image_reference || "/images/placeholder.png",
+                                          alt: product.product_name,
+                                        });
+                                      }}
                                       onError={(e) => {
                                         e.target.src = "/images/placeholder.png";
                                       }}
@@ -5719,8 +6482,19 @@ export default function ChatBot({ customerId }) {
                     onKeyPress={handleKeyPress}
                     disabled={isLoading}
                   />
-                  <button className="mic-btn" title="Voice input">
-                    🎤
+                  <button
+                    className={`mic-btn${isRecording ? " recording" : ""}`}
+                    title={
+                      isRecording
+                        ? "Stop recording"
+                        : isTranscribing
+                          ? "Transcribing..."
+                          : "Voice input"
+                    }
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={isLoading || isTranscribing}
+                  >
+                    {isTranscribing ? "⏳" : isRecording ? "⏹" : "🎤"}
                   </button>
                   <button
                     className="send-btn"

@@ -330,13 +330,165 @@ export default function UserJourney() {
                   CUSTOMER INFORMATION
                 </p>
                 <div className="flex items-start gap-3 mb-4">
-                  <div className="bg-gradient-to-br from-orange-600 to-orange-700 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
-                    {getInitials(user.customer_name || user.name)}
+                  {/* Avatar with tier badge overlay */}
+                  <div className="relative flex-shrink-0">
+                    <div className="bg-gradient-to-br from-orange-600 to-orange-700 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                      {getInitials(user.customer_name || user.name)}
+                    </div>
+                    {/* Tier badge overlaid on avatar */}
+                    {user.customer_type &&
+                      (() => {
+                        const tierMap = {
+                          tier_1: {
+                            label: "Diamond",
+                            ring: "ring-blue-300",
+                            bg: "bg-gradient-to-br from-blue-100 to-cyan-100",
+                            icon: (
+                              <svg
+                                className="w-3 h-3"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                              >
+                                <path
+                                  d="M6 3L1 10L12 21L23 10L18 3H6Z"
+                                  fill="url(#diamondGrad)"
+                                  stroke="#3B82F6"
+                                  strokeWidth="2"
+                                  strokeLinejoin="round"
+                                />
+                                <defs>
+                                  <linearGradient
+                                    id="diamondGrad"
+                                    x1="1"
+                                    y1="3"
+                                    x2="23"
+                                    y2="21"
+                                  >
+                                    <stop offset="0%" stopColor="#93C5FD" />
+                                    <stop offset="50%" stopColor="#60A5FA" />
+                                    <stop offset="100%" stopColor="#3B82F6" />
+                                  </linearGradient>
+                                </defs>
+                              </svg>
+                            ),
+                          },
+                          tier_2: {
+                            label: "Gold",
+                            ring: "ring-yellow-400",
+                            bg: "bg-gradient-to-br from-yellow-100 to-amber-100",
+                            icon: (
+                              <svg
+                                className="w-3 h-3"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                              >
+                                <path
+                                  d="M12 2L15 8.5L22 9.5L17 14.5L18 21.5L12 18L6 21.5L7 14.5L2 9.5L9 8.5L12 2Z"
+                                  fill="url(#goldGrad)"
+                                  stroke="#D97706"
+                                  strokeWidth="1.5"
+                                  strokeLinejoin="round"
+                                />
+                                <defs>
+                                  <linearGradient
+                                    id="goldGrad"
+                                    x1="2"
+                                    y1="2"
+                                    x2="22"
+                                    y2="22"
+                                  >
+                                    <stop offset="0%" stopColor="#FCD34D" />
+                                    <stop offset="50%" stopColor="#F59E0B" />
+                                    <stop offset="100%" stopColor="#D97706" />
+                                  </linearGradient>
+                                </defs>
+                              </svg>
+                            ),
+                          },
+                          tier_3: {
+                            label: "Silver",
+                            ring: "ring-gray-300",
+                            bg: "bg-gradient-to-br from-gray-100 to-slate-100",
+                            icon: (
+                              <svg
+                                className="w-3 h-3"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                              >
+                                <path
+                                  d="M12 2L15 8.5L22 9.5L17 14.5L18 21.5L12 18L6 21.5L7 14.5L2 9.5L9 8.5L12 2Z"
+                                  fill="url(#silverGrad)"
+                                  stroke="#9CA3AF"
+                                  strokeWidth="1.5"
+                                  strokeLinejoin="round"
+                                />
+                                <defs>
+                                  <linearGradient
+                                    id="silverGrad"
+                                    x1="2"
+                                    y1="2"
+                                    x2="22"
+                                    y2="22"
+                                  >
+                                    <stop offset="0%" stopColor="#E5E7EB" />
+                                    <stop offset="50%" stopColor="#D1D5DB" />
+                                    <stop offset="100%" stopColor="#9CA3AF" />
+                                  </linearGradient>
+                                </defs>
+                              </svg>
+                            ),
+                          },
+                        };
+                        const tier = tierMap[user.customer_type];
+                        if (!tier) return null;
+                        return (
+                          <div
+                            className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full ${tier.bg} ring-2 ${tier.ring} ring-offset-1 flex items-center justify-center shadow`}
+                          >
+                            {tier.icon}
+                          </div>
+                        );
+                      })()}
                   </div>
                   <div className="flex-1">
-                    <span className="text-2xl font-bold text-gray-800 block mb-2">
-                      {user.customer_name || user.name || "Loading..."}
-                    </span>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-2xl font-bold text-gray-800">
+                        {user.customer_name || user.name || "Loading..."}
+                      </span>
+                      {/* Tier label next to name */}
+                      {user.customer_type &&
+                        (() => {
+                          const tierLabels = {
+                            tier_1: {
+                              label: "Diamond",
+                              text: "text-blue-600",
+                              bg: "bg-blue-50",
+                              border: "border-blue-200",
+                            },
+                            tier_2: {
+                              label: "Gold",
+                              text: "text-amber-600",
+                              bg: "bg-amber-50",
+                              border: "border-amber-200",
+                            },
+                            tier_3: {
+                              label: "Silver",
+                              text: "text-gray-500",
+                              bg: "bg-gray-100",
+                              border: "border-gray-200",
+                            },
+                          };
+                          const tier = tierLabels[user.customer_type];
+                          if (!tier) return null;
+                          return (
+                            <span
+                              className={`text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${tier.bg} ${tier.text} border ${tier.border}`}
+                            >
+                              {tier.label}
+                            </span>
+                          );
+                        })()}
+                    </div>
                     {/* Phone Number */}
                     {user.phone && (
                       <div className="flex items-center gap-2 text-gray-600 mb-2">

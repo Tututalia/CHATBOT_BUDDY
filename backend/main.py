@@ -18,15 +18,19 @@ from models import Customer, Product, Store, OrderHistory, StoreKeeperTransactio
 from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
-from intelligent_agent_graph import run_agent, create_agent_graph, upsell_agent
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from intelligent_agent_graph import run_agent, create_agent_graph, upsell_agent, inventory_agent, recommendation_agent
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import openai
+import tempfile
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, ConfigDict
 import json
 import asyncio
 import re
+import time
+import random
 from sqlmodel import Session, select, func
 from dotenv import load_dotenv
 from whatsapp import send_text_message, send_image_message, resolve_image_url, is_valid_whatsapp_message
@@ -480,7 +484,8 @@ def get_customer_profile(customer_id: str, role_id: str):
                     "loyalty_points": customer.loyalty_points,
                     "role_id": customer.role_id,
                     "order_history": order_history,
-                    "pending_orders": pending_orders
+                    "pending_orders": pending_orders,
+                    "customer_type": customer.customer_type or ''
                 }
     except Exception as e:
         return {"error": f"Error fetching customer/store: {str(e)}"}
@@ -545,6 +550,11 @@ def get_admin_dashboard_data(time_range: str = "1month"):
     - Online vs Offline transactions (based on time_range)
     - Offline purchases per store
 
+    Data sources:
+    - Online orders  → order_history table
+    - Offline orders → store_keeper_transactions table
+    - Store count    → stores table
+
     Args:
         time_range: Filter by time range - '7days', '1month', or 'all' (default: '1month')
     """
@@ -553,24 +563,98 @@ def get_admin_dashboard_data(time_range: str = "1month"):
             from datetime import datetime, timedelta
             from collections import defaultdict
 
-            # Get total customers count
+            # ---------- helper: parse date string ----------
+            def _parse_date(date_str):
+                if not date_str:
+                    return None
+                s = str(date_str).strip()
+                # Truncate microseconds / fractional seconds
+                if '.' in s:
+                    s = s[:s.index('.')]
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
+                            "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+                    try:
+                        return datetime.strptime(s, fmt)
+                    except Exception:
+                        continue
+                return None
+
+            # ---------- counts ----------
             total_customers = session.exec(
                 select(func.count(Customer.customer_id))
             ).one()
 
-            # Get total retail stores count
             total_stores = session.exec(
                 select(func.count(Store.store_id))
             ).one()
 
-            # Get admin dashboard data (all transactions)
-            all_transactions = admin_dashboard_data_crud.get_all(
-                session, skip=0, limit=100000)
+            # ---------- online orders from order_history ----------
+            all_online_orders = session.exec(select(OrderHistory)).all()
 
-            # Calculate total products sold (sum of quantities from all transactions)
-            total_products_sold = sum(tx.qty for tx in all_transactions)
+            # ---------- offline orders from store_keeper_transactions ----------
+            all_offline_orders = session.exec(
+                select(StoreKeeperTransaction).where(
+                    func.lower(StoreKeeperTransaction.mode) == "offline"
+                )
+            ).all()
 
-            # Determine date threshold based on time_range
+            # ---------- look-ups for address / phone / price ----------
+            customer_map = {
+                c.customer_id: c
+                for c in session.exec(select(Customer)).all()
+            }
+            product_map = {
+                p.product_id: p
+                for p in session.exec(select(Product)).all()
+            }
+
+            # ---------- build unified transaction dicts ----------
+            unified_transactions = []
+
+            for order in all_online_orders:
+                amount = order.final_price
+                if not amount:
+                    prod = product_map.get(order.product_id)
+                    amount = (prod.price * order.quantity) if prod else 0
+                cust = customer_map.get(order.customer_id)
+                status = "Complete"
+                if order.return_status and order.return_status.lower() == "returned":
+                    status = "Returned"
+                elif order.return_status and order.return_status.lower() == "initiated":
+                    status = "Return Initiated"
+                unified_transactions.append({
+                    "id": order.transaction_id,
+                    "date": order.order_dates,
+                    "user_name": order.customer_name,
+                    "product": order.product_name,
+                    "qty": order.quantity,
+                    "mode": "Online",
+                    "store_name": "Online",
+                    "status": status,
+                    "amount": round(amount, 2) if amount else 0,
+                    "address": cust.address if cust else "N/A",
+                    "phone": cust.phone if cust else "N/A",
+                })
+
+            for tx in all_offline_orders:
+                unified_transactions.append({
+                    "id": tx.id,
+                    "date": tx.date,
+                    "user_name": tx.user_name,
+                    "product": tx.product,
+                    "qty": tx.qty,
+                    "mode": "Offline",
+                    "store_name": tx.store_name,
+                    "status": tx.status,
+                    "amount": tx.amount,
+                    "address": tx.address,
+                    "phone": tx.phone,
+                })
+
+            # ---------- total products sold (all time) ----------
+            total_products_sold = sum(t["qty"] for t in unified_transactions)
+
+            # ---------- date threshold ----------
             now = datetime.now()
             date_threshold = None
             time_period_label = "All Time"
@@ -581,9 +665,8 @@ def get_admin_dashboard_data(time_range: str = "1month"):
             elif time_range == "1month":
                 date_threshold = now - timedelta(days=30)
                 time_period_label = "Last 1 Month"
-            # else: time_range == "all", no date threshold
 
-            # Analyze transactions based on time range
+            # ---------- filter & aggregate ----------
             online_transactions = []
             offline_transactions = []
             store_purchases = defaultdict(int)
@@ -591,103 +674,59 @@ def get_admin_dashboard_data(time_range: str = "1month"):
             online_revenue = 0
             offline_revenue = 0
 
-            for tx in all_transactions:
-                # Parse transaction date with multiple format attempts
-                tx_date = None
-                try:
-                    # Try M/D/YYYY format (e.g., "1/15/2026")
-                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
-                except:
-                    try:
-                        # Try YYYY-MM-DD format
-                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
-                    except:
-                        try:
-                            # Try DD-MM-YYYY format
-                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
-                        except:
-                            try:
-                                # Try MM/DD/YYYY format with zero padding
-                                tx_date = datetime.strptime(
-                                    tx.date.strip(), "%m/%d/%Y")
-                            except:
-                                # Skip transactions with unparseable dates
-                                print(f"Could not parse date: {tx.date}")
-                                continue
+            for tx in unified_transactions:
+                tx_date = _parse_date(tx["date"])
+                if tx_date is None:
+                    continue
 
-                # Filter by date threshold (if set) or include all
                 if date_threshold is None or tx_date >= date_threshold:
-                    if tx.mode.lower() == "online":
+                    if tx["mode"].lower() == "online":
                         online_transactions.append(tx)
-                        online_revenue += tx.amount
+                        online_revenue += tx["amount"]
                     else:
                         offline_transactions.append(tx)
-                        offline_revenue += tx.amount
-                        # Count purchases per store for offline only
-                        store_purchases[tx.store_name] += tx.qty
+                        offline_revenue += tx["amount"]
+                        store_purchases[tx["store_name"]] += tx["qty"]
+                    total_revenue += tx["amount"]
 
-                # Total revenue from all transactions (regardless of time filter)
-                if date_threshold is None or tx_date >= date_threshold:
-                    total_revenue += tx.amount
-
-            # Calculate total transactions for the selected period
             total_transactions = len(
                 online_transactions) + len(offline_transactions)
+            avg_transaction_value = (
+                total_revenue / total_transactions if total_transactions > 0 else 0
+            )
 
-            # Calculate average transaction value for the selected period
-            avg_transaction_value = total_revenue / \
-                total_transactions if total_transactions > 0 else 0
-
-            # Format offline purchases per store (sorted by purchase count)
+            # ---------- offline purchases per store ----------
             offline_purchases_per_store = [
-                {
-                    "store_name": store_name,
-                    "purchases_count": count
-                }
-                for store_name, count in sorted(
-                    store_purchases.items(),
-                    key=lambda x: x[1],
-                    reverse=True
+                {"store_name": name, "purchases_count": count}
+                for name, count in sorted(
+                    store_purchases.items(), key=lambda x: x[1], reverse=True
                 )
             ]
 
-            # Calculate online vs offline percentages
-            online_percentage = (len(
-                online_transactions) / total_transactions * 100) if total_transactions > 0 else 0
-            offline_percentage = (len(
-                offline_transactions) / total_transactions * 100) if total_transactions > 0 else 0
+            # ---------- online / offline percentages ----------
+            online_percentage = (
+                len(online_transactions) / total_transactions * 100
+                if total_transactions > 0 else 0
+            )
+            offline_percentage = (
+                len(offline_transactions) / total_transactions * 100
+                if total_transactions > 0 else 0
+            )
 
-            # Calculate monthly transaction trends (respecting time_range filter)
+            # ---------- monthly trends (filtered) ----------
             monthly_online = defaultdict(int)
             monthly_offline = defaultdict(int)
 
-            # Use filtered transactions for monthly trends
-            filtered_tx_for_trends = online_transactions + offline_transactions
-
-            for tx in filtered_tx_for_trends:
-                # Parse transaction date
-                tx_date = None
-                try:
-                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
-                except:
-                    try:
-                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
-                    except:
-                        try:
-                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
-                        except:
-                            continue
-
-                # Get month-year key
-                month_key = tx_date.strftime("%b")  # e.g., "Jan", "Feb"
-
-                # Count by mode
-                if tx.mode.lower() == "online":
+            for tx in online_transactions + offline_transactions:
+                tx_date = _parse_date(tx["date"])
+                if tx_date is None:
+                    continue
+                month_key = tx_date.strftime("%b")
+                if tx["mode"].lower() == "online":
                     monthly_online[month_key] += 1
                 else:
                     monthly_offline[month_key] += 1
 
-            # Create monthly trends list with proper month ordering
             month_order = ["Jan", "Feb", "Mar", "Apr", "May",
                            "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
             monthly_trends = []
@@ -697,32 +736,20 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                         "month": month,
                         "online": monthly_online.get(month, 0),
                         "offline": monthly_offline.get(month, 0),
-                        "total": monthly_online.get(month, 0) + monthly_offline.get(month, 0)
+                        "total": monthly_online.get(month, 0) + monthly_offline.get(month, 0),
                     })
 
-            # Format all transactions for the table view
-            all_transactions_list = []
-            for tx in all_transactions:
-                all_transactions_list.append({
-                    "id": tx.id,
-                    "date": tx.date,
-                    "user_name": tx.user_name,
-                    "product": tx.product,
-                    "qty": tx.qty,
-                    "mode": tx.mode,
-                    "store_name": tx.store_name,
-                    "status": tx.status,
-                    "amount": tx.amount,
-                    "address": tx.address,
-                    "phone": tx.phone
-                })
+            # ---------- all transactions list (for table view) ----------
+            all_transactions_list = list(unified_transactions)
 
-            # Sort transactions by date (most recent first)
+            # Sort by date (most recent first)
             try:
-                all_transactions_list.sort(key=lambda x: datetime.strptime(
-                    x["date"], "%m/%d/%Y"), reverse=True)
-            except:
-                pass  # If date parsing fails, keep original order
+                all_transactions_list.sort(
+                    key=lambda x: _parse_date(x["date"]) or datetime.min,
+                    reverse=True,
+                )
+            except Exception:
+                pass
 
             return {
                 "summary": {
@@ -731,7 +758,7 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                     "total_retail_stores": total_stores,
                     "total_transactions": total_transactions,
                     "total_revenue": round(total_revenue, 2),
-                    "avg_transaction_value": round(avg_transaction_value, 2)
+                    "avg_transaction_value": round(avg_transaction_value, 2),
                 },
                 "transactions_overview": {
                     "time_period": time_period_label,
@@ -739,19 +766,19 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                     "online": {
                         "count": len(online_transactions),
                         "percentage": round(online_percentage, 1),
-                        "revenue": round(online_revenue, 2)
+                        "revenue": round(online_revenue, 2),
                     },
                     "offline": {
                         "count": len(offline_transactions),
                         "percentage": round(offline_percentage, 1),
-                        "revenue": round(offline_revenue, 2)
-                    }
+                        "revenue": round(offline_revenue, 2),
+                    },
                 },
                 "monthly_trends": monthly_trends,
                 "total_online_transactions": sum(monthly_online.values()),
                 "total_offline_transactions": sum(monthly_offline.values()),
                 "offline_purchases_per_store": offline_purchases_per_store,
-                "transactions": all_transactions_list
+                "transactions": all_transactions_list,
             }
 
     except Exception as e:
@@ -765,14 +792,14 @@ def get_admin_dashboard_data(time_range: str = "1month"):
                 "total_retail_stores": 0,
                 "total_transactions_past_month": 0,
                 "total_revenue": 0,
-                "avg_transaction_value": 0
+                "avg_transaction_value": 0,
             },
             "transactions_overview": {
                 "time_period": "Past 1 Month",
                 "online": {"count": 0, "percentage": 0, "revenue": 0},
-                "offline": {"count": 0, "percentage": 0, "revenue": 0}
+                "offline": {"count": 0, "percentage": 0, "revenue": 0},
             },
-            "offline_purchases_per_store": []
+            "offline_purchases_per_store": [],
         }
 
 
@@ -780,7 +807,8 @@ def get_admin_dashboard_data(time_range: str = "1month"):
 def get_admin_ai_insights(time_range: str = "1month"):
     """
     Get AI-powered insights and recommendations for the admin dashboard.
-    Uses LLM to analyze transaction data and provide actionable intelligence.
+    Computes per-store performance metrics from order_history + store_keeper_transactions,
+    then uses LLM to generate business insights and recommendations.
 
     Args:
         time_range: Filter by time range - '7days', '1month', or 'all' (default: '1month')
@@ -790,12 +818,71 @@ def get_admin_ai_insights(time_range: str = "1month"):
         from datetime import datetime, timedelta
         from collections import defaultdict
 
-        with get_db_session() as session:
-            # Get all dashboard data
-            all_transactions = admin_dashboard_data_crud.get_all(
-                session, skip=0, limit=100000)
+        # ---------- helper: parse date string ----------
+        def _parse_date(date_str):
+            if not date_str:
+                return None
+            s = str(date_str).strip()
+            if '.' in s:
+                s = s[:s.index('.')]
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S",
+                        "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    continue
+            return None
 
-            # Determine date threshold
+        with get_db_session() as session:
+            # ---------- load data ----------
+            all_online_orders = session.exec(select(OrderHistory)).all()
+            all_offline_orders = session.exec(
+                select(StoreKeeperTransaction).where(
+                    func.lower(StoreKeeperTransaction.mode) == "offline"
+                )
+            ).all()
+            all_stores = session.exec(select(Store)).all()
+            store_info_map = {s.store_name: s for s in all_stores}
+            # Also index by store_id for fallback matching
+            store_id_map = {s.store_id: s for s in all_stores}
+
+            product_map = {
+                p.product_id: p
+                for p in session.exec(select(Product)).all()
+            }
+
+            # ---------- build unified transaction dicts ----------
+            unified_transactions = []
+
+            for order in all_online_orders:
+                amount = order.final_price
+                if not amount:
+                    prod = product_map.get(order.product_id)
+                    amount = (prod.price * order.quantity) if prod else 0
+                unified_transactions.append({
+                    "date": order.order_dates,
+                    "user_name": order.customer_name,
+                    "product": order.product_name,
+                    "qty": order.quantity,
+                    "mode": "Online",
+                    "store_name": "Online",
+                    "amount": round(amount, 2) if amount else 0,
+                    "status": "Complete" if not order.return_status else order.return_status,
+                })
+
+            for tx in all_offline_orders:
+                unified_transactions.append({
+                    "date": tx.date,
+                    "user_name": tx.user_name,
+                    "product": tx.product,
+                    "qty": tx.qty,
+                    "mode": "Offline",
+                    "store_name": tx.store_name,
+                    "amount": tx.amount,
+                    "status": tx.status,
+                })
+
+            # ---------- date threshold ----------
             now = datetime.now()
             date_threshold = None
             time_period_label = "All Time"
@@ -807,49 +894,49 @@ def get_admin_ai_insights(time_range: str = "1month"):
                 date_threshold = now - timedelta(days=30)
                 time_period_label = "Last 1 Month"
 
-            # Filter and analyze transactions
+            # ---------- filter & aggregate ----------
             filtered_transactions = []
             online_count = 0
             offline_count = 0
             online_revenue = 0
             offline_revenue = 0
-            store_performance = defaultdict(lambda: {"count": 0, "revenue": 0})
+            # Per-store detailed metrics
+            store_metrics = defaultdict(lambda: {
+                "revenue": 0, "orders": 0, "customers": set(),
+                "complete_count": 0, "total_count": 0
+            })
             product_performance = defaultdict(
                 lambda: {"count": 0, "revenue": 0})
             customer_frequency = defaultdict(int)
 
-            for tx in all_transactions:
-                # Parse date
-                tx_date = None
-                try:
-                    tx_date = datetime.strptime(tx.date, "%m/%d/%Y")
-                except:
-                    try:
-                        tx_date = datetime.strptime(tx.date, "%Y-%m-%d")
-                    except:
-                        try:
-                            tx_date = datetime.strptime(tx.date, "%d-%m-%Y")
-                        except:
-                            continue
+            for tx in unified_transactions:
+                tx_date = _parse_date(tx["date"])
+                if tx_date is None:
+                    continue
 
-                # Filter by date threshold
                 if date_threshold is None or tx_date >= date_threshold:
                     filtered_transactions.append(tx)
 
-                    if tx.mode.lower() == "online":
+                    if tx["mode"].lower() == "online":
                         online_count += 1
-                        online_revenue += tx.amount
+                        online_revenue += tx["amount"]
                     else:
                         offline_count += 1
-                        offline_revenue += tx.amount
-                        store_performance[tx.store_name]["count"] += 1
-                        store_performance[tx.store_name]["revenue"] += tx.amount
+                        offline_revenue += tx["amount"]
+                        sname = tx["store_name"]
+                        store_metrics[sname]["revenue"] += tx["amount"]
+                        store_metrics[sname]["orders"] += tx["qty"]
+                        store_metrics[sname]["customers"].add(tx["user_name"])
+                        store_metrics[sname]["total_count"] += 1
+                        status_lower = (tx.get("status") or "").lower()
+                        if status_lower in ("complete", "completed"):
+                            store_metrics[sname]["complete_count"] += 1
 
-                    product_performance[tx.product]["count"] += tx.qty
-                    product_performance[tx.product]["revenue"] += tx.amount
-                    customer_frequency[tx.user_name] += 1
+                    product_performance[tx["product"]]["count"] += tx["qty"]
+                    product_performance[tx["product"]
+                                        ]["revenue"] += tx["amount"]
+                    customer_frequency[tx["user_name"]] += 1
 
-            # Calculate insights
             total_transactions = len(filtered_transactions)
             total_revenue = online_revenue + offline_revenue
             avg_transaction = total_revenue / \
@@ -857,19 +944,82 @@ def get_admin_ai_insights(time_range: str = "1month"):
             online_percentage = (
                 online_count / total_transactions * 100) if total_transactions > 0 else 0
 
-            # Get top performing products
-            top_products = sorted(product_performance.items(
-            ), key=lambda x: x[1]["revenue"], reverse=True)[:3]
+            # ---------- build store performance list ----------
+            store_performance_list = []
+            for sname, m in store_metrics.items():
+                cust_count = len(m["customers"])
+                aov = round(m["revenue"] / m["orders"],
+                            0) if m["orders"] > 0 else 0
+                success_rate = round(
+                    m["complete_count"] / m["total_count"] * 100, 1
+                ) if m["total_count"] > 0 else 0
 
-            # Get top stores
-            top_stores = sorted(store_performance.items(),
-                                key=lambda x: x[1]["revenue"], reverse=True)[:3]
+                # Determine rating based on revenue & orders
+                if m["revenue"] >= 200000 and m["orders"] >= 100:
+                    rating = "EXCELLENT"
+                elif m["revenue"] >= 150000 and m["orders"] >= 70:
+                    rating = "GOOD"
+                elif m["revenue"] >= 80000 and m["orders"] >= 30:
+                    rating = "AVERAGE"
+                else:
+                    rating = "POOR"
 
-            # Get top customers
-            top_customers = sorted(
-                customer_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+                # Lookup manager from stores table
+                store_obj = store_info_map.get(sname)
+                manager = store_obj.manager_name if store_obj else "N/A"
 
-            # Prepare data summary for LLM
+                store_performance_list.append({
+                    "store_name": sname,
+                    "manager": manager,
+                    "revenue": round(m["revenue"], 2),
+                    "orders": m["orders"],
+                    "customers": cust_count,
+                    "aov": int(aov),
+                    "success_rate": success_rate,
+                    "rating": rating,
+                })
+
+            # Sort by revenue descending
+            store_performance_list.sort(
+                key=lambda x: x["revenue"], reverse=True)
+            # Filter out stores with empty/blank names
+            store_performance_list = [
+                s for s in store_performance_list if s["store_name"].strip()]
+
+            # Identify top performer & needs-attention store
+            top_performer = store_performance_list[0] if store_performance_list else None
+            needs_attention = store_performance_list[-1] if len(
+                store_performance_list) > 1 else None
+
+            # Poor performing stores
+            poor_stores = [
+                s for s in store_performance_list if s["rating"] == "POOR"]
+
+            # ---------- top products, stores, customers for LLM ----------
+            top_products = sorted(product_performance.items(),
+                                  key=lambda x: x[1]["revenue"], reverse=True)[:5]
+            top_stores_sorted = sorted(store_metrics.items(),
+                                       key=lambda x: x[1]["revenue"], reverse=True)[:5]
+            bottom_stores_sorted = sorted(store_metrics.items(),
+                                          key=lambda x: x[1]["revenue"])[:5]
+            top_customers = sorted(customer_frequency.items(),
+                                   key=lambda x: x[1], reverse=True)[:5]
+
+            # ---------- LLM prompt ----------
+            total_offline_revenue = offline_revenue
+            avg_store_perf_gap = 0
+            if store_performance_list:
+                avg_rev = sum(
+                    s["revenue"] for s in store_performance_list) / len(store_performance_list)
+                avg_store_perf_gap = round(avg_rev / 1000)
+
+            best_aov = max((s["aov"]
+                           for s in store_performance_list), default=0)
+            avg_aov = round(sum(s["aov"] for s in store_performance_list) /
+                            len(store_performance_list)) if store_performance_list else 0
+            aov_improvement_potential = round(
+                (best_aov - avg_aov) / avg_aov * 100) if avg_aov > 0 else 0
+
             data_summary = f"""
 Analyze the following retail dashboard data for {time_period_label}:
 
@@ -881,31 +1031,55 @@ OVERALL METRICS:
 - Offline Sales: {offline_count:,} transactions (₹{offline_revenue:,.2f})
 - Online Percentage: {online_percentage:.1f}%
 
-TOP PERFORMING PRODUCTS:
-{chr(10).join([f"- {prod}: {data['count']} units sold, ₹{data['revenue']:,.2f} revenue" for prod, data in top_products[:3]])}
-
 TOP PERFORMING STORES (Offline):
-{chr(10).join([f"- {store}: {data['count']} transactions, ₹{data['revenue']:,.2f} revenue" for store, data in top_stores[:3]])}
+{chr(10).join([f"- {store}: {data['revenue']:.0f} revenue, {data['orders']} orders, {len(data['customers'])} customers" for store, data in top_stores_sorted])}
+
+BOTTOM PERFORMING STORES (Offline):
+{chr(10).join([f"- {store}: {data['revenue']:.0f} revenue, {data['orders']} orders, {len(data['customers'])} customers" for store, data in bottom_stores_sorted])}
+
+TOP PERFORMING PRODUCTS:
+{chr(10).join([f"- {prod}: {data['count']} units sold, ₹{data['revenue']:,.2f} revenue" for prod, data in top_products])}
 
 TOP CUSTOMERS (by frequency):
-{chr(10).join([f"- {customer}: {count} purchases" for customer, count in top_customers[:5]])}
+{chr(10).join([f"- {customer}: {count} purchases" for customer, count in top_customers])}
 
-Provide insights in the following JSON format:
+Provide business insights in the following strict JSON format ONLY (no extra text):
 {{
-  "overview": "Brief performance summary in 2-3 sentences",
-  "key_insights": ["insight 1", "insight 2", "insight 3"],
-  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
-  "opportunities": [
-    {{"area": "area name", "suggestion": "specific suggestion", "potential_savings": "estimated impact"}}
+  "overview": "Brief performance summary in 2-3 sentences covering growth trends",
+  "market_opportunities": [
+    "Total offline revenue: ₹{total_offline_revenue:,.0f}",
+    "Average store performance gap: {avg_store_perf_gap}K",
+    "Potential for {aov_improvement_potential}% AOV improvement across stores"
+  ],
+  "strategic_focus_areas": [
+    "specific strategic recommendation 1",
+    "specific strategic recommendation 2",
+    "specific strategic recommendation 3",
+    "specific strategic recommendation 4"
+  ],
+  "trend_analysis": {{
+    "direction": "growth or decline",
+    "summary": "2-3 sentences about revenue/order trends over time",
+    "key_factors": ["factor 1", "factor 2", "factor 3"]
+  }},
+  "poor_store_actions": [
+    "Urgent: Review operational efficiency and costs",
+    "Implement digital marketing and customer engagement",
+    "Consider staff retraining or management changes",
+    "Improve order fulfillment processes",
+    "Focus on upselling and cross-selling strategies"
+  ],
+  "top_performer_success_factors": [
+    "factor that makes the top store successful 1",
+    "factor 2",
+    "factor 3"
+  ],
+  "needs_attention_improvement_areas": [
+    "area to improve for the weakest store 1",
+    "area 2",
+    "area 3"
   ]
 }}
-
-Focus on actionable insights about:
-1. Revenue trends and transaction patterns
-2. Product performance and inventory optimization
-3. Store performance differences
-4. Customer behavior and retention strategies
-5. Channel optimization (online vs offline)
 """
 
             # Initialize LLM
@@ -915,46 +1089,51 @@ Focus on actionable insights about:
                 api_key=os.getenv("OPENAI_API_KEY")
             )
 
-            # Get AI insights
             response = llm.invoke(data_summary)
 
             # Parse LLM response
             try:
-                # Extract JSON from response
                 response_text = response.content
-
-                # Find JSON in the response
                 import re
                 json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-
                 if json_match:
                     insights_data = json.loads(json_match.group())
                 else:
-                    # Fallback if JSON not found
                     insights_data = {
                         "overview": response_text[:200],
-                        "key_insights": ["Unable to parse structured insights"],
-                        "recommendations": ["Please refresh to try again"],
-                        "opportunities": []
+                        "market_opportunities": [],
+                        "strategic_focus_areas": [],
+                        "trend_analysis": {"direction": "unknown", "summary": "Unable to determine", "key_factors": []},
+                        "poor_store_actions": [],
+                        "top_performer_success_factors": [],
+                        "needs_attention_improvement_areas": [],
                     }
             except Exception as parse_error:
                 print(f"Error parsing LLM response: {parse_error}")
                 insights_data = {
                     "overview": "Analysis completed but unable to format insights properly.",
-                    "key_insights": ["Data has been analyzed successfully"],
-                    "recommendations": ["Refresh to generate new insights"],
-                    "opportunities": []
+                    "market_opportunities": [],
+                    "strategic_focus_areas": [],
+                    "trend_analysis": {"direction": "unknown", "summary": "Unable to determine trends.", "key_factors": []},
+                    "poor_store_actions": [],
+                    "top_performer_success_factors": [],
+                    "needs_attention_improvement_areas": [],
                 }
 
             return {
                 "insights": insights_data,
+                "store_performance": store_performance_list,
+                "top_performer": top_performer,
+                "needs_attention": needs_attention,
+                "poor_stores": poor_stores,
                 "time_period": time_period_label,
                 "data_summary": {
                     "total_transactions": total_transactions,
                     "total_revenue": round(total_revenue, 2),
+                    "total_offline_revenue": round(offline_revenue, 2),
                     "avg_transaction_value": round(avg_transaction, 2),
-                    "online_percentage": round(online_percentage, 1)
-                }
+                    "online_percentage": round(online_percentage, 1),
+                },
             }
 
     except Exception as e:
@@ -964,10 +1143,17 @@ Focus on actionable insights about:
             "error": f"Error generating AI insights: {str(e)}",
             "insights": {
                 "overview": "Unable to generate insights at this time.",
-                "key_insights": [],
-                "recommendations": [],
-                "opportunities": []
-            }
+                "market_opportunities": [],
+                "strategic_focus_areas": [],
+                "trend_analysis": {"direction": "unknown", "summary": "", "key_factors": []},
+                "poor_store_actions": [],
+                "top_performer_success_factors": [],
+                "needs_attention_improvement_areas": [],
+            },
+            "store_performance": [],
+            "top_performer": None,
+            "needs_attention": None,
+            "poor_stores": [],
         }
 
 
@@ -1199,6 +1385,52 @@ def get_store_daily_orders(store_id: str, time_range: str = "weekly"):
         return {"error": str(e)}
 
 
+@app.get("/api/store/{store_id}/pending-orders")
+def get_store_pending_orders(store_id: str):
+    """
+    Get pending cart orders for a specific store.
+    Queries the cart table where store_id matches and status is 'pending'.
+    """
+    try:
+        with get_db_session() as session:
+            # Query cart items with matching store_id and pending status
+            pending_items = cart_crud.filter(
+                session,
+                filters={"store_id": store_id, "status": "pending"},
+                operators={"store_id": "==", "status": "=="},
+                limit=200,
+            )
+
+            if not pending_items:
+                return {"pending_orders": [], "total_pending": 0}
+
+            details = []
+            for item in pending_items:
+                product = product_crud.get_by_id(
+                    session, item.product_id) if item.product_id else None
+                customer = customer_crud.get_by_id(
+                    session, item.customer_id) if item.customer_id else None
+                details.append({
+                    "order_id": item.order_id,
+                    "customer_id": item.customer_id or "N/A",
+                    "customer_name": customer.customer_name if customer else "N/A",
+                    "product_id": item.product_id or "N/A",
+                    "product_name": product.product_name if product else "N/A",
+                    "quantity": getattr(item, "quantity", 1),
+                    "size": item.size or "N/A",
+                    "channel": item.channel or "N/A",
+                    "status": item.status,
+                    "created_at": item.created_at or "N/A",
+                })
+
+            return {
+                "pending_orders": details,
+                "total_pending": len(details),
+            }
+    except Exception as e:
+        return {"pending_orders": [], "total_pending": 0, "error": str(e)}
+
+
 @app.get("/api/store/{store_id}/ai-insights")
 async def get_store_ai_insights(store_id: str, time_range: str = "monthly"):
     """
@@ -1427,6 +1659,54 @@ def _merge_kiosk_result(state: Dict[str, Any], result: Dict[str, Any]) -> List[s
         if isinstance(message, AIMessage) and message.content:
             ai_texts.append(message.content)
     return ai_texts
+
+
+# ============ Speech-to-Text (Whisper) Endpoint ============
+
+@app.post("/api/speech-to-text")
+async def speech_to_text(audio: UploadFile = File(...)):
+    """Transcribe audio to text using OpenAI Whisper model."""
+    try:
+        # Read the uploaded audio bytes
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            return JSONResponse(status_code=400, content={"error": "Empty audio file"})
+
+        # Determine a safe suffix from the uploaded filename
+        suffix = ".webm"
+        if audio.filename:
+            ext = os.path.splitext(audio.filename)[1]
+            if ext:
+                suffix = ext
+
+        # Write to a temp file so the openai client can read it
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        try:
+            client = openai.OpenAI()  # uses OPENAI_API_KEY env var
+            with open(tmp_path, "rb") as f:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    language="en",
+                )
+            text = transcription.text.strip() if transcription.text else ""
+            return {"text": text}
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    except openai.APIError as e:
+        logging.error(f"OpenAI Whisper API error: {e}")
+        return JSONResponse(status_code=502, content={"error": "Speech-to-text service error"})
+    except Exception as e:
+        logging.error(f"Speech-to-text error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Failed to transcribe audio"})
 
 
 # code to  be pasted
@@ -1713,6 +1993,168 @@ def create_store_transaction_endpoint(tx: StoreTransactionCreateModel):
             return {"success": True, "id": created.id}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@app.get("/api/cart/pending/{customer_id}")
+def get_pending_cart_items(customer_id: str):
+    """Return a lightweight summary of pending cart items for a customer."""
+    try:
+        with get_db_session() as session:
+            cart_items = cart_crud.filter(
+                session,
+                filters={"customer_id": customer_id, "status": "pending"},
+                operators={"customer_id": "==", "status": "=="},
+                limit=50,
+            )
+            if not cart_items:
+                return {"cart_items": [], "total_items": 0, "total_amount": 0, "total_savings": 0, "available_loyalty_points": 0}
+
+            details = []
+            total_amount = 0
+            total_savings = 0
+            for item in cart_items:
+                product = product_crud.get_by_id(session, item.product_id)
+                if product:
+                    qty = getattr(item, "quantity", 1)
+                    size = getattr(item, "size", None)
+                    discount = getattr(product, "discount", 0) or 0
+                    price = round(product.price * (1 - discount / 100),
+                                  2) if discount > 0 else product.price
+                    item_total = price * qty
+                    item_original_total = product.price * qty
+                    item_savings = item_original_total - item_total
+                    total_amount += item_total
+                    total_savings += item_savings
+                    details.append({
+                        "order_id": item.order_id,
+                        "product_id": item.product_id,
+                        "product_name": product.product_name,
+                        "quantity": qty,
+                        "size": size,
+                        "price": price,
+                        "original_price": product.price,
+                        "discount": discount,
+                        "total": item_total,
+                        "image_reference": product.image_reference,
+                        "savings": item_savings,
+                    })
+
+            # Fetch customer loyalty points
+            available_loyalty_points = 0
+            try:
+                customer = customer_crud.get_by_id(session, customer_id)
+                if customer:
+                    available_loyalty_points = customer.loyalty_points or 0
+            except Exception:
+                pass
+
+            return {
+                "cart_items": details,
+                "total_items": len(details),
+                "total_amount": total_amount,
+                "total_savings": total_savings,
+                "available_loyalty_points": available_loyalty_points,
+            }
+    except Exception as e:
+        return {"cart_items": [], "total_items": 0, "total_amount": 0, "total_savings": 0, "available_loyalty_points": 0, "error": str(e)}
+
+
+@app.get("/api/cart/upsell/{customer_id}")
+def get_cart_upsell(customer_id: str):
+    """Run the autonomous upsell chain: upsell_agent → inventory_agent → recommendation_agent.
+    Returns upsell product recommendations based on the customer's pending cart."""
+    try:
+        # 1. Upsell agent – determines what category to recommend
+        upsell_raw = upsell_agent.invoke({"customer_id": customer_id})
+        upsell_data = json.loads(upsell_raw) if isinstance(
+            upsell_raw, str) else upsell_raw
+        upsell_query = upsell_data.get("search_query", "show me watches")
+        upsell_category = upsell_data.get("category", "accessories")
+
+        # 2. Inventory agent – fetch products in the upsell category
+        inv_raw = inventory_agent.invoke(
+            {"search_query": upsell_query, "customer_id": customer_id})
+
+        # 3. Recommendation agent – format as product cards
+        rec_raw = recommendation_agent.invoke({"inventory_data": inv_raw})
+        rec_parsed = json.loads(rec_raw) if isinstance(
+            rec_raw, str) else rec_raw
+
+        recs = (rec_parsed.get("responses") or {}).get("recommendation", [])
+        if recs:
+            rec_parsed["upsell_category"] = upsell_category
+            return {"upsell": rec_parsed}
+
+        return {"upsell": None}
+    except Exception as e:
+        print(f"[UPSELL REST] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"upsell": None}
+
+
+class CartAddModel(BaseModel):
+    product_id: str
+    quantity: int
+    customer_id: str
+    size: Optional[str] = None
+
+
+@app.post("/api/cart/add")
+def add_to_cart_direct(item: CartAddModel):
+    """Directly add a product to the cart table, bypassing the LLM pipeline.
+    Used by the bulk 'Add All to Cart' flow for deterministic, reliable inserts."""
+    if item.quantity <= 0:
+        return {"success": False, "error": "Quantity must be greater than 0"}
+
+    product = get_product_from_db(item.product_id)
+    if not product:
+        return {"success": False, "error": f"Product {item.product_id} not found"}
+
+    if product.quantity < item.quantity:
+        return {
+            "success": False,
+            "error": f"Only {product.quantity} units of {product.product_name} are available in stock.",
+        }
+
+    try:
+        with get_db_session() as session:
+            order_id = f"CART{int(time.time() * 1000) % 1000000}{random.randint(100, 999)}"
+
+            cart_data = {
+                "order_id": order_id,
+                "customer_id": item.customer_id,
+                "product_id": item.product_id,
+                "store_id": None,
+                "channel": "pending",
+                "status": "pending",
+                "quantity": item.quantity,
+                "size": item.size,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+
+            cart_crud.create(session, cart_data)
+
+            discount = getattr(product, "discount", 0) or 0
+            discount_price = (
+                round(product.price * (1 - discount / 100), 2)
+                if discount > 0
+                else product.price
+            )
+
+            return {
+                "success": True,
+                "order_id": order_id,
+                "product_name": product.product_name,
+                "product_id": item.product_id,
+                "quantity": item.quantity,
+                "price": product.price,
+                "discount_price": discount_price,
+                "discount": discount,
+            }
+    except Exception as e:
+        print(f"Error adding to cart directly: {e}")
+        return {"success": False, "error": "Failed to add product to cart. Please try again."}
 
 
 class UpdateCartQuantityModel(BaseModel):
