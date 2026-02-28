@@ -463,16 +463,56 @@
 }
 
 .header-text p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
+}
+
+/* Voice Mic Toggle in Input Area */
+.voice-mic-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  color: #b0b0b0;
+  transition:
+    color 0.25s ease,
+    background 0.25s ease;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.voice-mic-toggle:hover {
+  background: rgba(255, 140, 0, 0.08);
+  color: #ff8c00;
+}
+
+.voice-mic-toggle.active {
+  color: #ff8c00;
+}
+
+.voice-mic-toggle.active:hover {
+  background: rgba(255, 140, 0, 0.12);
+}
+
+.voice-mic-toggle svg {
+  display: block;
+}
+
+.voice-mic-toggle .mic-strikethrough {
+  stroke: #e53935;
+  stroke-width: 2.5;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 30px;
+  gap: 34px;
 }
 
 /* Header Cart Icon Button */
@@ -1797,10 +1837,10 @@
 .input-wrapper {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   background: #fff;
   border-radius: 35px;
-  padding: 8px 10px 8px 24px;
+  padding: 8px 10px 8px 12px;
   border: 2px solid #f5e6d3;
   transition:
     border-color 0.3s,

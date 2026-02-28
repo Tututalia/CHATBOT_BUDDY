@@ -379,6 +379,33 @@ async def run_whatsapp_agent(wa_id: str, message_body: str, phone_number: str | 
         await send_agent_response_to_whatsapp(wa_id, result)
         return result
 
+    # ── View-cart fast path ──────────────────────────────────────────
+    # Bypass the full LLM agent loop for simple cart-viewing queries
+    # so the response is near-instant on WhatsApp.
+    def _looks_like_view_cart_query(text: str) -> bool:
+        if not text or not isinstance(text, str):
+            return False
+        t = text.strip().lower()
+        # Match common "show cart" / "view cart" / "my cart" phrases
+        cart_phrases = [
+            "show my cart", "show cart", "view my cart", "view cart",
+            "my cart", "cart items", "my cart items", "show my cart items",
+            "what is in my cart", "what's in my cart", "whats in my cart",
+            "see my cart", "see cart", "open my cart", "open cart",
+            "display my cart", "display cart", "check my cart", "check cart",
+        ]
+        return any(phrase in t for phrase in cart_phrases)
+
+    if _looks_like_view_cart_query(message_body):
+        cart_raw = view_cart_agent.invoke({"customer_id": customer_id})
+        try:
+            result = json.loads(cart_raw) if isinstance(
+                cart_raw, str) else cart_raw
+        except Exception:
+            result = {"response": str(cart_raw)}
+        await send_agent_response_to_whatsapp(wa_id, result)
+        return result
+
     # Build conversation history
     history = get_or_create_whatsapp_session(wa_id)
     history.append(HumanMessage(content=message_body))

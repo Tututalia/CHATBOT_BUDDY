@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from whatsapp import send_text_message, send_image_message, resolve_image_url, is_valid_whatsapp_message
 from intelligent_whatsapp_graph import run_whatsapp_agent, send_whatsapp_text
 from security import signature_required
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -479,6 +479,7 @@ def get_customer_profile(customer_id: str, role_id: str):
                 return {
                     "customer_id": customer.customer_id,
                     "customer_name": customer.customer_name,
+                    "gender": customer.gender or '',
                     "phone": customer.phone or '',
                     "address": customer.address or '',
                     "loyalty_points": customer.loyalty_points,
@@ -1663,9 +1664,49 @@ def _merge_kiosk_result(state: Dict[str, Any], result: Dict[str, Any]) -> List[s
 
 # ============ Speech-to-Text (Whisper) Endpoint ============
 
+# Supported voice languages: English, Hindi, Bengali
+_SUPPORTED_VOICE_LANGS = {"en", "hi", "bn"}
+
+
+def _translate_to_english(client, text: str, source_lang: str) -> str:
+    """Translate Hindi/Bengali text to English using GPT for the agent pipeline."""
+    lang_name = {"hi": "Hindi", "bn": "Bengali"}.get(source_lang, source_lang)
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[
+                {"role": "system", "content": f"You are a translator. Translate the following {lang_name} text to English. Return ONLY the English translation, nothing else."},
+                {"role": "user", "content": text},
+            ],
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Translation to English failed: {e}")
+        return text  # fallback to original
+
+
+def _translate_from_english(client, text: str, target_lang: str) -> str:
+    """Translate English text to Hindi/Bengali using GPT for TTS output."""
+    lang_name = {"hi": "Hindi", "bn": "Bengali"}.get(target_lang, target_lang)
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0,
+            messages=[
+                {"role": "system", "content": f"You are a translator. Translate the following English text to {lang_name}. Return ONLY the {lang_name} translation, nothing else. Keep product names, brand names, and prices in English/numerals."},
+                {"role": "user", "content": text},
+            ],
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Translation to {lang_name} failed: {e}")
+        return text  # fallback to English
+
+
 @app.post("/api/speech-to-text")
 async def speech_to_text(audio: UploadFile = File(...)):
-    """Transcribe audio to text using OpenAI Whisper model."""
+    """Transcribe audio to text using OpenAI Whisper model with Hindi/Bengali support."""
     try:
         # Read the uploaded audio bytes
         audio_bytes = await audio.read()
@@ -1686,14 +1727,38 @@ async def speech_to_text(audio: UploadFile = File(...)):
 
         try:
             client = openai.OpenAI()  # uses OPENAI_API_KEY env var
+
+            # Step 1: Transcribe WITHOUT forcing language so Whisper auto-detects
             with open(tmp_path, "rb") as f:
                 transcription = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
-                    language="en",
+                    response_format="verbose_json",
                 )
+
             text = transcription.text.strip() if transcription.text else ""
-            return {"text": text}
+            detected_lang = getattr(transcription, "language", "en") or "en"
+            # Normalise language code (Whisper may return full name)
+            lang_map = {"english": "en", "hindi": "hi",
+                        "bengali": "bn", "bangla": "bn"}
+            detected_lang = lang_map.get(
+                detected_lang.lower(), detected_lang.lower()[:2])
+
+            # If language is not in our supported set, treat as English
+            if detected_lang not in _SUPPORTED_VOICE_LANGS:
+                detected_lang = "en"
+
+            # Step 2: If Hindi or Bengali, translate to English for the agent
+            translated_text = text
+            if detected_lang in ("hi", "bn") and text:
+                translated_text = _translate_to_english(
+                    client, text, detected_lang)
+
+            return {
+                "text": translated_text,           # English text for the agent
+                "original_text": text,              # Original transcription
+                "detected_language": detected_lang,  # "en", "hi", or "bn"
+            }
         finally:
             # Clean up temp file
             try:
@@ -1707,6 +1772,77 @@ async def speech_to_text(audio: UploadFile = File(...)):
     except Exception as e:
         logging.error(f"Speech-to-text error: {e}")
         return JSONResponse(status_code=500, content={"error": "Failed to transcribe audio"})
+
+
+# ============ Text-to-Speech (OpenAI TTS) Endpoint ============
+
+class TTSRequest(BaseModel):
+    text: str
+    customer_id: str = ""
+    language: str = "en"  # "en", "hi", or "bn"
+
+
+@app.post("/api/text-to-speech")
+async def text_to_speech(data: TTSRequest):
+    """Convert text to speech using OpenAI TTS. Voice is chosen based on customer gender.
+    If language is Hindi or Bengali, the English text is translated before TTS."""
+    try:
+        if not data.text or not data.text.strip():
+            return JSONResponse(status_code=400, content={"error": "Empty text"})
+
+        # Determine customer gender to pick opposite voice
+        voice = "nova"  # default female voice
+        if data.customer_id:
+            try:
+                with get_db_session() as session:
+                    customer = customer_crud.get_by_id(
+                        session, data.customer_id)
+                    if customer and customer.gender:
+                        g = customer.gender.strip().lower()
+                        if g in ("male", "men", "m"):
+                            # Male customer -> female voice
+                            voice = "nova"
+                        elif g in ("female", "women", "f"):
+                            # Female customer -> male voice
+                            voice = "echo"
+            except Exception:
+                pass  # fallback to default voice
+
+        # Truncate long text to avoid excessive TTS cost (max ~500 chars)
+        speak_text = data.text.strip()
+        if len(speak_text) > 500:
+            speak_text = speak_text[:497] + "..."
+
+        # Translate English text to target language if Hindi or Bengali
+        target_lang = (data.language or "en").strip().lower()
+        if target_lang in ("hi", "bn") and speak_text:
+            client_translate = openai.OpenAI()
+            speak_text = _translate_from_english(
+                client_translate, speak_text, target_lang)
+
+        client = openai.OpenAI()
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=speak_text,
+        )
+
+        # Return audio as MP3 bytes
+        audio_bytes = response.content
+        if not audio_bytes:
+            return JSONResponse(status_code=500, content={"error": "No audio generated"})
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=speech.mp3"},
+        )
+
+    except openai.APIError as e:
+        logging.error(f"OpenAI TTS API error: {e}")
+        return JSONResponse(status_code=502, content={"error": "Text-to-speech service error"})
+    except Exception as e:
+        logging.error(f"Text-to-speech error: {e}")
+        return JSONResponse(status_code=500, content={"error": "Failed to generate speech"})
 
 
 # code to  be pasted

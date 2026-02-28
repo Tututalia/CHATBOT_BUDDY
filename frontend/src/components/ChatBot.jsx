@@ -39,6 +39,7 @@ export default function ChatBot({ customerId }) {
 
   const [isOpen, setIsOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [customerGender, setCustomerGender] = useState("");
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -82,8 +83,126 @@ export default function ChatBot({ customerId }) {
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const ttsAudioRef = useRef(null);
+  const voiceLanguageRef = useRef("en"); // tracks detected voice language: "en", "hi", "bn"
+
+  // Helper: speak assistant response text via OpenAI TTS
+  const speakResponse = async (text) => {
+    if (!isVoiceEnabled) return;
+    if (!text || !text.trim()) return;
+    // Strip markdown/emoji artifacts for cleaner speech
+    const cleanText = text
+      .replace(/[*_~`#>|\-]{1,3}/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(
+        /[\u{1F600}-\u{1F9FF}\u{2600}-\u{2B55}\u{1FA00}-\u{1FAFF}\u{200D}\u{FE0F}]/gu,
+        "",
+      )
+      .trim();
+    if (!cleanText) return;
+    try {
+      // Stop any currently playing TTS audio
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current = null;
+      }
+      const res = await fetch("http://localhost:8000/api/text-to-speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: cleanText,
+          customer_id: customerId,
+          language: "en",
+        }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        ttsAudioRef.current = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          ttsAudioRef.current = null;
+        };
+        audio.play().catch((e) => console.error("TTS playback error:", e));
+      }
+    } catch (err) {
+      console.error("TTS error:", err);
+    }
+  };
+
+  // Helper: generate a concise TTS summary from the agent response
+  const getTtsSummary = (response) => {
+    if (!response) return "";
+    const agents = response.agent_calls || [];
+
+    // Store selection — nearest stores shown
+    if (response.storeSelection) {
+      const count = response.storeSelection.stores?.length || 0;
+      return `Here are ${count} store options nearest to your location. Kindly select one.`;
+    }
+
+    // Cart items viewed
+    if (response.cart_items && Array.isArray(response.cart_items)) {
+      const count = response.cart_items.length;
+      if (count === 0) return "Your cart is currently empty.";
+      const total = response.total_amount
+        ? `₹${Math.round(response.total_amount)}`
+        : "";
+      return `Your cart has ${count} item${count > 1 ? "s" : ""}${total ? " totalling " + total : ""}. You can update quantities or proceed to checkout.`;
+    }
+
+    // Purchase channel selection
+    if (agents.includes("choose_channel_agent")) {
+      return "How would you like to receive your order? You can buy online with home delivery or pick up from the nearest store.";
+    }
+
+    // Payment methods
+    if (agents.includes("payment_agent")) {
+      return "Please select your preferred payment method to complete the order.";
+    }
+
+    // Product recommendations
+    if (response.responses?.recommendation?.length > 0) {
+      const count = response.responses.recommendation.length;
+      const defaultMsg = response.responses?.default || "";
+      // Use the default message if it's short enough, otherwise summarize
+      if (defaultMsg && defaultMsg.length <= 200) return defaultMsg;
+      return `I found ${count} product${count > 1 ? "s" : ""} for you. Take a look and let me know if you'd like to add any to your cart.`;
+    }
+
+    // Fulfillment agent (order confirmation etc.)
+    if (agents.includes("fulfillment_agent")) {
+      return "Your order details have been processed. Please check the details on screen.";
+    }
+
+    // Loyalty agent
+    if (agents.includes("loyalty_agent")) {
+      return "Your loyalty points have been updated.";
+    }
+
+    // Post-purchase
+    if (agents.includes("post_purchase_agent")) {
+      return "Thank you for your purchase! Your order summary is on screen.";
+    }
+
+    // Add to cart confirmation
+    if (agents.includes("add_to_cart_agent")) {
+      return "Item has been added to your cart successfully.";
+    }
+
+    // Generic fallback — use response text but truncate
+    const fallback = response.responses?.default || response.response || "";
+    if (!fallback) return "";
+    // If text is short and clean, use it
+    if (fallback.length <= 200) return fallback;
+    // Otherwise extract first sentence
+    const firstSentence = fallback.match(/^[^.!?\n]+[.!?]/);
+    return firstSentence ? firstSentence[0] : fallback.slice(0, 150) + "...";
+  };
 
   // Fetch cart count from backend
   const fetchCartCount = async () => {
@@ -233,6 +352,18 @@ export default function ChatBot({ customerId }) {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, purchaseMethodsMessage]);
+      contentHandled = true;
+    }
+
+    // Handle store selection tiles from fulfillment_agent
+    if (!contentHandled && response.storeSelection) {
+      const storeMessage = {
+        type: "storeSelection",
+        title: response.storeSelection.title,
+        stores: response.storeSelection.stores,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, storeMessage]);
       contentHandled = true;
     }
 
@@ -426,13 +557,16 @@ export default function ChatBot({ customerId }) {
 
         // Fetch customer profile first
         let fetchedName = "Guest";
+        let fetchedGender = "";
         try {
           const profileData = await getCustomerProfile(customerId);
           fetchedName = profileData?.customer_name || "Guest";
+          fetchedGender = profileData?.gender || "";
         } catch (error) {
           console.error("Error fetching customer name:", error);
         }
         setCustomerName(fetchedName);
+        setCustomerGender(fetchedGender);
 
         // Check for existing chat history
         const historyResponse = await gethistory(customerId);
@@ -1149,6 +1283,16 @@ export default function ChatBot({ customerId }) {
           return [...prev, paymentMethodsMessage];
         });
       }
+      // Handle store selection tiles from fulfillment_agent
+      else if (response.storeSelection) {
+        const storeMessage = {
+          type: "storeSelection",
+          title: response.storeSelection.title,
+          stores: response.storeSelection.stores,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, storeMessage]);
+      }
       // Handle product cards from recommendation agent
       else if (
         response.responses &&
@@ -1210,6 +1354,12 @@ export default function ChatBot({ customerId }) {
             ]);
           }
         }
+      }
+
+      // Speak a concise TTS summary of the assistant response
+      const ttsText = getTtsSummary(response);
+      if (ttsText) {
+        speakResponse(ttsText);
       }
     } catch (err) {
       console.error("Error calling agent:", err);
@@ -2585,6 +2735,11 @@ export default function ChatBot({ customerId }) {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, wishlistCardsMessage]);
+
+        // TTS voice prompt for wishlist
+        speakResponse(
+          `Your wishlist has ${data.products.length} product${data.products.length > 1 ? "s" : ""}. Select quantity and add to cart!`,
+        );
       } else {
         const emptyMessage = {
           type: "ai",
@@ -2592,6 +2747,9 @@ export default function ChatBot({ customerId }) {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, emptyMessage]);
+        speakResponse(
+          "Your wishlist is empty. Browse products and tap the heart icon to add items.",
+        );
       }
     } catch (error) {
       console.error("Error fetching wishlist products:", error);
@@ -2714,6 +2872,15 @@ export default function ChatBot({ customerId }) {
         } else {
           console.log("not silent", cartCardsMessage);
           setMessages((prev) => [...prev, cartCardsMessage]);
+
+          // TTS voice prompt for cart view
+          const itemCount = data.cart_items.length;
+          const totalAmt = data.total_amount
+            ? `₹${Math.round(data.total_amount)}`
+            : "";
+          speakResponse(
+            `Your cart has ${itemCount} item${itemCount > 1 ? "s" : ""}${totalAmt ? " totalling " + totalAmt : ""}. You can update quantities or proceed to checkout.`,
+          );
 
           // Trigger autonomous upsell chain via REST (non-blocking)
           (async () => {
@@ -2855,6 +3022,7 @@ export default function ChatBot({ customerId }) {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+        if (!silent) speakResponse("Your cart is currently empty.");
       }
     } catch (error) {
       console.error("Error viewing cart:", error);
@@ -3093,6 +3261,9 @@ export default function ChatBot({ customerId }) {
       };
       setMessages((prev) => [...prev, aiMessage]);
 
+      // Speak cart addition confirmation
+      speakResponse(`${product.product_name} has been added to your cart.`);
+
       // Add View Cart button after successful add to cart
       const viewCartMessage = {
         type: "viewCartPrompt",
@@ -3171,9 +3342,15 @@ export default function ChatBot({ customerId }) {
 
           if (res.ok) {
             const data = await res.json();
-            if (data.text) {
+            // Store the detected language for TTS responses
+            if (data.detected_language) {
+              voiceLanguageRef.current = data.detected_language;
+            }
+            // Use the translated English text as input for the agent
+            const textForInput = data.text || "";
+            if (textForInput) {
               setInputValue((prev) =>
-                prev ? prev + " " + data.text : data.text,
+                prev ? prev + " " + textForInput : textForInput,
               );
             }
           } else {
@@ -3572,6 +3749,9 @@ export default function ChatBot({ customerId }) {
                                   ...prev,
                                   purchaseMethodsMessage,
                                 ]);
+                                speakResponse(
+                                  "How would you like to receive your order? You can buy online with home delivery or pick up from the nearest store.",
+                                );
                               } else if (
                                 data.agent_calls &&
                                 data.agent_calls.includes("payment_agent") &&
@@ -3590,6 +3770,9 @@ export default function ChatBot({ customerId }) {
                                     },
                                   ];
                                 });
+                                speakResponse(
+                                  "Please select your preferred payment method to complete the order.",
+                                );
                               } else if (data.response) {
                                 setMessages((prev) => [
                                   ...prev,
@@ -3599,6 +3782,7 @@ export default function ChatBot({ customerId }) {
                                     timestamp: new Date(),
                                   },
                                 ]);
+                                speakResponse(getTtsSummary(data));
                               }
                             } catch (err) {
                               console.error("Error in Go For Payment:", err);
@@ -3683,6 +3867,9 @@ export default function ChatBot({ customerId }) {
                                 timestamp: new Date(),
                               },
                             ]);
+                            speakResponse(
+                              "Here are your post-purchase support options. You can request a return, contact support, or leave feedback.",
+                            );
                           }}
                           disabled={isLoading}
                           title="Post Purchase Support"
@@ -5464,6 +5651,32 @@ export default function ChatBot({ customerId }) {
 
                                           // Show single summary message
                                           if (successCount > 0) {
+                                            // TTS: speak all added product names at once
+                                            const addedNames = productsToAdd
+                                              .filter(
+                                                (p) =>
+                                                  !failedProducts.includes(
+                                                    p.product_name,
+                                                  ),
+                                              )
+                                              .map((p) => p.product_name);
+                                            if (addedNames.length === 1) {
+                                              speakResponse(
+                                                `${addedNames[0]} has been added to your cart.`,
+                                              );
+                                            } else if (addedNames.length > 1) {
+                                              const nameList =
+                                                addedNames
+                                                  .slice(0, -1)
+                                                  .join(", ") +
+                                                " and " +
+                                                addedNames[
+                                                  addedNames.length - 1
+                                                ];
+                                              speakResponse(
+                                                `${nameList} have been added to your cart.`,
+                                              );
+                                            }
                                             let summaryText =
                                               successCount ===
                                               productsToAdd.length
@@ -6093,6 +6306,9 @@ export default function ChatBot({ customerId }) {
                                                 timestamp: new Date(),
                                               },
                                             ]);
+                                            speakResponse(
+                                              "How would you like to receive your order? You can buy online with home delivery or pick up from the nearest store.",
+                                            );
                                           } else if (
                                             data.agent_calls &&
                                             data.agent_calls.includes(
@@ -6117,6 +6333,9 @@ export default function ChatBot({ customerId }) {
                                                 },
                                               ];
                                             });
+                                            speakResponse(
+                                              "Please select your preferred payment method to complete the order.",
+                                            );
                                           } else if (data.response) {
                                             setMessages((prev) => [
                                               ...prev,
@@ -6126,6 +6345,7 @@ export default function ChatBot({ customerId }) {
                                                 timestamp: new Date(),
                                               },
                                             ]);
+                                            speakResponse(getTtsSummary(data));
                                           }
                                         } catch (err) {
                                           console.error(
@@ -6473,6 +6693,51 @@ export default function ChatBot({ customerId }) {
 
               <div className="chat-input-container">
                 <div className="input-wrapper">
+                  <button
+                    className={`voice-mic-toggle${isVoiceEnabled ? " active" : ""}`}
+                    title={
+                      isVoiceEnabled
+                        ? "Voice assistance on"
+                        : "Voice assistance off"
+                    }
+                    onClick={() => {
+                      const next = !isVoiceEnabled;
+                      setIsVoiceEnabled(next);
+                      if (!next && ttsAudioRef.current) {
+                        ttsAudioRef.current.pause();
+                        ttsAudioRef.current = null;
+                      }
+                      if (!next && isRecording) {
+                        stopRecording();
+                      }
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      width="22"
+                      height="22"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="9" y="1" width="6" height="12" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                      {!isVoiceEnabled && (
+                        <line
+                          x1="3"
+                          y1="3"
+                          x2="21"
+                          y2="21"
+                          className="mic-strikethrough"
+                        />
+                      )}
+                    </svg>
+                  </button>
                   <input
                     type="text"
                     className="chat-input"
@@ -6482,20 +6747,22 @@ export default function ChatBot({ customerId }) {
                     onKeyPress={handleKeyPress}
                     disabled={isLoading}
                   />
-                  <button
-                    className={`mic-btn${isRecording ? " recording" : ""}`}
-                    title={
-                      isRecording
-                        ? "Stop recording"
-                        : isTranscribing
-                          ? "Transcribing..."
-                          : "Voice input"
-                    }
-                    onClick={isRecording ? stopRecording : startRecording}
-                    disabled={isLoading || isTranscribing}
-                  >
-                    {isTranscribing ? "⏳" : isRecording ? "⏹" : "🎤"}
-                  </button>
+                  {isVoiceEnabled && (
+                    <button
+                      className={`mic-btn${isRecording ? " recording" : ""}`}
+                      title={
+                        isRecording
+                          ? "Stop recording"
+                          : isTranscribing
+                            ? "Transcribing..."
+                            : "Voice input"
+                      }
+                      onClick={isRecording ? stopRecording : startRecording}
+                      disabled={isLoading || isTranscribing}
+                    >
+                      {isTranscribing ? "⏳" : isRecording ? "⏹" : "🎤"}
+                    </button>
+                  )}
                   <button
                     className="send-btn"
                     onClick={sendMessage}

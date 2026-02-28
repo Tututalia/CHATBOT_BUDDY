@@ -260,8 +260,9 @@ def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] =
                             f"{items_text}\n"
                         )
                     wa_msg += (
-                        f"💡 _You can now complete your purchase_\n"
-                        f"   _anytime from the comfort of your home._\n\n"
+                        f"*Please Note:* Your selected products will be reserved for the next 6 hours. Beyond this window, availability will be subject to real-time inventory levels. We recommend completing your purchase at your earliest convenience to ensure availability.\n\n"
+                        # f"💡 _You can now complete your purchase_\n"
+                        # f"   _anytime from the comfort of your home._\n\n"
                         f"Happy Shopping! 🛍️\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━"
                     )

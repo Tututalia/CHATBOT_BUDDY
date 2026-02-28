@@ -1000,21 +1000,8 @@ export default function Chatbot_Kiosk({ customerId }) {
       const data = await response.json();
       if (data.success) {
         const itemCount = data.items_switched || 0;
-        const congratsMessage = `🎉✨ **Congratulations!** ✨🎉
-
-**What a Brilliant Choice!** 🌟
-
-We're absolutely delighted to offer you this incredible flexibility! Now you can browse, explore, and add your favorite products from our entire collection to your cart at your leisure. 
-
-Products successfully moved to your online cart!** 🛒
-
-Feel free to continue shopping from the comfort of your home and complete your payment whenever you're ready. 💳✨
-
-**Happy Shopping!** 🎊`;
-
         addMessage({
-          type: "ai",
-          text: congratsMessage,
+          type: "switchSuccess",
           timestamp: new Date(),
         });
         pushTimelineEntry({
@@ -1860,6 +1847,57 @@ Feel free to continue shopping from the comfort of your home and complete your p
                     <div className="kiosk-message-content kiosk-transfer-card">
                       <div className="kiosk-transfer-text">
                         {renderRichText(message.text)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (message.type === "switchSuccess") {
+                return (
+                  <div
+                    key={`sw-${index}`}
+                    className="kiosk-message kiosk-ai-message"
+                  >
+                    <div className="kiosk-message-content kiosk-switch-success-card">
+                      <div className="kiosk-switch-success-banner">
+                        🎉✨ Congratulations! ✨🎉
+                      </div>
+                      <div className="kiosk-switch-success-title">
+                        What a Brilliant Choice! 🌟
+                      </div>
+                      <div className="kiosk-switch-success-body">
+                        We're absolutely delighted to offer you this incredible
+                        flexibility! Now you can browse, explore, and add your
+                        favorite products from our entire collection to your
+                        cart at your leisure.
+                      </div>
+                      <div className="kiosk-switch-success-highlight">
+                        Products successfully moved to your online cart! 🛒
+                      </div>
+                      <div className="kiosk-switch-success-body">
+                        Feel free to continue shopping from the comfort of your
+                        home and complete your payment whenever you're ready.
+                        💳✨
+                      </div>
+                      <div className="kiosk-switch-success-note">
+                        <span className="kiosk-switch-success-note-icon">
+                          📌
+                        </span>
+                        <span>
+                          <strong>Please Note:</strong> Your selected products
+                          will be reserved for the next 6 hours. Beyond this
+                          window, availability will be subject to real-time
+                          inventory levels. We recommend completing your
+                          purchase at your earliest convenience to ensure
+                          availability.
+                        </span>
+                      </div>
+                      <div className="kiosk-switch-success-footer">
+                        Happy Shopping! 🎊
+                      </div>
+                      <div className="kiosk-message-time">
+                        {message.timestamp.toLocaleTimeString()}
                       </div>
                     </div>
                   </div>
