@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, StrictMode } from "react";
 import "./ChatBot.css";
 import chatbotConfig from "../../data/chatbotAgents.json";
 import chatbotSchema from "../../data/chatbot.json";
+import VirtualTryOnModal from "./VirtualTryOnModal";
 
 export default function ChatBot({ customerId }) {
   // Helper function to get time-based greeting
@@ -79,6 +80,7 @@ export default function ChatBot({ customerId }) {
   const [cartCount, setCartCount] = useState(0);
   const [cartBlink, setCartBlink] = useState(false);
   const [zoomedImage, setZoomedImage] = useState(null);
+  const [virtualTryOnProduct, setVirtualTryOnProduct] = useState(null);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -3433,6 +3435,14 @@ export default function ChatBot({ customerId }) {
         </div>
       )}
 
+      {/* Virtual Try-On Modal */}
+      {virtualTryOnProduct && (
+        <VirtualTryOnModal
+          product={virtualTryOnProduct}
+          onClose={() => setVirtualTryOnProduct(null)}
+        />
+      )}
+
       {/* Chatbot Icon */}
       <div className="chatbot-icon" onClick={toggleChatbot}>
         <div className="bot-avatar">
@@ -5741,6 +5751,19 @@ export default function ChatBot({ customerId }) {
                                         }`}
                                       >
                                         <div className="product-image-wrapper">
+                                          <button
+                                            className="vto-tryon-btn"
+                                            title="3D Virtual Trial Room"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setVirtualTryOnProduct(product);
+                                            }}
+                                          >
+                                            👗
+                                            <span className="vto-tryon-tooltip">
+                                              3D Trial Room
+                                            </span>
+                                          </button>
                                           <img
                                             src={
                                               product.image_reference ||

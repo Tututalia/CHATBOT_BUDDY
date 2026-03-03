@@ -19,7 +19,7 @@ from database import engine, get_db_session
 from chat_database import save_message, get_conversation_history, clear_conversation_history
 from langchain_core.messages import HumanMessage, AIMessage
 from intelligent_agent_graph import run_agent, create_agent_graph, upsell_agent, inventory_agent, recommendation_agent
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import openai
@@ -1843,6 +1843,179 @@ async def text_to_speech(data: TTSRequest):
     except Exception as e:
         logging.error(f"Text-to-speech error: {e}")
         return JSONResponse(status_code=500, content={"error": "Failed to generate speech"})
+
+
+# ============ Virtual Try-On (Google Vertex AI) Endpoint ============
+
+@app.post("/api/virtual-tryon")
+async def virtual_tryon(
+    person_image: UploadFile = File(...),
+    product_image_url: Optional[str] = Form(None),
+    product_image: Optional[UploadFile] = File(None),
+):
+    """
+    Virtual Try-On using Google Vertex AI.
+    Accepts a person image upload and a product image (either as URL or upload).
+    Returns the generated try-on image as base64.
+    """
+    try:
+        from google import genai
+        from google.genai.types import RecontextImageSource, ProductImage, Image
+
+        logging.info(
+            f"[VTO] person_image={person_image.filename}, product_image_url={product_image_url}, product_image={getattr(product_image, 'filename', None)}")
+
+        api_key = os.getenv("GOOGLE_VERTEX_API_KEY", "")
+        project_id = os.getenv("GOOGLE_VERTEX_PROJECT_ID", "")
+        location = os.getenv("GOOGLE_VERTEX_LOCATION", "us-central1")
+        credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+        # google-genai SDK: api_key and vertexai/project/location are MUTUALLY EXCLUSIVE.
+        # virtual-try-on-001 is a Vertex AI model → needs vertexai=True + project + location.
+        # We load the service account JSON to provide credentials.
+        if project_id:
+            # Resolve credentials path relative to this file if not absolute
+            if credentials_path and not os.path.isabs(credentials_path):
+                credentials_path = os.path.join(
+                    os.path.dirname(os.path.abspath(
+                        __file__)), credentials_path
+                )
+
+            # Load service account credentials from JSON key file
+            if credentials_path and os.path.isfile(credentials_path):
+                from google.oauth2 import service_account
+                credentials = service_account.Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                )
+                logging.info(
+                    f"[VTO] Using Vertex AI mode with service account: project={project_id}, location={location}, creds={credentials_path}")
+                vertex_client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location=location,
+                    credentials=credentials,
+                )
+            else:
+                # Fallback: rely on Application Default Credentials (gcloud auth)
+                logging.info(
+                    f"[VTO] Using Vertex AI mode with ADC: project={project_id}, location={location}")
+                vertex_client = genai.Client(
+                    vertexai=True,
+                    project=project_id,
+                    location=location,
+                )
+        elif api_key:
+            # API-key-only mode (Google AI / Gemini API)
+            logging.info("[VTO] Using API key mode (no project_id set)")
+            vertex_client = genai.Client(api_key=api_key)
+        else:
+            return JSONResponse(status_code=500, content={
+                "error": "Virtual try-on not configured. Set GOOGLE_VERTEX_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS in .env"
+            })
+
+        # Read person image bytes
+        person_bytes = await person_image.read()
+        if not person_bytes:
+            return JSONResponse(status_code=400, content={"error": "Empty person image"})
+
+        # Save person image to temp file
+        person_suffix = os.path.splitext(
+            person_image.filename or "person.jpg")[1] or ".jpg"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=person_suffix) as tmp_person:
+            tmp_person.write(person_bytes)
+            tmp_person_path = tmp_person.name
+
+        # Get product image - either from URL or file upload
+        tmp_product_path = None
+        try:
+            if product_image and product_image.filename:
+                # Product image uploaded directly
+                product_bytes = await product_image.read()
+                product_suffix = os.path.splitext(
+                    product_image.filename)[1] or ".jpg"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=product_suffix) as tmp_product:
+                    tmp_product.write(product_bytes)
+                    tmp_product_path = tmp_product.name
+            elif product_image_url:
+                # Download product image from URL
+                import httpx
+                # Handle relative URLs by looking at local filesystem first
+                if product_image_url.startswith("/images/"):
+                    local_path = _IMAGES_DIR / \
+                        product_image_url.replace("/images/", "")
+                    if local_path.exists():
+                        tmp_product_path = str(local_path)
+                    else:
+                        return JSONResponse(status_code=400, content={"error": "Product image not found locally"})
+                else:
+                    async with httpx.AsyncClient() as http_client:
+                        resp = await http_client.get(product_image_url, timeout=15.0)
+                        resp.raise_for_status()
+                        product_suffix = ".jpg"
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=product_suffix) as tmp_product:
+                            tmp_product.write(resp.content)
+                            tmp_product_path = tmp_product.name
+            else:
+                return JSONResponse(status_code=400, content={"error": "No product image provided"})
+
+            # Call Vertex AI Virtual Try-On
+            response = vertex_client.models.recontext_image(
+                model="virtual-try-on-001",
+                source=RecontextImageSource(
+                    person_image=Image.from_file(location=tmp_person_path),
+                    product_images=[
+                        ProductImage(product_image=Image.from_file(
+                            location=tmp_product_path))
+                    ],
+                ),
+            )
+
+            if response.generated_images and len(response.generated_images) > 0:
+                # Save result to temp file and read as base64
+                import base64
+                result_suffix = ".png"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=result_suffix) as tmp_result:
+                    response.generated_images[0].image.save(tmp_result.name)
+                    tmp_result_path = tmp_result.name
+
+                with open(tmp_result_path, "rb") as f:
+                    result_bytes = f.read()
+
+                # Cleanup result temp file
+                try:
+                    os.unlink(tmp_result_path)
+                except OSError:
+                    pass
+
+                result_base64 = base64.b64encode(result_bytes).decode("utf-8")
+                return {"success": True, "image": f"data:image/png;base64,{result_base64}"}
+            else:
+                return JSONResponse(status_code=422, content={
+                    "error": "Virtual try-on could not generate a result. Please try with a clearer full-body photo."
+                })
+
+        finally:
+            # Cleanup temp files
+            try:
+                os.unlink(tmp_person_path)
+            except OSError:
+                pass
+            if tmp_product_path and not tmp_product_path.startswith(str(_IMAGES_DIR)):
+                try:
+                    os.unlink(tmp_product_path)
+                except OSError:
+                    pass
+
+    except ImportError:
+        logging.error(
+            "google-genai package not installed. Run: pip install google-genai")
+        return JSONResponse(status_code=500, content={"error": "Virtual try-on service not available. Missing google-genai package."})
+    except Exception as e:
+        logging.error(f"Virtual try-on error: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(status_code=500, content={"error": f"Virtual try-on failed: {str(e)}"})
 
 
 # code to  be pasted

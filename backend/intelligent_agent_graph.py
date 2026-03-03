@@ -1652,7 +1652,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
     # Always return the fulfillment agent message in a dict with 'response' key for frontend
     if purchase_type.lower() == "online":
         print("⏳ Confirming your order...")
-        time.sleep(0.05)
+        # time.sleep(0.05)
         delivery_date = "3-5 business days"
         result = f"📦 **Order Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
@@ -1788,7 +1788,7 @@ def loyalty_agent(order_id: str, customer_id: str) -> str:
     """
     # Add delay before showing loyalty rewards
     print("⏳ Calculating your rewards...")
-    time.sleep(0.05)
+    # time.sleep(0.05)
 
     # Calculate total loyalty points from all order items based on product loyalty_points
     try:
@@ -1885,7 +1885,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
     """
     # Add 0.5 seconds delay before showing post-purchase services
     print("⏳ Processing your request...")
-    time.sleep(0.05)
+    # time.sleep(0.05)
 
     # === DB operations: Add to order_history, store_keeper_transaction, and delete from cart ===
     try:

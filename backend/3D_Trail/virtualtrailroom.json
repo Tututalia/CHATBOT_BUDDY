@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "virtualtrailroom",
+  "private_key_id": "e0485cf766b5ce6c0ff232767b82b9caf35c2318",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC1QWyUM4PUCvaa\nfhpZ91VC4G7FIb+dZK37KXO/W3zMrfh+LMcyEa29XoRfoEwBn3MpC7vIXiKEJrtI\n0etTngTebLZoJqZwCeUWjwa2b2EHJTPw0RFl13lyXT5qOtKY2AhRs/+zl/WbGBPt\nW14W2vnFKWrwe265wkSWKtgoYma8hfpiTSo91TBzPzMyOccC1ABF6H6FM4inTdEl\nXe6Cz/8B6inAcpaMcWNqNn8/2LVyYtQGJcPBv/j8MyaQ6XGryW2qz2p1aYxlsTsa\nyvfFBSC6X6X5daR/bgsEHC5wmEXqkDJjR8RzwUNYiWm6QJqN2SnIH6yZhg6bAW+l\npHBwbJflAgMBAAECggEAGjNqYCPwNvscualn4sBjhUbPDFT8D2Lp2WgdELjHWgj9\n5jNP2hd/H2Qly3Lu+b8UVQcarnSZFbRJl1Ws6Enr10EsvvJzVbfAc1nadQ21n2RL\n1VBLbQbQSe1bo9x769cyoKjd2hapzLEW1FVETRZ7S3pYuImHMHf6FSD9XR0YT8Dp\nr1TAzpnIsT1F+zr68NnSUnoII77ycyCeI4rk4kreakBwBTsBRccUs3ZrGGboSAtd\nHzJRlIuFAkw2gdH2w3FJafRsXMwzKu27csFr5MO7+hh2mFAVlTVhM2UiEu9u7K27\nIh8ouxYfYJIbSIwtsev8GoAdk1qkR7Wdy4xJimHccQKBgQDr7z8oqe3bZ7cWJlBk\n6jgU4XtmkOMzqdciHxwgm6VLUaihiKbdYZ/ClaC6ciGvPlKSgpkcsVCYzSUCjCbJ\no6qhUKinwim+aBTSlwidjQgd+Ed0HGDcxNmvagQkMNVhVilNwl7cuD9HHYirm3gq\nn9pzxiM9pbOx5B4naa1XDs0D+QKBgQDEq7WmzHyf/fQk+kRPYy9MAQpZbEdowVYP\nXqXG5ij+bh8tyCMZ7ZbatkMlKHUOhxZDlFh9wAaznxlcQ/sayU34Z/3QAL+w1GP2\nCHwkrn49k+oMXLD2AskKhrkcJlihNX5r5RgChNTIsWBhTnO9ywJYR54mI/T2Dxs7\njl5uhoMWTQKBgEyC4KOKP+WIA9q+ABJJ1ngHC2Kel9+YM3kQR6nXb8o2KA6CZ0Kh\ntxJ+PYpZGs1e055Jlee1JOL4nAjwdF+toNcBdkA4+hqSXDZS3mthYgF+E4X28f6G\nI+X75m3qHDidnXVnFCZV5cdlL34fQ9/myQwEdEc4pkaJKLI1Vg5GcXvZAoGAVPGd\nCaf0g93Z30bAzlEWkos4fxsHVLV8iDLnAxtRxWKm0M1Ka950c46ZPalVtaqe8R1X\ngyi3PEmRWIp8IDumE45Gz9oi8Ssq6Y8Mn4NGPy5tvl0iiX72ejdqKEBfs3E5YzyV\nvDDG/s+twxlxYB4YqyxzoCGTodswde6t1qr+X1kCgYAg5lkDBu/DHuNumyLwNV5y\nx3yWyBK38t3rLS+6SC6xGfGZTlFzEAal7yELu2eHe3ftolHUzaBVLdbcenrZ5VVX\niuIAWZ8qwmwJ0PMfJDJmK6G0CYFisSrmgwRpfFZhtxt0bHCbTHEAJGzZVhQnR+xs\nXKnjMYngJ49aNm912sYMxQ==\n-----END PRIVATE KEY-----\n",
+  "client_email": "vtr-user@virtualtrailroom.iam.gserviceaccount.com",
+  "client_id": "108040096643403766100",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/vtr-user%40virtualtrailroom.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
