@@ -1711,13 +1711,13 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         result += "[SYSTEM: CONVERSATION_COMPLETE - Offline store pickup. Transfer to in-store kiosk. END conversation.]"
         response_payload["response"] = result
 
-        # --- Send WhatsApp confirmation only for CUST038 ---
-        if customer_id == "CUST008":
+        # --- Send WhatsApp confirmation only for CUST043 ---
+        if customer_id == "CUST043":
             try:
                 from intelligent_whatsapp_graph import send_whatsapp_text
                 wa_phone = "+919339712883"
                 print(
-                    f"[Fulfillment] 📱 Sending WhatsApp pickup confirmation to {wa_phone} for CUST038...")
+                    f"[Fulfillment] 📱 Sending WhatsApp pickup confirmation to {wa_phone} for CUST043...")
                 customer = get_customer_by_id(customer_id)
                 customer_name = getattr(
                     customer, 'customer_name', 'Valued Customer') if customer else 'Valued Customer'
@@ -1759,7 +1759,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
 
                 send_whatsapp_text(wa_phone, wa_msg)
                 print(
-                    f"[Fulfillment] ✅ WhatsApp pickup confirmation sent to {wa_phone} for order {order_id} (CUST038)")
+                    f"[Fulfillment] ✅ WhatsApp pickup confirmation sent to {wa_phone} for order {order_id} (CUST043)")
             except Exception as wa_err:
                 print(
                     f"[Fulfillment] ❌ Failed to send WhatsApp pickup confirmation: {wa_err}")
@@ -1767,7 +1767,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                 traceback.print_exc()
         else:
             print(
-                f"[Fulfillment] Skipping WhatsApp notification — customer_id is '{customer_id}', not CUST001")
+                f"[Fulfillment] Skipping WhatsApp notification — customer_id is '{customer_id}', not CUST043")
 
     return response_payload
 
@@ -2129,8 +2129,8 @@ def upsell_agent(customer_id: str) -> str:
     _female_related = {
         "Top": ["Skirt", "Jeans", "Footwear", "Accessories", "Costume Jewellery", "Heels"],
         "Skirt": ["Top", "Footwear", "Costume Jewellery", "Accessories", "Heels"],
-        "Dress": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
-        "Dresses": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
+        "Dress": ["Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
+        "Dresses": ["Costume Jewellery", "Accessories", "Heels", "Handbags & Bags"],
         "Gown": ["Footwear", "Costume Jewellery", "Accessories", "Heels", "Perfume"],
         "Ethnic": ["Costume Jewellery", "Footwear", "Accessories", "Kurti", "Perfume"],
         "Ethnic Wear": ["Costume Jewellery", "Footwear", "Accessories", "Kurti", "Perfume"],
@@ -2284,24 +2284,30 @@ def upsell_agent(customer_id: str) -> str:
     except Exception as e:
         print(f"[UPSELL] Error reading cart for {customer_id}: {e}")
 
-    # De-duplicate while preserving randomness, then pick one
+    # De-duplicate and shuffle so we have a prioritised list of categories to try.
+    # Returning ALL candidates lets the caller loop through them until 4 products
+    # are collected, avoiding the problem of a single category yielding < 4 items.
     if candidate_categories:
         unique_candidates = list(set(candidate_categories))
-        selected = random.choice(unique_candidates)
+        random.shuffle(unique_candidates)
     else:
         fb = _fallback_by_gender.get(detected_gender, fallback_categories)
-        selected = random.choice(fb)
+        unique_candidates = list(fb)
+        random.shuffle(unique_candidates)
 
+    selected = unique_candidates[0] if unique_candidates else "Accessories"
     search_query = f"show me {selected}"
 
     print(
-        f"[UPSELL] Triggered for customer {customer_id} — recommending: {selected}")
+        f"[UPSELL] Triggered for customer {customer_id} — recommending: {selected} "
+        f"(all candidates: {unique_candidates})")
 
     return json.dumps({
         "tool": "upsell_agent",
         "type": "upsell",
         "search_query": search_query,
         "category": selected,
+        "categories": unique_candidates,
         "customer_id": customer_id
     })
 

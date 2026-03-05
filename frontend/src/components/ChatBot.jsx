@@ -1112,6 +1112,24 @@ export default function ChatBot({ customerId }) {
     }
     // --- End pending refund handling ---
 
+    // --- Fast path: "show my cart items" triggers instant cart load ---
+    const _cartFastInput = inputValue.trim().toLowerCase();
+    if (
+      _cartFastInput === "show my cart items" ||
+      _cartFastInput === "please show my cart items" ||
+      _cartFastInput === "show my cart" ||
+      _cartFastInput === "show cart items" ||
+      _cartFastInput === "view my cart" ||
+      _cartFastInput === "show my card items" ||
+      _cartFastInput === "show my card item" ||
+      _cartFastInput === "view cart"
+    ) {
+      setInputValue("");
+      await handleViewCart();
+      return;
+    }
+    // --- End fast path ---
+
     const userMessage = {
       type: "user",
       text: inputValue,
@@ -5753,7 +5771,7 @@ export default function ChatBot({ customerId }) {
                                         <div className="product-image-wrapper">
                                           <button
                                             className="vto-tryon-btn"
-                                            title="3D Virtual Trial Room"
+                                            title="Virtual Trial Room"
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               setVirtualTryOnProduct(product);
@@ -5761,7 +5779,7 @@ export default function ChatBot({ customerId }) {
                                           >
                                             👗
                                             <span className="vto-tryon-tooltip">
-                                              3D Trial Room
+                                              Virtual Trial Room
                                             </span>
                                           </button>
                                           <img

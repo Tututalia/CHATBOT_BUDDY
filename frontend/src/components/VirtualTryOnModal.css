@@ -440,6 +440,128 @@
 
 /* ============ 3D Trial Room Button on Product Card ============ */
 
+/* ============ Zoom Lightbox ============ */
+
+.vto-zoomable {
+  cursor: zoom-in;
+  transition: filter 0.2s;
+}
+
+.vto-zoomable:hover {
+  filter: brightness(0.92);
+}
+
+.vto-zoom-hint {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.vto-product-preview:hover .vto-zoom-hint,
+.vto-person-preview:hover .vto-zoom-hint,
+.vto-result-preview:hover .vto-zoom-hint {
+  opacity: 1;
+  pointer-events: auto;
+  cursor: zoom-in;
+}
+
+.vto-product-preview,
+.vto-person-preview,
+.vto-result-preview {
+  position: relative;
+}
+
+.vto-zoom-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300000;
+  animation: vtoFadeIn 0.2s ease;
+  cursor: zoom-out;
+}
+
+.vto-zoom-controls {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 300002;
+}
+
+.vto-zoom-ctrl-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  backdrop-filter: blur(8px);
+}
+
+.vto-zoom-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.vto-zoom-close {
+  margin-left: 8px;
+  background: rgba(220, 38, 38, 0.5);
+  border-color: rgba(220, 38, 38, 0.6);
+}
+
+.vto-zoom-close:hover {
+  background: rgba(220, 38, 38, 0.75);
+}
+
+.vto-zoom-level {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 44px;
+  text-align: center;
+  user-select: none;
+}
+
+.vto-zoom-img {
+  max-width: 80vw;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease;
+  user-select: none;
+  -webkit-user-drag: none;
+  cursor: default;
+}
+
+/* ============ 3D Trial Room Button on Product Card ============ */
+
 .vto-tryon-btn {
   position: absolute;
   top: 8px;

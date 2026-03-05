@@ -4,6 +4,7 @@ LLM decides which agent tools to call based on user query.
 Responses are sent back to the user via WhatsApp (Twilio / Meta Cloud API).
 """
 
+from whatsapp import send_quick_reply_buttons, get_button_command
 from unittest import result
 from crud import (
     product_crud, store_crud, customer_crud, order_history_crud,
@@ -32,6 +33,8 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Quick-action button utilities for WhatsApp
 
 # Import database and CRUD modules
 
@@ -181,6 +184,47 @@ def _format_whatsapp_product_card(product: dict) -> str:
     return "\n".join(lines)
 
 
+def _determine_button_context(agent_result) -> str | None:
+    """Determine which quick-action button set to show based on agent response."""
+    if not isinstance(agent_result, dict):
+        return "main_menu"
+
+    raw_resp = str(agent_result.get("response", ""))
+    if "CONVERSATION_COMPLETE" in raw_resp:
+        return None
+
+    agent_calls = agent_result.get("agent_calls", [])
+    resp_lower = raw_resp.lower()
+
+    # Map the most-recently-called agent to a button context
+    _AGENT_CONTEXT_MAP = {
+        "post_purchase_agent": "after_purchase",
+        "loyalty_agent": "after_purchase",
+        "fulfillment_agent": "after_purchase",
+        "choose_channel_agent": "channel_select",
+        "view_cart_agent": "after_view_cart",
+        "remove_from_cart_agent": "after_view_cart",
+        "add_to_cart_agent": "after_add_to_cart",
+        "recommendation_agent": "after_recommendation",
+        "inventory_agent": "after_recommendation",
+        "upsell_agent": "after_recommendation",
+        "customer_info_agent": "main_menu",
+    }
+
+    if agent_calls:
+        last_agent = agent_calls[-1]
+        # Special case: payment_agent context depends on response content
+        if last_agent == "payment_agent":
+            if "payment method" in resp_lower or "choose" in resp_lower:
+                return "payment_methods"
+            return "after_purchase"
+        ctx = _AGENT_CONTEXT_MAP.get(last_agent)
+        if ctx:
+            return ctx
+
+    return "main_menu"
+
+
 async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
     """
     Take the raw result dict from the agent graph (same structure the web chat
@@ -189,6 +233,7 @@ async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
     if not agent_result:
         send_whatsapp_text(
             recipient, "Sorry, I could not process your request. Please try again.")
+        send_quick_reply_buttons(recipient, "main_menu")
         return
 
     # --- 1.  Recommendation Agent / Inventory results with product cards ---
@@ -219,6 +264,7 @@ async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
                     send_whatsapp_image(recipient, img_url, caption)
                 else:
                     send_whatsapp_text(recipient, caption)
+            send_quick_reply_buttons(recipient, "after_view_cart")
             return
 
         # fulfillment_agent returns {id: "fulfillment_agent", response: "..."}
@@ -228,6 +274,9 @@ async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
                 # Strip [SYSTEM:...] instructions meant for the LLM
                 text = re.sub(r"\[SYSTEM:.*?\]", "", text).strip()
                 send_whatsapp_text(recipient, text)
+            # Send quick-action buttons (skip for offline / conversation complete)
+            if "CONVERSATION_COMPLETE" not in str(agent_result.get("response", "")):
+                send_quick_reply_buttons(recipient, "after_purchase")
             return
 
         # inventory_agent store selection
@@ -261,6 +310,7 @@ async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
 
         send_whatsapp_text(
             recipient, "Would you like to *add any of these to your cart*? Reply with the product name or ID and quantity.")
+        send_quick_reply_buttons(recipient, "after_recommendation")
         return
 
     # --- 3. Plain text response ---
@@ -287,6 +337,11 @@ async def send_agent_response_to_whatsapp(recipient: str, agent_result: dict):
     else:
         send_whatsapp_text(
             recipient, "✅ Done! Is there anything else I can help you with?")
+
+    # Send contextual quick-action buttons after every response
+    _btn_ctx = _determine_button_context(agent_result)
+    if _btn_ctx:
+        send_quick_reply_buttons(recipient, _btn_ctx)
 
 
 def get_or_create_whatsapp_session(wa_id: str) -> List[BaseMessage]:
@@ -326,7 +381,7 @@ def _resolve_customer_id_from_phone(phone: str) -> str:
         logging.error(f"[WA] Error resolving customer from phone {phone}: {e}")
 
     # Default fallback
-    return "CUST008"
+    return "CUST043"
 
 
 async def run_whatsapp_agent(wa_id: str, message_body: str, phone_number: str | None = None) -> dict:
@@ -351,7 +406,13 @@ async def run_whatsapp_agent(wa_id: str, message_body: str, phone_number: str | 
     # Handle reset / clear commands
     if message_body.strip().lower() in ("reset", "clear", "start over", "new chat"):
         clear_whatsapp_session(wa_id)
+        send_quick_reply_buttons(wa_id, "main_menu")
         return {"response": "🔄 Chat reset! How can I help you today?"}
+
+    # Map quick-action button taps to agent commands
+    _btn_cmd = get_button_command(message_body)
+    if _btn_cmd:
+        message_body = _btn_cmd
 
     # Price-band fast path (same as web chat)
     def _looks_like_price_band_query(text: str) -> bool:
@@ -405,6 +466,122 @@ async def run_whatsapp_agent(wa_id: str, message_body: str, phone_number: str | 
             result = {"response": str(cart_raw)}
         await send_agent_response_to_whatsapp(wa_id, result)
         return result
+
+    # ── Checkout / channel-select fast path ──────────────────────────
+    # Bypass the full LLM agent loop when user taps "Checkout" button.
+    def _looks_like_checkout_query(text: str) -> bool:
+        if not text or not isinstance(text, str):
+            return False
+        t = text.strip().lower()
+        checkout_phrases = [
+            "i want to proceed to checkout", "proceed to checkout",
+            "checkout", "proceed to payment", "proceed with payment",
+            "i want to checkout", "go to checkout",
+        ]
+        return any(phrase in t for phrase in checkout_phrases)
+
+    if _looks_like_checkout_query(message_body):
+        raw = choose_channel_agent.invoke({"customer_id": customer_id})
+        text = _md_to_whatsapp(str(raw))
+        send_whatsapp_text(wa_id, text)
+        send_quick_reply_buttons(wa_id, "channel_select")
+        return {"response": text, "agent_calls": ["choose_channel_agent"]}
+
+    # ── Buy-online fast path (show payment methods instantly) ────────
+    def _looks_like_buy_online_query(text: str) -> bool:
+        if not text or not isinstance(text, str):
+            return False
+        t = text.strip().lower()
+        online_phrases = [
+            "i want to buy online", "buy online", "online",
+            "home delivery", "deliver to home", "i choose online",
+            "i want online delivery",
+        ]
+        return any(phrase in t for phrase in online_phrases)
+
+    if _looks_like_buy_online_query(message_body):
+        raw = payment_agent.invoke(
+            {"customer_id": customer_id, "payment_method": ""})
+        text = _md_to_whatsapp(str(raw))
+        send_whatsapp_text(wa_id, text)
+        send_quick_reply_buttons(wa_id, "payment_methods")
+        return {"response": text, "agent_calls": ["payment_agent"]}
+
+    # ── Payment-method fast path (process payment instantly) ─────────
+    _PAYMENT_METHOD_MAP = {
+        "i want to pay with upi": "upi",
+        "i want to pay with credit card": "credit card",
+        "i want to pay with cash on delivery": "cash on delivery",
+        "pay with upi": "upi",
+        "pay with credit card": "credit card",
+        "pay with cash on delivery": "cash on delivery",
+        "upi": "upi",
+        "credit card": "credit card",
+        "cash on delivery": "cash on delivery",
+        "card": "credit card",
+        "cod": "cash on delivery",
+    }
+
+    def _resolve_payment_method(text: str) -> str | None:
+        if not text or not isinstance(text, str):
+            return None
+        t = text.strip().lower()
+        return _PAYMENT_METHOD_MAP.get(t)
+
+    _pm = _resolve_payment_method(message_body)
+    if _pm:
+        # ── Step 1: Payment ──
+        pay_raw = payment_agent.invoke(
+            {"customer_id": customer_id, "payment_method": _pm})
+        pay_text = _md_to_whatsapp(str(pay_raw))
+        pay_text = re.sub(r"\[SYSTEM:.*?\]", "", pay_text).strip()
+        send_whatsapp_text(wa_id, pay_text)
+
+        # Extract order_id from payment response (e.g. "Order ID: ORD924041")
+        _oid_match = re.search(r"Order\s*ID[:\s]*(ORD\d+)", str(pay_raw))
+        _order_id = _oid_match.group(
+            1) if _oid_match else f"ORD{random.randint(100000, 999999)}"
+
+        # ── Step 2: Fulfillment ──
+        try:
+            ful_raw = fulfillment_agent.invoke({
+                "purchase_type": "online",
+                "customer_id": customer_id,
+                "order_id": _order_id
+            })
+            ful_text = _md_to_whatsapp(str(ful_raw))
+            ful_text = re.sub(r"\[SYSTEM:.*?\]", "", ful_text).strip()
+            # The fulfillment response is a dict with 'response' key
+            if isinstance(ful_raw, dict) and "response" in ful_raw:
+                ful_text = _md_to_whatsapp(str(ful_raw["response"]))
+                ful_text = re.sub(r"\[SYSTEM:.*?\]", "", ful_text).strip()
+            send_whatsapp_text(wa_id, ful_text)
+        except Exception as e:
+            print(f"[Fast-path] Fulfillment error: {e}")
+
+        # ── Step 3: Loyalty ──
+        try:
+            loy_raw = loyalty_agent.invoke({
+                "order_id": _order_id,
+                "customer_id": customer_id
+            })
+            loy_text = _md_to_whatsapp(str(loy_raw))
+            loy_text = re.sub(r"\[SYSTEM:.*?\]", "", loy_text).strip()
+            send_whatsapp_text(wa_id, loy_text)
+        except Exception as e:
+            print(f"[Fast-path] Loyalty error: {e}")
+
+        # ── Step 4: Post-purchase (DB ops only – skip sending the message on WhatsApp) ──
+        try:
+            post_purchase_agent.invoke({
+                "order_id": _order_id,
+                "customer_id": customer_id
+            })
+        except Exception as e:
+            print(f"[Fast-path] Post-purchase error: {e}")
+
+        send_quick_reply_buttons(wa_id, "after_purchase")
+        return {"response": pay_text, "agent_calls": ["payment_agent", "fulfillment_agent", "loyalty_agent", "post_purchase_agent"]}
 
     # Build conversation history
     history = get_or_create_whatsapp_session(wa_id)
@@ -1734,12 +1911,12 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
     Shows available payment methods and processes online payment for all items in customer's cart.
     Use this after user confirms cart and chooses ONLINE purchase option.
 
-    STEP 1: If payment_method is empty, show 4 payment methods (UPI, Credit Card, Debit Card, Net Banking)
+    STEP 1: If payment_method is empty, show 4 payment methods (UPI, Credit Card, Debit Card, Cash On Delivery)
     STEP 2: If payment_method is provided, process payment for all cart items
 
     Args:
         customer_id: The customer ID
-        payment_method: Payment method selected by user (upi, credit card, debit card, net banking). 
+        payment_method: Payment method selected by user (upi, credit card, debit card, cash on delivery). 
                        Leave empty to show available payment methods.
 
     Returns:
@@ -1809,7 +1986,7 @@ def payment_agent(customer_id: str, payment_method: str = "") -> str:
         result += "1. 📱 **UPI** - Pay using any UPI app (Google Pay, PhonePe, Paytm, etc.)\\n"
         result += "2. 💳 **Credit Card** - Visa, Mastercard, American Express, etc.\\n"
         result += "3. 💳 **Debit Card** - All major banks supported\\n"
-        result += "4. 🏦 **Net Banking** - Direct bank transfer\\n\\n"
+        result += "4. 📦 **Cash On Delivery** - Pay when you receive your order\\n\\n"
         result += "Which payment method would you like to use?"
         return result
 
@@ -1929,7 +2106,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
     # Always return the fulfillment agent message in a dict with 'response' key for frontend
     if purchase_type.lower() == "online":
         print("⏳ Confirming your order...")
-        time.sleep(2.5)
+        # time.sleep(2.5)
         delivery_date = "3-5 business days"
         result = f"📦 **Order Confirmed!**\n\n"
         result += f"Order ID: {order_id}\n"
@@ -2004,7 +2181,7 @@ def loyalty_agent(order_id: str, customer_id: str) -> str:
     """
     # Add delay before showing loyalty rewards
     print("⏳ Calculating your rewards...")
-    time.sleep(2.5)
+    # time.sleep(2.5)
 
     # Calculate total loyalty points from all order items based on product loyalty_points
     try:
@@ -2101,7 +2278,7 @@ def post_purchase_agent(order_id: str, customer_id: str) -> str:
     """
     # Add 2-3 seconds delay before showing post-purchase services
     print("⏳ Processing your request...")
-    time.sleep(2.5)
+    # time.sleep(2.5)
 
     # === DB operations: Add to order_history, store_keeper_transaction, and delete from cart ===
     try:
@@ -2517,7 +2694,7 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
 
 **STEP 5B: ONLINE FLOW**
 - If user types "online" or confirms online purchase:
-  1. IMMEDIATELY call `payment_agent` with customer_id (no payment_method parameter) to show 4 payment options: UPI, Credit Card, Debit Card, Net Banking
+  1. IMMEDIATELY call `payment_agent` with customer_id (no payment_method parameter) to show 4 payment options: UPI, Credit Card, Debit Card, Cash On Delivery
   2. DO NOT ask to view cart again, DO NOT call choose_channel_agent again
   3. DO NOT call view_cart_agent again (cart already known)
 **STEP 5B: ONLINE FLOW - TWO-STAGE PAYMENT PROCESS**
@@ -2525,12 +2702,12 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
   
   **STAGE 1: Show Payment Options**
   1. IMMEDIATELY call `payment_agent(customer_id="{customer_id}")` - NO payment_method parameter
-     - This shows 4 payment options: UPI, Credit Card, Debit Card, Net Banking
+     - This shows 4 payment options: UPI, Credit Card, Debit Card, Cash On Delivery
      - DO NOT ask to view cart, DO NOT call choose_channel_agent
   
   **STAGE 2: Process Payment (User's NEXT message)**
   2. After payment_agent shows options, user's VERY NEXT MESSAGE is their payment method selection
-     - User types ONE of: "upi", "credit card", "debit card", "net banking" (case-insensitive)
+     - User types ONE of: "upi", "credit card", "debit card", "cash on delivery" (case-insensitive)
      - IMMEDIATELY call `payment_agent(payment_method="<method>", customer_id="{customer_id}")`
      - Examples: User says "upi" → call payment_agent(payment_method="upi", customer_id="{customer_id}")
      - DO NOT ask for confirmation, DO NOT call view_cart_agent, DO NOT call payment_agent a third time
@@ -2569,7 +2746,7 @@ Wrong Action: `add_to_cart_agent(product_id="PRD056", ...)` ❌ (PRD056 was not 
   * After SECOND call returns "Payment Successful", IMMEDIATELY call fulfillment_agent
   * DO NOT call payment_agent a THIRD time
   * DO NOT ask user for anything after payment success
-- **PAYMENT METHOD SELECTION RULE**: After payment_agent shows options, the user's NEXT message containing "upi"/"credit card"/"debit card"/"net banking" is their selection. IMMEDIATELY call payment_agent(payment_method="<method>"). DO NOT ask for confirmation.
+- **PAYMENT METHOD SELECTION RULE**: After payment_agent shows options, the user's NEXT message containing "upi"/"credit card"/"debit card"/"cash on delivery" is their selection. IMMEDIATELY call payment_agent(payment_method="<method>"). DO NOT ask for confirmation.
 - **OFFLINE FLOW CRITICAL RULE - CHECK CONVERSATION HISTORY**: 
   * STEP 1: User says "offline" → call inventory_agent(product_id=X) to show stores → stores displayed
   * STEP 2: Check last tool call - was it inventory_agent showing stores? If YES, then user's current message is store selection
@@ -2602,7 +2779,7 @@ User: "Proceed"
 **ONLINE FLOW EXAMPLE:**
 User: "Online"
 → CALL 1: payment_agent(customer_id="{customer_id}")  # NO payment_method parameter
-→ Shows: "Choose payment: UPI, Credit Card, Debit Card, or Net Banking?"
+→ Shows: "Choose payment: UPI, Credit Card, Debit Card, or Cash On Delivery?"
 
 User: "upi"
 → CALL 2: payment_agent(payment_method="upi", customer_id="{customer_id}")  # WITH payment_method
@@ -2632,7 +2809,7 @@ User: "STR011 - ABFRL Store South City"  # User selects a store
 
 **OFFLINE FLOW SUMMARY**: 3 tool calls total = view_cart_agent (get cart) + inventory_agent (show stores) + fulfillment_agent (pickup)
 
-**CRITICAL**: When user types "upi", "credit card", "debit card", or "net banking" after seeing payment options, that IS their payment method selection. Call payment_agent immediately with that method. Do NOT ask for confirmation.
+**CRITICAL**: When user types "upi", "credit card", "debit card", or "cash on delivery" after seeing payment options, that IS their payment method selection. Call payment_agent immediately with that method. Do NOT ask for confirmation.
 
 Follow this workflow strictly for every customer interaction.
 """

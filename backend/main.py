@@ -1919,10 +1919,39 @@ async def virtual_tryon(
         if not person_bytes:
             return JSONResponse(status_code=400, content={"error": "Empty person image"})
 
+        # --- Image optimization: resize large images for faster Vertex AI processing ---
+        def _optimize_image_bytes(img_bytes, max_dim=1024, quality=85):
+            """Resize and compress image bytes using Pillow for faster API calls."""
+            try:
+                from PIL import Image as PILImage
+                import io
+                img = PILImage.open(io.BytesIO(img_bytes))
+                # Convert RGBA/palette to RGB
+                if img.mode in ("RGBA", "P", "LA"):
+                    img = img.convert("RGB")
+                w, h = img.size
+                if w > max_dim or h > max_dim:
+                    scale = min(max_dim / w, max_dim / h)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    img = img.resize((new_w, new_h), PILImage.LANCZOS)
+                    logging.info(
+                        f"[VTO] Resized image from {w}x{h} to {new_w}x{new_h}")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
+                return buf.getvalue()
+            except ImportError:
+                logging.warning(
+                    "[VTO] Pillow not installed, skipping image optimization")
+                return img_bytes
+            except Exception as e:
+                logging.warning(
+                    f"[VTO] Image optimization failed: {e}, using original")
+                return img_bytes
+
+        person_bytes = _optimize_image_bytes(person_bytes)
+
         # Save person image to temp file
-        person_suffix = os.path.splitext(
-            person_image.filename or "person.jpg")[1] or ".jpg"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=person_suffix) as tmp_person:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_person:
             tmp_person.write(person_bytes)
             tmp_person_path = tmp_person.name
 
@@ -1932,9 +1961,8 @@ async def virtual_tryon(
             if product_image and product_image.filename:
                 # Product image uploaded directly
                 product_bytes = await product_image.read()
-                product_suffix = os.path.splitext(
-                    product_image.filename)[1] or ".jpg"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=product_suffix) as tmp_product:
+                product_bytes = _optimize_image_bytes(product_bytes)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_product:
                     tmp_product.write(product_bytes)
                     tmp_product_path = tmp_product.name
             elif product_image_url:
@@ -1945,16 +1973,21 @@ async def virtual_tryon(
                     local_path = _IMAGES_DIR / \
                         product_image_url.replace("/images/", "")
                     if local_path.exists():
-                        tmp_product_path = str(local_path)
+                        # Optimize local product image too
+                        with open(local_path, "rb") as f:
+                            local_bytes = _optimize_image_bytes(f.read())
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_product:
+                            tmp_product.write(local_bytes)
+                            tmp_product_path = tmp_product.name
                     else:
                         return JSONResponse(status_code=400, content={"error": "Product image not found locally"})
                 else:
                     async with httpx.AsyncClient() as http_client:
                         resp = await http_client.get(product_image_url, timeout=15.0)
                         resp.raise_for_status()
-                        product_suffix = ".jpg"
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=product_suffix) as tmp_product:
-                            tmp_product.write(resp.content)
+                        optimized = _optimize_image_bytes(resp.content)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_product:
+                            tmp_product.write(optimized)
                             tmp_product_path = tmp_product.name
             else:
                 return JSONResponse(status_code=400, content={"error": "No product image provided"})
@@ -2371,21 +2404,51 @@ def get_pending_cart_items(customer_id: str):
 @app.get("/api/cart/upsell/{customer_id}")
 def get_cart_upsell(customer_id: str):
     """Run the autonomous upsell chain: upsell_agent → inventory_agent → recommendation_agent.
+    Loops through multiple candidate categories until 4 unique products are collected.
     Returns upsell product recommendations based on the customer's pending cart."""
     try:
-        # 1. Upsell agent – determines what category to recommend
+        # 1. Upsell agent – determines candidate categories to recommend
         upsell_raw = upsell_agent.invoke({"customer_id": customer_id})
         upsell_data = json.loads(upsell_raw) if isinstance(
             upsell_raw, str) else upsell_raw
-        upsell_query = upsell_data.get("search_query", "show me watches")
-        upsell_category = upsell_data.get("category", "accessories")
+        categories = upsell_data.get("categories", [])
+        if not categories:
+            categories = [upsell_data.get("category", "Accessories")]
+        upsell_category = categories[0]
 
-        # 2. Inventory agent – fetch products in the upsell category
-        inv_raw = inventory_agent.invoke(
-            {"search_query": upsell_query, "customer_id": customer_id})
+        # 2. Loop through categories, collecting unique products until we have 4
+        collected_products = []
+        seen_product_ids = set()
+        TARGET_COUNT = 4
 
-        # 3. Recommendation agent – format as product cards
-        rec_raw = recommendation_agent.invoke({"inventory_data": inv_raw})
+        for cat in categories:
+            if len(collected_products) >= TARGET_COUNT:
+                break
+            try:
+                inv_raw = inventory_agent.invoke(
+                    {"search_query": f"show me {cat}", "customer_id": customer_id})
+                inv_data = json.loads(inv_raw) if isinstance(
+                    inv_raw, str) else inv_raw
+                for p in inv_data.get("products", []):
+                    pid = p.get("product_id")
+                    if pid and pid not in seen_product_ids:
+                        seen_product_ids.add(pid)
+                        collected_products.append(p)
+                        if len(collected_products) >= TARGET_COUNT:
+                            break
+            except Exception:
+                continue
+
+        if not collected_products:
+            return {"upsell": None}
+
+        # 3. Build merged inventory result and pass to recommendation agent
+        merged_inv = json.dumps({
+            "status": "success",
+            "message": f"Found {len(collected_products)} upsell products",
+            "products": collected_products
+        })
+        rec_raw = recommendation_agent.invoke({"inventory_data": merged_inv})
         rec_parsed = json.loads(rec_raw) if isinstance(
             rec_raw, str) else rec_raw
 
@@ -3588,8 +3651,10 @@ async def ws_chat(websocket: WebSocket):
                     )
                     upsell_data = json.loads(upsell_raw) if isinstance(
                         upsell_raw, str) else upsell_raw
-                    upsell_query = upsell_data.get(
-                        "search_query", "show me watches")
+                    upsell_categories = upsell_data.get("categories", [])
+                    if not upsell_categories:
+                        upsell_categories = [
+                            upsell_data.get("category", "Accessories")]
 
                     await websocket.send_json({
                         "type": "timeline_log",
@@ -3597,7 +3662,7 @@ async def ws_chat(websocket: WebSocket):
                         "tool": upsell_tool_name,
                         "agent": upsell_label,
                         "timestamp": "now",
-                        "text": _ws_line(f"Upsell category: {upsell_data.get('category', 'accessories')}"),
+                        "text": _ws_line(f"Upsell categories: {', '.join(upsell_categories[:4])}"),
                     })
                     await websocket.send_json({
                         "type": "timeline_end",
@@ -3608,7 +3673,7 @@ async def ws_chat(websocket: WebSocket):
                         "status": "completed",
                     })
 
-                    # --- Inventory Agent timeline (upsell search) ---
+                    # --- Inventory Agent timeline (upsell search across categories) ---
                     inv_tool_name = "inventory_agent"
                     inv_label = tool_to_agent.get(
                         inv_tool_name, "Inventory Agent")
@@ -3630,22 +3695,39 @@ async def ws_chat(websocket: WebSocket):
                         "timestamp": "now",
                         "text": _ws_line(f"{upsell_label} → {inv_label}"),
                     })
-                    inv_start = _summarize_tool_start(
-                        inv_tool_name, {"search_query": upsell_query})
-                    if inv_start:
-                        await websocket.send_json({
-                            "type": "timeline_log",
-                            "request_id": request_id,
-                            "tool": inv_tool_name,
-                            "agent": inv_label,
-                            "timestamp": "now",
-                            "text": _ws_line(inv_start),
-                        })
 
-                    inv_raw = await asyncio.to_thread(
-                        _inventory_tool.invoke,
-                        {"search_query": upsell_query, "customer_id": customer_id},
-                    )
+                    # Loop through candidate categories until we collect 4 unique products
+                    _upsell_collected = []
+                    _upsell_seen_pids = set()
+                    _UPSELL_TARGET = 4
+                    for _ucat in upsell_categories:
+                        if len(_upsell_collected) >= _UPSELL_TARGET:
+                            break
+                        try:
+                            _upsell_inv_query = f"show me {_ucat}"
+                            _cat_inv_raw = await asyncio.to_thread(
+                                _inventory_tool.invoke,
+                                {"search_query": _upsell_inv_query,
+                                    "customer_id": customer_id},
+                            )
+                            _cat_inv_data = json.loads(_cat_inv_raw) if isinstance(
+                                _cat_inv_raw, str) else _cat_inv_raw
+                            for _up in _cat_inv_data.get("products", []):
+                                _upid = _up.get("product_id")
+                                if _upid and _upid not in _upsell_seen_pids:
+                                    _upsell_seen_pids.add(_upid)
+                                    _upsell_collected.append(_up)
+                                    if len(_upsell_collected) >= _UPSELL_TARGET:
+                                        break
+                        except Exception:
+                            continue
+
+                    # Build merged inventory result
+                    inv_raw = json.dumps({
+                        "status": "success",
+                        "message": f"Found {len(_upsell_collected)} upsell products",
+                        "products": _upsell_collected
+                    })
 
                     inv_summary = _summarize_tool_result(
                         inv_tool_name, inv_raw)

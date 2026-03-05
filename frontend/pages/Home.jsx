@@ -16,11 +16,11 @@ export default function Home({ onLoginClick }) {
         </div>
 
         <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-600 to-orange-600 mb-5 pb-2 leading-tight">
-          Welcome to ABFRL Agentic Dashboard
+          Welcome to ABFRL Dashboard
         </h1>
 
         <p className="text-lg text-gray-600 max-w-4xl mx-auto">
-          Navigate through different Agentic journeys for different
+          Navigate through different journeys for different
           persona-based user groups
         </p>
       </div>

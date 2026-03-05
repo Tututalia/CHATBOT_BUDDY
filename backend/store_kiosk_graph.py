@@ -207,7 +207,7 @@ def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] =
             session.commit()
 
             # --- Send WhatsApp notification only for CUST008 ---
-            if customer_id == "CUST008":
+            if customer_id == "CUST043":
                 try:
                     from intelligent_whatsapp_graph import send_whatsapp_text
                     import logging
@@ -268,6 +268,11 @@ def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] =
                     )
 
                     send_whatsapp_text(wa_phone, wa_msg)
+
+                    # Send quick-action buttons so the customer can act immediately
+                    from whatsapp import send_quick_reply_buttons
+                    send_quick_reply_buttons(wa_phone, "cart_moved_online")
+
                     print(
                         f"[SwitchChannel] ✅ WhatsApp cart-switch notification sent to {wa_phone} (CUST011)")
                 except Exception as wa_err:
@@ -420,9 +425,9 @@ def payment_method_node(state: KioskState):
     # Check if user wants to pay for all items or specific item
     pay_all = state.get("pay_all", False)
 
-    # If not paying for all and no specific order selected, return error
-    # if not pay_all and not state.get("order_id"):
-    #     return {"messages": [AIMessage(content="⚠️ Please select an order first by typing its number (e.g., '1' or '2').")]}
+    # Fallback: if no specific order was selected, default to paying for all items
+    if not pay_all and not state.get("order_id"):
+        pay_all = True
 
     # Wait for user to select a payment method
     last_msg = state["messages"][-1] if state["messages"] else None
@@ -446,8 +451,24 @@ def payment_method_node(state: KioskState):
                     if pay_all:
                         # Process all items in cart
                         kiosk_store_id = state.get("kiosk_store_id") or None
-                        pending_orders = get_pending_offline_orders(
-                            customer_id, store_id=kiosk_store_id)
+
+                        # Query pending offline orders directly in this session
+                        # so that status updates are tracked and committed properly.
+                        filters = {"customer_id": customer_id,
+                                   "channel": "offline", "status": "pending"}
+                        operators = {"customer_id": "==",
+                                     "channel": "==", "status": "=="}
+                        if kiosk_store_id:
+                            filters["store_id"] = kiosk_store_id
+                            operators["store_id"] = "=="
+                        pending_orders = cart_crud.filter(
+                            session,
+                            filters=filters,
+                            operators=operators,
+                            order_by="created_at",
+                            order_desc=True,
+                            limit=100
+                        )
                         if not pending_orders:
                             return {"messages": [AIMessage(content="❌ No items found in cart.")]}
 
@@ -470,8 +491,8 @@ def payment_method_node(state: KioskState):
                                 order_details.append(
                                     f"- {product.product_name} (x{qty}): ₹{item_total:.2f}")
 
-                                # Update cart status to 'paid'
-                                order.status = 'paid'
+                            # Update cart status to 'paid' (tracked by this session)
+                            order.status = 'paid'
 
                         session.commit()
 

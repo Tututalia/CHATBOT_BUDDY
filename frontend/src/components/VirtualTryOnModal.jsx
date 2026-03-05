@@ -1,5 +1,50 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import "./VirtualTryOnModal.css";
+
+// Resize image on canvas to reduce upload size and speed up Vertex AI processing
+function resizeImageFile(file, maxDim = 1024, quality = 0.85) {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (
+        width <= maxDim &&
+        height <= maxDim &&
+        file.size <= 1.5 * 1024 * 1024
+      ) {
+        resolve(file); // Already small enough
+        return;
+      }
+      const scale = Math.min(maxDim / width, maxDim / height, 1);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            const resized = new File([blob], file.name, { type: "image/jpeg" });
+            resolve(resized);
+          } else {
+            resolve(file);
+          }
+        },
+        "image/jpeg",
+        quality,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
 
 export default function VirtualTryOnModal({ product, onClose }) {
   const [personImage, setPersonImage] = useState(null);
@@ -8,7 +53,41 @@ export default function VirtualTryOnModal({ product, onClose }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [zoomImage, setZoomImage] = useState(null);
+  const [zoomScale, setZoomScale] = useState(1);
   const fileInputRef = useRef(null);
+
+  // Zoom lightbox handlers
+  const openZoom = useCallback((src) => {
+    if (src) {
+      setZoomImage(src);
+      setZoomScale(1);
+    }
+  }, []);
+
+  const closeZoom = useCallback(() => {
+    setZoomImage(null);
+    setZoomScale(1);
+  }, []);
+
+  const handleZoomIn = useCallback((e) => {
+    e.stopPropagation();
+    setZoomScale((s) => Math.min(s + 0.3, 5));
+  }, []);
+
+  const handleZoomOut = useCallback((e) => {
+    e.stopPropagation();
+    setZoomScale((s) => Math.max(s - 0.3, 0.5));
+  }, []);
+
+  const handleZoomWheel = useCallback((e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      setZoomScale((s) => Math.min(s + 0.15, 5));
+    } else {
+      setZoomScale((s) => Math.max(s - 0.15, 0.5));
+    }
+  }, []);
 
   const handleFileSelect = (file) => {
     if (!file) return;
@@ -63,8 +142,10 @@ export default function VirtualTryOnModal({ product, onClose }) {
     setResultImage(null);
 
     try {
+      // Resize person image for faster upload & Vertex AI processing
+      const optimizedPerson = await resizeImageFile(personImage, 1024, 0.85);
       const formData = new FormData();
-      formData.append("person_image", personImage);
+      formData.append("person_image", optimizedPerson);
 
       // Fetch the product image and send it as a file for maximum reliability
       const productImgUrl = product.image_reference || "";
@@ -126,7 +207,7 @@ export default function VirtualTryOnModal({ product, onClose }) {
           <div className="vto-header-title">
             <span className="vto-header-icon">👗</span>
             <div>
-              <h3>3D Virtual Trial Room</h3>
+              <h3>Virtual Trial Room</h3>
               <p className="vto-subtitle">Try on {product.product_name}</p>
             </div>
           </div>
@@ -144,7 +225,13 @@ export default function VirtualTryOnModal({ product, onClose }) {
           {/* Product preview (left side) */}
           <div className="vto-product-section">
             <div className="vto-section-label">Product</div>
-            <div className="vto-product-preview">
+            <div
+              className="vto-product-preview vto-zoomable"
+              onClick={() =>
+                openZoom(product.image_reference || "/images/placeholder.png")
+              }
+              title="Click to zoom"
+            >
               <img
                 src={product.image_reference || "/images/placeholder.png"}
                 alt={product.product_name}
@@ -152,6 +239,7 @@ export default function VirtualTryOnModal({ product, onClose }) {
                   e.target.src = "/images/placeholder.png";
                 }}
               />
+              <div className="vto-zoom-hint">🔍</div>
             </div>
             <div className="vto-product-name">{product.product_name}</div>
           </div>
@@ -191,7 +279,19 @@ export default function VirtualTryOnModal({ product, onClose }) {
               </div>
             ) : (
               <div className="vto-person-preview">
-                <img src={personPreview} alt="Your photo" />
+                <img
+                  src={personPreview}
+                  alt="Your photo"
+                  className="vto-zoomable"
+                  onClick={() => openZoom(personPreview)}
+                  title="Click to zoom"
+                />
+                <div
+                  className="vto-zoom-hint"
+                  onClick={() => openZoom(personPreview)}
+                >
+                  🔍
+                </div>
                 <button
                   className="vto-change-photo-btn"
                   onClick={handleReset}
@@ -221,7 +321,13 @@ export default function VirtualTryOnModal({ product, onClose }) {
                   </p>
                 </div>
               ) : resultImage ? (
-                <img src={resultImage} alt="Virtual try-on result" />
+                <img
+                  src={resultImage}
+                  alt="Virtual try-on result"
+                  className="vto-zoomable"
+                  onClick={() => openZoom(resultImage)}
+                  title="Click to zoom"
+                />
               ) : (
                 <div className="vto-result-placeholder">
                   <span className="vto-result-placeholder-icon">🪞</span>
@@ -262,6 +368,59 @@ export default function VirtualTryOnModal({ product, onClose }) {
           </button>
         </div>
       </div>
+
+      {/* Zoom Lightbox Overlay — click anywhere outside the image to close */}
+      {zoomImage && (
+        <div
+          className="vto-zoom-overlay"
+          onClick={(e) => {
+            e.stopPropagation();
+            closeZoom();
+          }}
+          onWheel={handleZoomWheel}
+        >
+          <div
+            className="vto-zoom-controls"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="vto-zoom-ctrl-btn"
+              onClick={handleZoomIn}
+              title="Zoom In"
+            >
+              ＋
+            </button>
+            <span className="vto-zoom-level">
+              {Math.round(zoomScale * 100)}%
+            </span>
+            <button
+              className="vto-zoom-ctrl-btn"
+              onClick={handleZoomOut}
+              title="Zoom Out"
+            >
+              －
+            </button>
+            <button
+              className="vto-zoom-ctrl-btn vto-zoom-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeZoom();
+              }}
+              title="Close"
+            >
+              ✕
+            </button>
+          </div>
+          <img
+            src={zoomImage}
+            alt="Zoomed view"
+            className="vto-zoom-img"
+            style={{ transform: `scale(${zoomScale})` }}
+            draggable={false}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

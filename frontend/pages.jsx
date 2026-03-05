@@ -99,6 +99,27 @@ export default function Pages() {
     navigate("/");
   };
 
+  const handleStoreKeeperLogout = () => {
+    localStorage.removeItem("loggedInCustomerId");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("storeKeeperData");
+    localStorage.removeItem("kioskStoreId");
+    localStorage.removeItem("skBackup_customerId");
+    localStorage.removeItem("skBackup_userRole");
+    localStorage.removeItem("skBackup_storeKeeperData");
+    navigate("/");
+  };
+
+  const isStorePage = location.pathname.startsWith("/store");
+  const isAdminPage = location.pathname === "/admin";
+
+  const handleAdminLogout = () => {
+    localStorage.removeItem("loggedInAdminId");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("adminData");
+    navigate("/");
+  };
+
   const handleCustomerJourneyClick = (e) => {
     e.preventDefault();
     const loggedIn = localStorage.getItem("loggedInCustomerId");
@@ -121,37 +142,53 @@ export default function Pages() {
                 alt="ABFRL Logo"
                 className="w-12 h-12 object-contain"
               />
-              <h1 className="text-3xl font-bold text-slate-800">
-                Agentic Dashboard
+              <h1 className="text-2xl font-bold text-slate-800">
+                POWERED BY ABFRL
               </h1>
             </div>
             <div className="flex items-center gap-6">
               <nav className="space-x-6 text-base">
-                <Link
-                  to="/"
-                  className="text-slate-700 hover:text-red-600 font-medium"
-                >
-                  Home
-                </Link>
-                <a
-                  href="#"
-                  onClick={handleCustomerJourneyClick}
-                  className="text-slate-700 hover:text-red-600 font-medium cursor-pointer"
-                >
-                  Customer Journey
-                </a>
-                <Link
-                  to="/store"
-                  className="text-slate-700 hover:text-red-600 font-medium"
-                >
-                  Store Keeper
-                </Link>
-                <Link
-                  to="/admin"
-                  className="text-slate-700 hover:text-red-600 font-medium"
-                >
-                  Operations-Revenue Command Center
-                </Link>
+                {location.pathname !== "/user" &&
+                  !isStorePage &&
+                  !isAdminPage && (
+                    <Link
+                      to="/"
+                      className="text-slate-700 hover:text-red-600 font-medium"
+                    >
+                      Home
+                    </Link>
+                  )}
+                {location.pathname !== "/user" &&
+                  !isStorePage &&
+                  !isAdminPage && (
+                    <a
+                      href="#"
+                      onClick={handleCustomerJourneyClick}
+                      className="text-slate-700 hover:text-red-600 font-medium cursor-pointer"
+                    >
+                      Customer Journey
+                    </a>
+                  )}
+                {location.pathname !== "/user" &&
+                  !isStorePage &&
+                  !isAdminPage && (
+                    <Link
+                      to="/store"
+                      className="text-slate-700 hover:text-red-600 font-medium"
+                    >
+                      Store Keeper
+                    </Link>
+                  )}
+                {location.pathname !== "/user" &&
+                  !isStorePage &&
+                  !isAdminPage && (
+                    <Link
+                      to="/admin"
+                      className="text-slate-700 hover:text-red-600 font-medium"
+                    >
+                      Operations-Revenue Command Center
+                    </Link>
+                  )}
               </nav>
               {/* Show Login button only on home page */}
               {/* {location.pathname === "/" && (
@@ -166,6 +203,24 @@ export default function Pages() {
               {location.pathname === "/user" && isLoggedIn && (
                 <button
                   onClick={handleLogout}
+                  className="bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-lg font-semibold hover:shadow-lg transition-all duration-200"
+                >
+                  Logout
+                </button>
+              )}
+              {/* Show Logout button on store pages */}
+              {isStorePage && (
+                <button
+                  onClick={handleStoreKeeperLogout}
+                  className="bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-lg font-semibold hover:shadow-lg transition-all duration-200"
+                >
+                  Logout
+                </button>
+              )}
+              {/* Show Logout button on admin page */}
+              {isAdminPage && (
+                <button
+                  onClick={handleAdminLogout}
                   className="bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-lg font-semibold hover:shadow-lg transition-all duration-200"
                 >
                   Logout
