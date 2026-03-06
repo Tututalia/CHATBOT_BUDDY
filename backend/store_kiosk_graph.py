@@ -206,8 +206,8 @@ def switch_channel_instore_to_online(customer_id: str, store_id: Optional[str] =
 
             session.commit()
 
-            # --- Send WhatsApp notification only for CUST008 ---
-            if customer_id == "CUST043":
+            # --- Send WhatsApp notification only for CUST038 ---
+            if customer_id == "CUST038":
                 try:
                     from intelligent_whatsapp_graph import send_whatsapp_text
                     import logging
