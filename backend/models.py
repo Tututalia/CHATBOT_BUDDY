@@ -89,6 +89,13 @@ class OrderHistory(SQLModel, table=True):
     size: Optional[str] = Field(default=None)
     order_dates: str  # Date as string
     loyalty_points: int
+    loyalty_applied: Optional[float] = Field(default=None)
+    discount_amount: Optional[float] = Field(default=None)
+    final_price: Optional[float] = Field(default=None)
+    return_status: Optional[str] = Field(default=None)
+    return_reason: Optional[str] = Field(default=None)
+    return_initiated_time: Optional[str] = Field(default=None)
+    feedback: Optional[str] = Field(default=None)
 
     # Relationships
     customer: Optional[Customer] = Relationship(back_populates="orders")
@@ -203,3 +210,12 @@ class Feedback(SQLModel, table=True):
         index=True,
     )
     review: float = Field(default=0.0)
+
+
+# Wishlist Model
+class Wishlist(SQLModel, table=True):
+    __tablename__ = "wishlist"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    customer_id: str = Field(foreign_key="customers.customer_id", index=True)
+    product_id: str = Field(foreign_key="products.product_id", index=True)

@@ -1,95 +1,126 @@
+"""
+WhatsApp integration via Twilio for the Retail Agent.
+Sends text messages and media (product images) through Twilio's WhatsApp API.
+"""
+import os
 import logging
-import json
-from urllib import response
-import requests
-
-from config import config
-# from app.services.openai_service import generate_response
 import re
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Twilio credentials – set these in your .env
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WHATSAPP_NUMBER = os.getenv(
+    "TWILIO_WHATSAPP_NUMBER", "")  # e.g. "whatsapp:+14155238886"
+
+# Public base URL where product images are accessible.
+PRODUCT_IMAGE_BASE_URL = os.getenv("PRODUCT_IMAGE_BASE_URL", "")
 
 
-def log_http_response(response):
-    logging.info(f"Status: {response.status_code}")
-    logging.info(f"Content-type: {response.headers.get('content-type')}")
-    logging.info(f"Body: {response.text}")
+def _get_twilio_client():
+    """Lazy-init a Twilio REST client."""
+    from twilio.rest import Client
+    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 
-def get_text_message_input(recipient, text):
-    return json.dumps(
-        {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": recipient,
-            "type": "text",
-            "text": {"preview_url": False, "body": text},
-        }
-    )
+def _normalize_whatsapp_number(number: str) -> str:
+    """Ensure the number is in whatsapp:<E.164> format."""
+    number = number.strip()
+    if not number.startswith("whatsapp:"):
+        number = f"whatsapp:{number}"
+    return number
 
 
-# def generate_response(response):
-#     # Return text in uppercase
-#     return response.upper()
+def send_text_message(to: str, body: str):
+    """
+    Send a plain text WhatsApp message via Twilio.
 
-
-def send_message(data):
-    headers = {
-        "Content-type": "application/json",
-        "Authorization": f"Bearer {config.ACCESS_TOKEN}",
-    }
-
-    url = f"https://graph.facebook.com/{config.VERSION}/{config.PHONE_NUMBER_ID}/messages"
+    Args:
+        to: Recipient phone in E.164 format (e.g. "+919876543210") or "whatsapp:+919876543210"
+        body: The text body.
+    """
+    client = _get_twilio_client()
+    to = _normalize_whatsapp_number(to)
+    from_number = _normalize_whatsapp_number(TWILIO_WHATSAPP_NUMBER)
 
     try:
-        response = requests.post(
-            url, data=data, headers=headers, timeout=10
-        )  # 10 seconds timeout as an example
-        # Raises an HTTPError if the HTTP request returned an unsuccessful status code
-        response.raise_for_status()
-    except requests.Timeout:
-        logging.error("Timeout occurred while sending message")
-        return {"status": "error", "message": "Request timed out"}, 408
-    except (
-        requests.RequestException
-    ) as e:  # This will catch any general request exception
-        logging.error(f"Request failed due to: {e}")
-        return {"status": "error", "message": "Failed to send message"}, 500
-    else:
-        # Process the response as normal
-        log_http_response(response)
-        return response
+        chunks = _split_text(body, max_len=1500)
+        for chunk in chunks:
+            msg = client.messages.create(
+                body=chunk,
+                from_=from_number,
+                to=to,
+            )
+            logging.info(f"[Twilio] Text sent to {to}: SID={msg.sid}")
+    except Exception as exc:
+        logging.error(f"[Twilio] Failed to send text to {to}: {exc}")
+
+
+def send_image_message(to: str, image_url: str, caption: str = ""):
+    """
+    Send an image (media) WhatsApp message via Twilio.
+
+    Args:
+        to: Recipient phone in E.164 format or "whatsapp:..." format.
+        image_url: Publicly accessible URL of the image.
+        caption: Optional caption text for the image.
+    """
+    client = _get_twilio_client()
+    to = _normalize_whatsapp_number(to)
+    from_number = _normalize_whatsapp_number(TWILIO_WHATSAPP_NUMBER)
+
+    try:
+        msg = client.messages.create(
+            body=caption[:1600] if caption else "",
+            from_=from_number,
+            to=to,
+            media_url=[image_url],
+        )
+        logging.info(f"[Twilio] Image sent to {to}: SID={msg.sid}")
+    except Exception as exc:
+        logging.error(f"[Twilio] Failed to send image to {to}: {exc}")
+
+
+def resolve_image_url(image_reference: str | None) -> str | None:
+    """Convert a relative /images/PRDxxx.jpg path to a fully-qualified public URL."""
+    if not image_reference:
+        return None
+    if image_reference.startswith("http"):
+        return image_reference
+    path = image_reference.lstrip("/")
+    base = PRODUCT_IMAGE_BASE_URL.rstrip("/")
+    if not base:
+        return None
+    return f"{base}/{path}"
+
+
+def _split_text(text: str, max_len: int = 1500) -> list:
+    """Split long text into chunks that fit within Twilio's recommended limit."""
+    if not text:
+        return [""]
+    chunks = []
+    while text:
+        if len(text) <= max_len:
+            chunks.append(text)
+            break
+        idx = text.rfind("\n", 0, max_len)
+        if idx == -1:
+            idx = max_len
+        chunks.append(text[:idx])
+        text = text[idx:].lstrip("\n")
+    return chunks
 
 
 def process_text_for_whatsapp(text):
-    # Remove brackets
+    """Convert markdown-style bold to WhatsApp-style bold."""
     pattern = r"\【.*?\】"
-    # Substitute the pattern with an empty string
     text = re.sub(pattern, "", text).strip()
-
-    # Pattern to find double asterisks including the word(s) in between
     pattern = r"\*\*(.*?)\*\*"
-
-    # Replacement pattern with single asterisks
     replacement = r"*\1*"
-
-    # Substitute occurrences of the pattern with the replacement
     whatsapp_style_text = re.sub(pattern, replacement, text)
-
     return whatsapp_style_text
-
-
-def process_whatsapp_message(body):
-    wa_id = body["entry"][0]["changes"][0]["value"]["contacts"][0]["wa_id"]
-    name = body["entry"][0]["changes"][0]["value"]["contacts"][0]["profile"]["name"]
-
-    message = body["entry"][0]["changes"][0]["value"]["messages"][0]
-    message_body = message["text"]["body"]
-
-    # OpenAI Integration
-    # response = generate_response(message_body, wa_id, name)
-    # response = process_text_for_whatsapp(response)
-
-    data = get_text_message_input(wa_id, response)
-    send_message(data)
 
 
 def is_valid_whatsapp_message(body):
@@ -104,3 +135,18 @@ def is_valid_whatsapp_message(body):
         and body["entry"][0]["changes"][0]["value"].get("messages")
         and body["entry"][0]["changes"][0]["value"]["messages"][0]
     )
+
+
+# ---- Legacy aliases for backward compatibility ----
+def send_message(data):
+    """Legacy Meta Cloud API send_message — now a no-op stub."""
+    logging.warning(
+        "[whatsapp] send_message (Meta Cloud API) called but deprecated. Use send_text_message instead.")
+
+
+def get_text_message_input(recipient, text):
+    """Legacy Meta Cloud API helper — now a no-op stub."""
+    logging.warning(
+        "[whatsapp] get_text_message_input (Meta Cloud API) called but deprecated.")
+    import json
+    return json.dumps({"to": recipient, "text": text})

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import "./ChatBot_Kisok.css";
 
 const KIOSK_API_URL = "http://localhost:8000/api/kiosk/chat";
@@ -18,6 +18,7 @@ const TRANSFER_MESSAGE =
 
 export default function Chatbot_Kiosk({ customerId }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(true);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -58,7 +59,24 @@ export default function Chatbot_Kiosk({ customerId }) {
 
   const handleCloseChatbot = () => {
     setIsOpen(false);
-    navigate("/");
+    if (location.pathname === "/store/kiosk") {
+      // Restore store keeper session that was saved before entering kiosk
+      const skId = localStorage.getItem("skBackup_customerId");
+      const skRole = localStorage.getItem("skBackup_userRole");
+      const skData = localStorage.getItem("skBackup_storeKeeperData");
+      if (skId && skRole) {
+        localStorage.setItem("loggedInCustomerId", skId);
+        localStorage.setItem("userRole", skRole);
+        if (skData) localStorage.setItem("storeKeeperData", skData);
+      }
+      localStorage.removeItem("skBackup_customerId");
+      localStorage.removeItem("skBackup_userRole");
+      localStorage.removeItem("skBackup_storeKeeperData");
+      localStorage.removeItem("kioskStoreId");
+      navigate("/store");
+    } else {
+      navigate("/");
+    }
   };
 
   useEffect(() => {
@@ -539,6 +557,7 @@ export default function Chatbot_Kiosk({ customerId }) {
       const productId = (
         block.match(/\bProduct ID:\s*([^\n]+)/i)?.[1] || ""
       ).trim();
+      const parsedSize = (block.match(/\bSize:\s*([^\n]+)/i)?.[1] || "").trim();
       const storeName = (
         block.match(/\bStore:\s*([^\n]+?)\s*\(ID:/i)?.[1] || ""
       ).trim();
@@ -578,6 +597,7 @@ export default function Chatbot_Kiosk({ customerId }) {
         product_name: productName || "Item",
         category: category || "",
         product_id: productId || "",
+        size: parsedSize || "",
         store_name: storeName || "",
         store_id: storeId || "",
         original_price: originalPrice ?? unitPrice,
@@ -718,25 +738,9 @@ export default function Chatbot_Kiosk({ customerId }) {
         status: "completed",
       });
 
-      const payload = await sendAgentMessage("view cart");
-
-      if (payload?.cart_items && Array.isArray(payload.cart_items)) {
-        const cart = {
-          cartItems: payload.cart_items.map((i) => ({
-            ...i,
-            image_reference: i.image_reference || null,
-          })),
-          total_amount: payload.total_amount,
-          total_savings: payload.total_savings,
-        };
-
-        // For an explicit user request, append a new cart card so it visibly appears.
-        appendCartMessage(cart);
-        return;
-      }
-
-      // Fallback: if /api/chat returns plain text, try to parse it.
-      const responseText = payload?.response || payload?.message || "";
+      // Use kiosk endpoint which filters by channel='offline' + store_id.
+      // Do NOT use sendAgentMessage/view_cart_agent — no channel/store filter.
+      const responseText = await fetchKioskResponseText("__kiosk_start__");
       const cartSummary = parseCartSummary(responseText);
       if (cartSummary) {
         pushTimelineEntry({
@@ -844,10 +848,15 @@ export default function Chatbot_Kiosk({ customerId }) {
   };
 
   const fetchKioskResponseText = async (message) => {
+    const kioskStoreId = localStorage.getItem("kioskStoreId") || "";
     const res = await fetch(KIOSK_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, customer_id: customerId }),
+      body: JSON.stringify({
+        message,
+        customer_id: customerId,
+        store_id: kioskStoreId,
+      }),
     });
     const data = await res.json();
     const responseText =
@@ -858,16 +867,19 @@ export default function Chatbot_Kiosk({ customerId }) {
   const refreshCartSilently = async () => {
     if (!customerId) return;
     try {
-      // Prefer structured agent cart (includes product_id + image_reference)
-      const agentCart = await fetchAgentCart();
-      if (agentCart) {
-        upsertLatestCartMessage(agentCart);
-        return;
-      }
-
+      // Use ONLY the kiosk endpoint which filters by channel='offline' + store_id.
+      // Do NOT use fetchAgentCart — it hits view_cart_agent which returns ALL
+      // pending items regardless of channel or store.
       const responseText = await fetchKioskResponseText("__kiosk_start__");
       const cartSummary = parseCartSummary(responseText);
-      if (!cartSummary) return;
+      if (!cartSummary || cartSummary.cartItems.length === 0) {
+        upsertLatestCartMessage({
+          cartItems: [],
+          total_amount: 0,
+          total_savings: 0,
+        });
+        return;
+      }
       upsertLatestCartMessage(cartSummary);
       hydrateCartItemsWithProducts(cartSummary.cartItems);
     } catch {
@@ -978,7 +990,10 @@ export default function Chatbot_Kiosk({ customerId }) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customer_id: customerId }),
+          body: JSON.stringify({
+            customer_id: customerId,
+            store_id: localStorage.getItem("kioskStoreId") || "",
+          }),
         },
       );
 
@@ -1007,9 +1022,13 @@ Feel free to continue shopping from the comfort of your home and complete your p
           tool: "switch_channel_instore_to_online",
           status: "completed",
         });
-        // Refresh to show empty offline cart
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        await refreshCartSilently();
+        // Clear the in-store cart display directly since all offline items
+        // have been moved to online channel and should no longer appear.
+        upsertLatestCartMessage({
+          cartItems: [],
+          total_amount: 0,
+          total_savings: 0,
+        });
       } else {
         addMessage({
           type: "ai",
@@ -1386,6 +1405,7 @@ Feel free to continue shopping from the comfort of your home and complete your p
         body: JSON.stringify({
           message,
           customer_id: customerId,
+          store_id: localStorage.getItem("kioskStoreId") || "",
         }),
       });
 
@@ -1428,14 +1448,10 @@ Feel free to continue shopping from the comfort of your home and complete your p
       setWelcomeShown(true);
     }
 
-    // Prime kiosk state for payment flow
+    // Prime kiosk state for payment flow.
+    // welcome_node now filters by channel='offline' + store_id,
+    // so only items for this specific store are shown.
     await sendToBackend("__kiosk_start__");
-
-    // Also hydrate cart via agent payload for images + product_id
-    const agentCart = await fetchAgentCart({ throttleMs: 0 });
-    if (agentCart) {
-      upsertLatestCartMessage(agentCart);
-    }
   };
 
   useEffect(() => {

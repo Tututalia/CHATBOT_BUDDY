@@ -1,0 +1,137 @@
+product_id,category,gender,product_name,price,image_reference,quantity,online_available,offline_available,festival,season,loyalty_points,discount
+PRD281,Casual Shoes,Men,Men Textured Mojaris Shoes,1192,/images/PRD281.jpg,280,yes,yes,All Festival,All Season,2,14
+PRD282,Casual Shoes,Men,Men Embellished Loafers,1745,/images/PRD282.jpg,147,yes,yes,All Festival,All Season,2,11
+PRD283,Casual Shoes,Men,Leather Casual Shoes,1698,/images/PRD283.jpg,240,yes,yes,All Festival,All Season,2,4
+PRD284,Casual Shoes,Men,Men Colourblocked PU Sneakers,1359,/images/PRD284.jpg,154,yes,yes,All Festival,All Season,4,6
+PRD285,Casual Shoes,Men,Men Embroidered Casual Loafers,1253,/images/PRD285.jpg,277,yes,yes,All Festival,All Season,5,4
+PRD286,Casual Shoes,Men,Colourblocked Lace-Ups Shoes,1279,/images/PRD286.jpg,319,yes,yes,All Festival,All Season,8,1
+PRD287,Casual Shoes,Men,Men Colourblocked Sneakers,1279,/images/PRD287.jpg,9,yes,yes,All Festival,All Season,3,6
+PRD288,Casual Shoes,Men,Men Woven Design Mojaris,1699,/images/PRD288.jpg,32,yes,yes,All Festival,All Season,6,2
+PRD289,Casual Shoes,Men,Men Colourblocked High-Top Sneakers,763,/images/PRD289.jpg,172,yes,yes,All Festival,All Season,3,12
+PRD290,Casual Shoes,Men,Men Colourblocked Sneakers,824,/images/PRD290.jpg,277,yes,yes,All Festival,All Season,6,2
+PRD291,Casual Shoes,Men,Embroidered Slip On Mojaris,1449,/images/PRD291.jpg,299,yes,yes,All Festival,All Season,5,6
+PRD292,Sports Shoes,Men,Men CLOUDFOAM GO LOUNGER,3359,/images/PRD292.jpg,98,yes,yes,All Festival,All Season,8,6
+PRD293,Sports Shoes,Men,Men Cloudfoam Walking Shoes,3359,/images/PRD293.jpg,87,yes,yes,All Festival,All Season,3,0
+PRD294,Sports Shoes,Men,HRX-235 03 Mesh Running Shoes,879,/images/PRD294.jpg,196,yes,yes,All Festival,All Season,8,10
+PRD295,Sports Shoes,Men,Men Running Shoes,1121,/images/PRD295.jpg,56,yes,yes,All Festival,All Season,3,10
+PRD296,Sports Shoes,Men,Men Active Running Shoes,1399,/images/PRD296.jpg,74,yes,yes,All Festival,All Season,6,10
+PRD297,Sports Shoes,Men,Men Striped Running Shoes,1121,/images/PRD297.jpg,213,yes,yes,All Festival,All Season,8,15
+PRD298,Sports Shoes,Men,HYULTRAI Badminton Shoes,1899,/images/PRD298.jpg,168,yes,yes,All Festival,All Season,3,7
+PRD299,Sports Shoes,Men,Men Active Running Shoes,1329,/images/PRD299.jpg,137,yes,yes,All Festival,All Season,3,12
+PRD300,Sports Shoes,Men,Men Running Shoes,1999,/images/PRD300.jpg,222,yes,yes,All Festival,All Season,5,14
+PRD301,Sports Shoes,Men,Unisex Cricket Shoes,1063,/images/PRD301.jpg,303,yes,yes,All Festival,All Season,8,10
+PRD302,Sports Shoes,Men,Men Running Shoes,959,/images/PRD302.jpg,325,yes,yes,All Festival,All Season,8,4
+PRD303,Formal Shoes,Men,Men Round Toe Formal Loafers,1255,/images/PRD303.jpg,229,yes,yes,All Festival,All Season,7,9
+PRD304,Formal Shoes,Men,Men Textured Leather Formal Derbys,1570,/images/PRD304.jpg,196,yes,yes,All Festival,All Season,6,11
+PRD305,Formal Shoes,Men,Men Slip-On Formal Loafers,707,/images/PRD305.jpg,141,yes,yes,All Festival,All Season,2,14
+PRD306,Formal Shoes,Men,Men Textured Formal Derbys,743,/images/PRD306.jpg,185,yes,yes,All Festival,All Season,7,8
+PRD307,Formal Shoes,Men,Men Textured Formal Brogues,1570,/images/PRD307.jpg,228,yes,yes,All Festival,All Season,2,2
+PRD308,Formal Shoes,Men,Men Solid Formal Loafers,878,/images/PRD308.jpg,329,yes,yes,All Festival,All Season,2,0
+PRD309,Formal Shoes,Men,Men Round Toe Slip On Loafers,834,/images/PRD309.jpg,314,yes,yes,All Festival,All Season,5,7
+PRD310,Formal Shoes,Men,Men Perforated Formal Derbys,699,/images/PRD310.jpg,255,yes,yes,All Festival,All Season,6,5
+PRD311,Formal Shoes,Men,Lace-Ups Derbys Formal,646,/images/PRD311.jpg,38,yes,yes,All Festival,All Season,2,7
+PRD312,Formal Shoes,Men,Men Formal Loafers,1160,/images/PRD312.jpg,163,yes,yes,All Festival,All Season,3,8
+PRD313,Formal Shoes,Men,Men Formal Slip On Loafers,1322,/images/PRD313.jpg,307,yes,yes,All Festival,All Season,3,10
+PRD314,Sneakers,Men,Men Mono Court Sneaker,1099,/images/PRD314.jpg,130,yes,yes,All Festival,All Season,4,8
+PRD315,Sneakers,Men,Men Sneakers,974,/images/PRD315.jpg,250,yes,yes,All Festival,All Season,4,4
+PRD316,Sneakers,Men,Leather Casual Shoes,1698,/images/PRD316.jpg,267,yes,yes,All Festival,All Season,6,12
+PRD317,Sneakers,Men,Men Colourblocked PU Sneakers,1359,/images/PRD317.jpg,179,yes,yes,All Festival,All Season,7,8
+PRD318,Sneakers,Men,Men Comfort Insole PU Sneakers,1374,/images/PRD318.jpg,116,yes,yes,All Festival,All Season,5,15
+PRD319,Sneakers,Men,Colourblocked Lace-Ups Shoes,1279,/images/PRD319.jpg,284,yes,yes,All Festival,All Season,7,10
+PRD320,Sneakers,Men,Men Colourblocked Sneakers,1279,/images/PRD320.jpg,163,yes,yes,All Festival,All Season,5,15
+PRD321,Sneakers,Men,Men Colourblocked Sneakers,1049,/images/PRD321.jpg,236,yes,yes,All Festival,All Season,4,8
+PRD322,Sneakers,Men,Men Colourblocked High-Top Sneakers,763,/images/PRD322.jpg,162,yes,yes,All Festival,All Season,4,14
+PRD323,Sneakers,Men,Men Colourblocked Sneakers,824,/images/PRD323.jpg,12,yes,yes,All Festival,All Season,4,11
+PRD324,Sneakers,Men,Men Colourblocked Sneakers,719,/images/PRD324.jpg,141,yes,yes,All Festival,All Season,6,13
+PRD325,Socks,Men,Men Pack Of 5 Ankle Socks,374,/images/PRD325.jpg,139,yes,yes,All Festival,All Season,4,1
+PRD326,Socks,Men,Men 5Pcs Ankle Length Socks,384,/images/PRD326.jpg,280,yes,yes,All Festival,All Season,7,5
+PRD327,Socks,Men,Men 3 Ankle-Length Socks,367,/images/PRD327.jpg,266,yes,yes,All Festival,All Season,7,14
+PRD328,Socks,Men,Men Pack Of 3 Solid Ankle-Length Socks,323,/images/PRD328.jpg,11,yes,yes,All Festival,All Season,5,0
+PRD329,Socks,Men,3Pcs Aloe-Soft No-Show Socks,481,/images/PRD329.jpg,32,yes,yes,All Festival,All Season,8,2
+PRD330,Socks,Men,Men Training Socks,280,/images/PRD330.jpg,27,yes,yes,All Festival,All Season,7,4
+PRD331,Socks,Men,Men Pack Of 4 Bamboo Socks,378,/images/PRD331.jpg,67,yes,yes,All Festival,All Season,2,11
+PRD332,Socks,Men,Men Pack of 3 Socks,478,/images/PRD332.jpg,136,yes,yes,All Festival,All Season,7,9
+PRD333,Socks,Men,Men Pack Of 3 Socks,479,/images/PRD333.jpg,127,yes,yes,All Festival,All Season,7,11
+PRD334,Jeans,Men,Men Relaxed Fit Jeans,883,/images/PRD334.jpg,122,yes,yes,All Festival,All Season,6,10
+PRD335,Jeans,Men,Men Slim Fit Jeans,1312,/images/PRD335.jpg,53,yes,yes,All Festival,All Season,6,15
+PRD336,Jeans,Men,Men Pure Cotton Jeans,950,/images/PRD336.jpg,232,yes,yes,All Festival,All Season,3,13
+PRD337,Jeans,Men,Men Wide Leg Mid-Rise Jeans,1399,/images/PRD337.jpg,149,yes,yes,All Festival,All Season,2,5
+PRD338,Jeans,Men,Men Slim Fit Mid-Rise Jeans,1312,/images/PRD338.jpg,279,yes,yes,All Festival,All Season,6,0
+PRD339,Jeans,Men,Men Washed Wide Leg Jeans,753,/images/PRD339.jpg,169,yes,yes,All Festival,All Season,4,3
+PRD340,Jeans,Men,Men Regular Fit Mid-Rise Jeans,899,/images/PRD340.jpg,326,yes,yes,All Festival,All Season,5,7
+PRD341,Jeans,Men,Men Relaxed Fit Jeans,942,/images/PRD341.jpg,274,yes,yes,All Festival,All Season,2,7
+PRD342,Jeans,Men,Pure Cotton Straight Fit Jeans,949,/images/PRD342.jpg,248,yes,yes,All Festival,All Season,5,6
+PRD343,Jeans,Men,Men Slim Straight Fit Jeans,1619,/images/PRD343.jpg,349,yes,yes,All Festival,All Season,4,2
+PRD344,Jeans,Men,Men Straight Fit Jeans,999,/images/PRD344.jpg,107,yes,yes,All Festival,All Season,4,13
+PRD345,Wallets,Men,Leather Two Fold Wallet,1169,/images/PRD345.jpg,64,yes,yes,All Festival,All Season,6,15
+PRD346,Wallets,Men,Leather Two Fold Wallet,507,/images/PRD346.jpg,41,yes,yes,All Festival,All Season,6,4
+PRD347,Wallets,Men,Men Wallets,500,/images/PRD347.jpg,13,yes,yes,All Festival,All Season,7,7
+PRD348,Wallets,Men,Leather Two Fold Wallet,593,/images/PRD348.jpg,226,yes,yes,All Festival,All Season,8,15
+PRD349,Wallets,Men,Men Cardholder Wallets,259,/images/PRD349.jpg,210,yes,yes,All Festival,All Season,4,6
+PRD350,Wallets,Men,Leather Two Fold Wallet,814,/images/PRD350.jpg,336,yes,yes,All Festival,All Season,4,6
+PRD351,Wallets,Men,Leather Two Fold Wallet,814,/images/PRD351.jpg,316,yes,yes,All Festival,All Season,5,9
+PRD352,Belts,Men,Men Leather Belt,554,/images/PRD352.jpg,78,yes,yes,All Festival,All Season,4,4
+PRD353,Belts,Men,Men Leather Reversible Belt,1499,/images/PRD353.jpg,220,yes,yes,All Festival,All Season,2,0
+PRD354,Belts,Men,Men Solid Genuine Leather Belt,1241,/images/PRD354.jpg,25,yes,yes,All Festival,All Season,8,2
+PRD355,Belts,Men,Solid Leather Belt,1007,/images/PRD355.jpg,72,yes,yes,All Festival,All Season,2,15
+PRD356,Belts,Men,Leather Reversible Belt,607,/images/PRD356.jpg,71,yes,yes,All Festival,All Season,7,4
+PRD357,Belts,Men,Men Leather Belt,499,/images/PRD357.jpg,225,yes,yes,All Festival,All Season,3,5
+PRD358,Belts,Men,Men Solid Belt,1310,/images/PRD358.jpg,261,yes,yes,All Festival,All Season,6,8
+PRD359,Belts,Men,Men Textured Leather Wide Belt,1169,/images/PRD359.jpg,345,yes,yes,All Festival,All Season,2,10
+PRD360,Belts,Men,Reversible Leather Belt,1179,/images/PRD360.jpg,225,yes,yes,All Festival,All Season,4,5
+PRD361,Belts,Men,Men Leather Belt,1385,/images/PRD361.jpg,7,yes,yes,All Festival,All Season,7,13
+PRD362,Belts,Men,Men Leather Belt,898,/images/PRD362.jpg,43,yes,yes,All Festival,All Season,7,8
+PRD363,Ethnic Wear,Women,Embroidered Kurta Set,1349,/images/PRD363.jpg,247,yes,yes,All Festival,All Season,5,12
+PRD364,Ethnic Wear,Women,Ethnic Wear Salwar Suit Set,1198,/images/PRD364.jpg,308,yes,yes,All Festival,All Season,4,4
+PRD365,Ethnic Wear,Women,Embroidered A-Line Kurta Set,1737,/images/PRD365.jpg,109,yes,yes,All Festival,All Season,8,6
+PRD366,Ethnic Wear,Women,Embroidered Ethnic Dresses,1640,/images/PRD366.jpg,227,yes,yes,All Festival,All Season,6,12
+PRD367,Ethnic Wear,Women,Floral Printed Pure Cotton Blend Kurti,879,/images/PRD367.jpg,189,yes,yes,All Festival,All Season,7,14
+PRD368,Ethnic Wear,Women,Gotta Patti Straight Kurta,436,/images/PRD368.jpg,148,yes,yes,All Festival,All Season,2,9
+PRD369,Ethnic Wear,Women,Ethnic Wear Salwar Suit Set,1198,/images/PRD369.jpg,333,yes,yes,All Festival,All Season,6,3
+PRD370,Ethnic Wear,Women,Ethnic Motif Embroidered Kurti,993,/images/PRD370.jpg,172,yes,yes,All Festival,All Season,6,14
+PRD371,Ethnic Wear,Women,Women Loose Fit Cotton Salwar,552,/images/PRD371.jpg,241,yes,yes,All Festival,All Season,7,9
+PRD372,Ethnic Wear,Women,Women Embroidered Kurta with Trousers With Dupatta,1317,/images/PRD372.jpg,145,yes,yes,All Festival,All Season,5,1
+PRD373,Jeans,Women,Women Skinny Fit Cotton Jeans,1289,/images/PRD373.jpg,47,yes,yes,All Festival,All Season,4,1
+PRD374,Jeans,Women,Women Straight Fit High-Rise Jeans,574,/images/PRD374.jpg,210,yes,yes,All Festival,All Season,4,15
+PRD375,Jeans,Women,Women Slim Fit High-Rise Jeans,1176,/images/PRD375.jpg,348,yes,yes,All Festival,All Season,6,7
+PRD376,Jeans,Women,Women Cotton High-Rise Jeans,443,/images/PRD376.jpg,342,yes,yes,All Festival,All Season,4,8
+PRD377,Jeans,Women,Women Wide Leg High-Rise Jeans,839,/images/PRD377.jpg,110,yes,yes,All Festival,All Season,3,13
+PRD378,Jeans,Women,Women Stretchable Jeans,1551,/images/PRD378.jpg,299,yes,yes,All Festival,All Season,5,4
+PRD379,Jeans,Women,Women Flared High-Rise Jeans,713,/images/PRD379.jpg,98,yes,yes,All Festival,All Season,2,13
+PRD380,Jeans,Women,Women Straight Fit High-Rise Jeans,559,/images/PRD380.jpg,185,yes,yes,All Festival,All Season,8,15
+PRD381,Jeans,Women,Women Straight Fit Jeans,694,/images/PRD381.jpg,195,yes,yes,All Festival,All Season,2,11
+PRD382,Jeans,Women,Women Flared Clean Look Jeans,619,/images/PRD382.jpg,59,yes,yes,All Festival,All Season,6,15
+PRD383,Jeans,Women,Women Wide Leg High-Rise Jeans,1075,/images/PRD383.jpg,226,yes,yes,All Festival,All Season,7,2
+PRD384,Heels,Women,Women Open-Toe Heels,1823,/images/PRD384.jpg,58,yes,yes,All Festival,All Season,8,7
+PRD385,Heels,Women,Block Heels,1099,/images/PRD385.jpg,11,yes,yes,All Festival,All Season,7,12
+PRD386,Heels,Women,Solid Block Heels,655,/images/PRD386.jpg,91,yes,yes,All Festival,All Season,3,1
+PRD387,Heels,Women,Open Toe Block Heels,1699,/images/PRD387.jpg,144,yes,yes,All Festival,All Season,4,1
+PRD388,Heels,Women,Embellished Wedges,1325,/images/PRD388.jpg,343,yes,yes,All Festival,All Season,3,12
+PRD389,Heels,Women,Embellished Party Wedge Heels,1282,/images/PRD389.jpg,202,yes,yes,All Festival,All Season,4,10
+PRD390,Heels,Women,Caged Block Heels Sandals,1539,/images/PRD390.jpg,274,yes,yes,All Festival,All Season,2,10
+PRD391,Heels,Women,Embellished Wedges,1325,/images/PRD391.jpg,17,yes,yes,All Festival,All Season,4,0
+PRD392,Heels,Women,Textured PU Party Kitten Mules with Bows,1349,/images/PRD392.jpg,57,yes,yes,All Festival,All Season,7,5
+PRD393,Heels,Women,Pointed Toe Block Heel Pumps,874,/images/PRD393.jpg,124,yes,yes,All Festival,All Season,5,2
+PRD394,Heels,Women,Embellished Ethnic Block Heels,1257,/images/PRD394.jpg,73,yes,yes,All Festival,All Season,3,4
+PRD395,Boots,Women,High-Top Block Heeled Boots,1229,/images/PRD395.jpg,32,yes,yes,All Festival,All Season,3,10
+PRD396,Boots,Women,Women Beige Chelsia Boots,1331,/images/PRD396.jpg,236,yes,yes,All Festival,All Season,4,1
+PRD397,Boots,Women,Women Heeled Regular Boots,1229,/images/PRD397.jpg,338,yes,yes,All Festival,All Season,2,5
+PRD398,Boots,Women,Women Block-Heel Chelsea Boots,1229,/images/PRD398.jpg,185,yes,yes,All Festival,All Season,6,14
+PRD399,Boots,Women,Women Round Toe Heeled Boots,837,/images/PRD399.jpg,169,yes,yes,All Festival,All Season,7,3
+PRD400,Boots,Women,Women Mules,718,/images/PRD400.jpg,350,yes,yes,All Festival,All Season,8,15
+PRD401,Boots,Women,Women Flat Boots,1189,/images/PRD401.jpg,222,yes,yes,All Festival,All Season,5,15
+PRD402,Boots,Women,Women Block-Heeled Boots,1229,/images/PRD402.jpg,190,yes,yes,All Festival,All Season,2,9
+PRD403,Boots,Women,Women Block-Heeled Boots,718,/images/PRD403.jpg,300,yes,yes,All Festival,All Season,2,13
+PRD404,Boots,Women,Solid Casual Chelsea Boots,1189,/images/PRD404.jpg,67,yes,yes,All Festival,All Season,7,6
+PRD405,Boots,Women,Women Block Heel Boots,1499,/images/PRD405.jpg,305,yes,yes,All Festival,All Season,5,3
+PRD406,Handbags & Bags,Women,Textured Crossbody Sling Bag,1797,/images/PRD406.jpg,91,yes,yes,All Festival,All Season,8,1
+PRD407,Handbags & Bags,Women,Colorblocked Sling Bag,1749,/images/PRD407.jpg,116,yes,yes,All Festival,All Season,7,14
+PRD408,Handbags & Bags,Women,Leather Half Moon Hobo Bag,1999,/images/PRD408.jpg,149,yes,yes,All Festival,All Season,3,7
+PRD409,Handbags & Bags,Women,Structured Handheld Bag,1480,/images/PRD409.jpg,208,yes,yes,All Festival,All Season,3,8
+PRD410,Handbags & Bags,Women,Colorblocked Sling Bag,1749,/images/PRD410.jpg,13,yes,yes,All Festival,All Season,4,3
+PRD411,Handbags & Bags,Women,Laptop Structured Shoulder Bag,1499,/images/PRD411.jpg,47,yes,yes,All Festival,All Season,8,9
+PRD412,Handbags & Bags,Women,Structured Sling Bag,1587,/images/PRD412.jpg,70,yes,yes,All Festival,All Season,6,7
+PRD413,Handbags & Bags,Women,Structured Sling Bag,1708,/images/PRD413.jpg,191,yes,yes,All Festival,All Season,5,3
+PRD414,Handbags & Bags,Women,Women Structured Tote Bag,1639,/images/PRD414.jpg,92,yes,yes,All Festival,All Season,7,14
+PRD415,Handbags & Bags,Women,Unisex The Aisle Crossbody Bag,1399,/images/PRD415.jpg,190,yes,yes,All Festival,All Season,6,8
+PRD416,Handbags & Bags,Women,Women Quilted Satchel,1097,/images/PRD416.jpg,106,yes,yes,All Festival,All Season,5,8

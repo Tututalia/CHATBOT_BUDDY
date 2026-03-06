@@ -37,3 +37,4 @@ def get_session():
 def get_db_session():
     """Get a database session for direct use"""
     return Session(engine)
+

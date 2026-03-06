@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { json, useNavigate } from "react-router-dom";
+import { json, useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart,
   Bar,
@@ -26,7 +26,11 @@ export default function StoreKeeper() {
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [dailyOrdersData, setDailyOrdersData] = useState(null);
   const [dailyOrdersTimeRange, setDailyOrdersTimeRange] = useState("weekly");
+  const [pendingOrders, setPendingOrders] = useState([]);
+  const [pendingOrdersLoading, setPendingOrdersLoading] = useState(false);
+  const [showPendingOrders, setShowPendingOrders] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     // Check if user is authenticated
@@ -67,6 +71,34 @@ export default function StoreKeeper() {
       fetchDailyOrders(storeKeeperData.store_id, dailyOrdersTimeRange);
     }
   }, [dailyOrdersTimeRange, storeKeeperData]);
+
+  // Fetch pending orders for this store
+  useEffect(() => {
+    if (storeKeeperData) {
+      fetchPendingOrders(storeKeeperData.store_id);
+    }
+  }, [storeKeeperData]);
+
+  const fetchPendingOrders = async (storeId) => {
+    try {
+      setPendingOrdersLoading(true);
+      const response = await fetch(
+        `http://localhost:8000/api/store/${storeId}/pending-orders`,
+      );
+      const data = await response.json();
+      if (data.error) {
+        console.error("Error fetching pending orders:", data.error);
+        setPendingOrders([]);
+      } else {
+        setPendingOrders(data.pending_orders || []);
+      }
+    } catch (error) {
+      console.error("Error fetching pending orders:", error);
+      setPendingOrders([]);
+    } finally {
+      setPendingOrdersLoading(false);
+    }
+  };
 
   const fetchTransactionData = async (storeId, range) => {
     try {
@@ -444,9 +476,32 @@ export default function StoreKeeper() {
       <div className="max-w-7xl mx-auto">
         {/* Store Keeper Info Section */}
         <div className="mb-6 p-6 bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 rounded-lg shadow-lg">
-          <h2 className="text-2xl font-bold mb-4 text-white">
-            Store Keeper Dashboard
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-2xl font-bold text-white">
+              Store Keeper Dashboard
+            </h2>
+            {location.pathname === "/store/admin" && (
+              <button
+                onClick={() => navigate("/store")}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/30 transition-all duration-200 text-sm"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+                Back to Store
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
             <div className="bg-white p-3 rounded-lg shadow-sm">
               <p className="text-gray-600 font-semibold mb-1">Store ID</p>
@@ -477,6 +532,199 @@ export default function StoreKeeper() {
             <p className="text-gray-600 font-semibold mb-1">Address</p>
             <p className="text-gray-900">{storeKeeperData.address}</p>
           </div>
+        </div>
+
+        {/* Pending Orders Section */}
+        <style>{`
+          @keyframes pendingBlink {
+            0%, 100% { box-shadow: 0 0 0px rgba(239,68,68,0); }
+            50% { box-shadow: 0 0 28px 8px rgba(239,68,68,0.6), 0 0 60px 16px rgba(239,68,68,0.25); }
+          }
+          .pending-blink {
+            animation: pendingBlink 1.5s ease-in-out infinite;
+            border: 3px solid rgba(239,68,68,0.7);
+          }
+        `}</style>
+        <div
+          className={`mb-6 bg-gradient-to-r from-red-900 via-red-700 to-yellow-600 rounded-2xl shadow-2xl overflow-hidden ${
+            pendingOrders.length > 0 ? "pending-blink" : ""
+          }`}
+        >
+          <button
+            onClick={() => setShowPendingOrders(!showPendingOrders)}
+            className="w-full p-6 flex items-center justify-between hover:bg-white/10 transition-all duration-300"
+          >
+            <div className="flex items-center gap-4">
+              <div className="bg-white/20 backdrop-blur-sm p-4 rounded-xl">
+                <svg
+                  className="w-8 h-8 text-white"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </div>
+              <div className="text-left">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                  Pending Orders
+                  {pendingOrders.length > 0 && (
+                    <span className="bg-red-500 text-white text-sm px-3 py-1 rounded-full font-bold animate-pulse">
+                      {pendingOrders.length}
+                    </span>
+                  )}
+                  {pendingOrdersLoading && (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                  )}
+                </h2>
+                <p className="text-white/80 text-sm mt-1">
+                  {pendingOrders.length > 0
+                    ? `${pendingOrders.length} pending order(s) require attention`
+                    : "No pending orders"}{" "}
+                  • Click to {showPendingOrders ? "hide" : "view"} details
+                </p>
+              </div>
+            </div>
+            <svg
+              className={`w-6 h-6 text-white transition-transform duration-300 ${
+                showPendingOrders ? "rotate-180" : ""
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+
+          {showPendingOrders && (
+            <div className="p-6 bg-gradient-to-br from-gray-50 to-white">
+              {pendingOrdersLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-red-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600 font-medium">
+                      Loading pending orders...
+                    </p>
+                  </div>
+                </div>
+              ) : pendingOrders.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full bg-white border border-gray-200 rounded-xl overflow-hidden shadow-md">
+                    <thead>
+                      <tr className="bg-gradient-to-r from-red-800 to-red-600 text-white">
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Order ID
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Customer ID
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Customer Name
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Product ID
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Product Name
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Qty
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Size
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Channel
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-sm font-semibold">
+                          Created At
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingOrders.map((order, index) => (
+                        <tr
+                          key={order.order_id}
+                          className={`${
+                            index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                          } hover:bg-yellow-50 transition-colors border-b border-gray-100`}
+                        >
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                            {order.order_id}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.customer_id}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.customer_name}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.product_id}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.product_name}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.quantity}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.size}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.channel}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-semibold">
+                              {order.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {order.created_at}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="bg-green-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg
+                      className="w-10 h-10 text-green-500"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  </div>
+                  <p className="text-gray-600 font-medium">All clear!</p>
+                  <p className="text-gray-400 text-sm mt-2">
+                    No pending orders for this store
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* AI Insights & Recommendations Section */}

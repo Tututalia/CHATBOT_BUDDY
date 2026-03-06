@@ -56,6 +56,7 @@ export default function ChatBot({ customerId }) {
     message: "",
   });
   const [isRefundGuidelinesOpen, setIsRefundGuidelinesOpen] = useState(false);
+  const [pendingRefundOrder, setPendingRefundOrder] = useState(null); // Tracks order awaiting return reason
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const timelineEndRef = useRef(null);
@@ -73,6 +74,66 @@ export default function ChatBot({ customerId }) {
   const [loyaltyPointsUsed, setLoyaltyPointsUsed] = useState(0);
   const [loyaltyProcessing, setLoyaltyProcessing] = useState(false);
   const [paymentFailModal, setPaymentFailModal] = useState({ open: false });
+  const [wishlistedIds, setWishlistedIds] = useState(new Set());
+  const [cartCount, setCartCount] = useState(0);
+  const [cartBlink, setCartBlink] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  // Fetch cart count from backend
+  const fetchCartCount = async () => {
+    if (!customerId) return;
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/cart/pending/${customerId}`,
+      );
+      const data = await res.json();
+      setCartCount(data.total_items || 0);
+    } catch (err) {
+      console.error("Error fetching cart count:", err);
+    }
+  };
+
+  // Trigger blink animation whenever cartCount changes
+  useEffect(() => {
+    if (cartCount > 0) {
+      setCartBlink(true);
+      const timer = setTimeout(() => setCartBlink(false), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [cartCount]);
+
+  // Load wishlist on mount / when customerId changes
+  useEffect(() => {
+    if (!customerId) return;
+    fetch(`http://localhost:8000/api/wishlist/${customerId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.product_ids) setWishlistedIds(new Set(data.product_ids));
+      })
+      .catch(() => {});
+  }, [customerId]);
+
+  const handleWishlistToggle = async (productId) => {
+    try {
+      const res = await fetch("http://localhost:8000/api/wishlist/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_id: customerId,
+          product_id: productId,
+        }),
+      });
+      const data = await res.json();
+      setWishlistedIds((prev) => {
+        const next = new Set(prev);
+        if (data.wishlisted) next.add(productId);
+        else next.delete(productId);
+        return next;
+      });
+    } catch (err) {
+      console.error("Wishlist toggle failed", err);
+    }
+  };
 
   // Helper function to add timeline entries sequentially with animation delay
   const addTimelineEntriesSequentially = (entries, delayMs = 500) => {
@@ -174,7 +235,8 @@ export default function ChatBot({ customerId }) {
       !contentHandled &&
       response.responses &&
       response.responses.recommendation &&
-      Array.isArray(response.responses.recommendation)
+      Array.isArray(response.responses.recommendation) &&
+      response.responses.recommendation.length > 0
     ) {
       // Track last recommendations for downstream UI (e.g., add-to-cart confirmation)
       setLastRecommendations(response.responses.recommendation);
@@ -184,6 +246,23 @@ export default function ChatBot({ customerId }) {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, productCardsMessage]);
+      contentHandled = true;
+    }
+
+    // Handle empty recommendations (no products found) — show the default text message
+    if (
+      !contentHandled &&
+      response.responses &&
+      response.responses.default &&
+      (!response.responses.recommendation ||
+        response.responses.recommendation.length === 0)
+    ) {
+      const aiMessage = {
+        type: "ai",
+        text: response.responses.default,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
       contentHandled = true;
     }
 
@@ -301,6 +380,22 @@ export default function ChatBot({ customerId }) {
 
   useEffect(() => {
     if (!isOpen) setIsQuickActionsOpen(false);
+  }, [isOpen]);
+
+  // Fetch cart count when chatbot opens or customerId changes
+  useEffect(() => {
+    if (isOpen && customerId) {
+      fetchCartCount();
+    }
+  }, [isOpen, customerId]);
+
+  // Silent return-monitoring agent: runs when chatbot opens (batch for all customers)
+  useEffect(() => {
+    if (isOpen) {
+      fetch("http://localhost:8000/api/orders/return-monitoring", {
+        method: "POST",
+      }).catch(() => {});
+    }
   }, [isOpen]);
 
   // Auto-scroll to bottom when chatbot is opened and history is restored
@@ -440,6 +535,30 @@ export default function ChatBot({ customerId }) {
               isWelcomeCard: true,
             },
           ]);
+        }
+
+        // Check for pending cart items and show reminder
+        try {
+          const cartRes = await fetch(
+            `http://localhost:8000/api/cart/pending/${customerId}`,
+          );
+          const cartData = await cartRes.json();
+          if (cartData.cart_items && cartData.cart_items.length > 0) {
+            setTimeout(() => {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  type: "pendingCartReminder",
+                  cartItems: cartData.cart_items,
+                  total_items: cartData.total_items,
+                  total_amount: cartData.total_amount,
+                  timestamp: new Date(),
+                },
+              ]);
+            }, 600);
+          }
+        } catch (cartErr) {
+          console.error("Error checking pending cart:", cartErr);
         }
       } catch (error) {
         console.error("Error initializing chat:", error);
@@ -659,6 +778,13 @@ export default function ChatBot({ customerId }) {
         reject(new Error("WebSocket connection error"));
       };
 
+      ws.onclose = (event) => {
+        // If the socket closed before we got a run_end or error, reject the promise
+        if (!finalResponse) {
+          reject(new Error("WebSocket closed unexpectedly"));
+        }
+      };
+
       ws.onmessage = (event) => {
         let msg;
         try {
@@ -737,6 +863,112 @@ export default function ChatBot({ customerId }) {
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
+
+    // --- Handle pending refund: user is providing return reason ---
+    if (pendingRefundOrder) {
+      const returnReason = inputValue.trim();
+      const order = pendingRefundOrder;
+      const transactionId = order?.transaction_id;
+      const productName = order?.product_name || "Product";
+
+      // Show user message
+      setMessages((prev) => [
+        ...prev,
+        { type: "user", text: returnReason, timestamp: new Date() },
+      ]);
+      setInputValue("");
+      setIsLoading(true);
+
+      try {
+        const res = await fetch(
+          "http://localhost:8000/api/orders/initiate-return",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              transaction_id: transactionId,
+              return_reason: returnReason,
+            }),
+          },
+        );
+        const data = await res.json();
+
+        if (data.success) {
+          // Reason accepted — clear pending order and show confirmation
+          setPendingRefundOrder(null);
+
+          // Pause for a couple of seconds before showing confirmation in chat
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: [
+                `✅ **Your refund request has been initiated successfully.**`,
+                ``,
+                `**Product:** ${productName}  •  **Order ID:** ${transactionId}`,
+                `**Reason:** ${returnReason}`,
+                ``,
+                `**What happens next:**`,
+                `• Our pickup partner will collect the item within 2–3 business days.`,
+                `• After pickup and verification, the refund will be processed to your original payment method.`,
+                ``,
+                `Please keep the product packed and ready (tags/invoice if available).`,
+              ].join("\n"),
+              timestamp: new Date(),
+            },
+          ]);
+        } else if (data.invalid_reason) {
+          // Reason rejected — keep pendingRefundOrder so user can retry
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: [
+                `⚠️ **Your return reason was not specific enough.**`,
+                ``,
+                `Please provide a **valid product-related reason** such as:`,
+                `• 📏 **Size/Fit issue** — too small, too big, doesn't fit`,
+                `• 🔧 **Defective/Damaged** — broken, torn, scratched`,
+                `• 🎨 **Wrong item/color** — received incorrect product`,
+                `• 🧵 **Quality issue** — poor fabric, bad stitching`,
+                `• 🤦 **Ordered by mistake** — accidental purchase`,
+                `• 📦 **Packaging damaged** — box damaged, seal broken`,
+                ``,
+                `Please type your reason below:`,
+              ].join("\n"),
+              timestamp: new Date(),
+            },
+          ]);
+        } else {
+          // Other errors — clear pending order
+          setPendingRefundOrder(null);
+          setMessages((prev) => [
+            ...prev,
+            {
+              type: "ai",
+              text: `⚠️ ${data.error || "Failed to initiate return. Please try again."}`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      } catch (e) {
+        setPendingRefundOrder(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "ai",
+            text: "❌ Something went wrong while processing your return. Please try again.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+    // --- End pending refund handling ---
 
     const userMessage = {
       type: "user",
@@ -854,7 +1086,8 @@ export default function ChatBot({ customerId }) {
             setTimeout(() => {
               const upsellHeaderMessage = {
                 type: "ai",
-                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
+                isUpsellHeader: true,
+                text: `🔥🎯 **Great choice!** We handpicked these **${upsellCategory}** just for you — they'd go perfectly with your picks! 👇✨`,
                 timestamp: new Date(),
               };
               setMessages((prev) => [...prev, upsellHeaderMessage]);
@@ -982,6 +1215,7 @@ export default function ChatBot({ customerId }) {
       setMessages((prev) => [...prev, errorMessage]);
     }
     setIsLoading(false);
+    fetchCartCount();
   };
 
   const formatOrderDate = (rawDate) => {
@@ -998,6 +1232,32 @@ export default function ChatBot({ customerId }) {
   const handleRefundQuickAction = async () => {
     if (isLoading || isRefundLoading) return;
     setIsRefundLoading(true);
+
+    // Emit live timeline entries for Return Agent flow
+    const returnKey = `${Date.now()}:return_agent`;
+    ensureTimelineEntry({
+      key: returnKey,
+      tool: "return_agent",
+      agentLabel: "Return Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Return Agent`,
+      });
+    }, 200);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Fetching recent orders (last 7 days)`,
+      });
+    }, 500);
+
     try {
       const res = await fetch(
         `http://localhost:8000/api/customer/${customerId}/orders/recent?days=7`,
@@ -1006,6 +1266,22 @@ export default function ChatBot({ customerId }) {
       const orders = Array.isArray(data?.order_history)
         ? data.order_history
         : [];
+
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Found ${orders.length} eligible order(s)`,
+      });
+      setTimeout(() => {
+        appendTimelineLog({
+          key: returnKey,
+          tool: "return_agent",
+          agentLabel: "Return Agent",
+          line: `[${formatLocalTime()}] Return Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: returnKey, status: "completed" });
+      }, 400);
 
       setMessages((prev) => [
         ...prev,
@@ -1016,6 +1292,14 @@ export default function ChatBot({ customerId }) {
         },
       ]);
     } catch (e) {
+      appendTimelineLog({
+        key: returnKey,
+        tool: "return_agent",
+        agentLabel: "Return Agent",
+        line: `[${formatLocalTime()}] Failed to fetch recent orders`,
+      });
+      endTimelineEntry({ key: returnKey, status: "error" });
+
       setMessages((prev) => [
         ...prev,
         {
@@ -1029,41 +1313,152 @@ export default function ChatBot({ customerId }) {
     }
   };
 
+  const handleLocateUs = async () => {
+    if (isLoading || isRefundLoading) return;
+    setIsRefundLoading(true);
+
+    // Emit live timeline entries for Locate Us Agent flow
+    const locateKey = `${Date.now()}:locate_us_agent`;
+    ensureTimelineEntry({
+      key: locateKey,
+      tool: "locate_us_agent",
+      agentLabel: "Locate Us Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Locate Us Agent`,
+      });
+    }, 200);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Fetching store distances & map data`,
+      });
+    }, 500);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/stores/locate/${customerId}`,
+      );
+      const data = await res.json();
+      const stores = Array.isArray(data?.stores) ? data.stores : [];
+
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Found ${stores.length} store location(s)`,
+      });
+      setTimeout(() => {
+        appendTimelineLog({
+          key: locateKey,
+          tool: "locate_us_agent",
+          agentLabel: "Locate Us Agent",
+          line: `[${formatLocalTime()}] Locate Us Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: locateKey, status: "completed" });
+      }, 400);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "storeLocator",
+          stores,
+          timestamp: new Date(),
+        },
+      ]);
+    } catch (e) {
+      appendTimelineLog({
+        key: locateKey,
+        tool: "locate_us_agent",
+        agentLabel: "Locate Us Agent",
+        line: `[${formatLocalTime()}] Failed to fetch store locations`,
+      });
+      endTimelineEntry({ key: locateKey, status: "error" });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "ai",
+          text: "Sorry, I couldn't fetch store locations right now. Please try again.",
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsRefundLoading(false);
+    }
+  };
+
+  const handleCustomerSupport = () => {
+    // Add user message to chat
+    setMessages((prev) => [
+      ...prev,
+      { type: "user", text: "Customer Support", timestamp: new Date() },
+    ]);
+
+    // Add timeline entry
+    const csKey = `${Date.now()}:customer_support`;
+    ensureTimelineEntry({
+      key: csKey,
+      tool: "post_purchase_agent",
+      agentLabel: "Post-Purchase Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: csKey,
+        tool: "post_purchase_agent",
+        agentLabel: "Post-Purchase Agent",
+        line: `[${formatLocalTime()}] Showing customer support contact info`,
+      });
+      endTimelineEntry({ key: csKey, status: "completed" });
+    }, 300);
+
+    // Add contact support card
+    setMessages((prev) => [
+      ...prev,
+      { type: "contactSupport", timestamp: new Date() },
+    ]);
+  };
+
   const openRefundModal = (order) => {
-    const productName = order?.product_name ? String(order.product_name) : null;
+    const productName = order?.product_name
+      ? String(order.product_name)
+      : "this product";
     const transactionId = order?.transaction_id
       ? String(order.transaction_id)
       : null;
-    const purchaseDate = order?.purchase_date
-      ? formatOrderDate(order.purchase_date)
-      : null;
 
-    const orderLineParts = [
-      productName ? `Product: ${productName}` : null,
-      transactionId ? `Order ID: ${transactionId}` : null,
-      purchaseDate ? `Purchased: ${purchaseDate}` : null,
-    ].filter(Boolean);
+    // Store the order awaiting a return reason
+    setPendingRefundOrder(order);
 
-    const orderLine =
-      orderLineParts.length > 0 ? `${orderLineParts.join("  •  ")}` : "";
-
-    const message = [
-      "Your refund request has been initiated successfully.",
-      orderLine,
-      "",
-      "What happens next:",
-      "• Our pickup partner will collect the item within 2–3 business days.",
-      "• After pickup and verification, the refund will be processed to your original payment method.",
-      "",
-      "Please keep the product packed and ready (tags/invoice if available).",
-    ]
-      .filter((line) => line !== "")
-      .join("\n");
-
-    setRefundModal({
-      open: true,
-      message,
-    });
+    // Ask user for return reason via chatbot message with valid reason guidance
+    setMessages((prev) => [
+      ...prev,
+      {
+        type: "ai",
+        text: [
+          `🔄 You have selected **${productName}**${transactionId ? ` (Order ID: ${transactionId})` : ""} for return/refund.`,
+          ``,
+          `Please provide a **specific product-related reason** for your return. Accepted reasons include:`,
+          `• 📏 Size/Fit issue`,
+          `• 🔧 Defective or damaged product`,
+          `• 🎨 Wrong item or color received`,
+          `• 🧵 Quality issue (fabric, stitching, etc.)`,
+          `• 🤦 Ordered by mistake`,
+          `• 📦 Packaging damaged`,
+          ``,
+          `⚠️ _Generic reasons like "I want my money back" will not be accepted._`,
+        ].join("\n"),
+        timestamp: new Date(),
+      },
+    ]);
   };
 
   const closeRefundModal = () => {
@@ -1121,8 +1516,12 @@ export default function ChatBot({ customerId }) {
     if (orderMatch) {
       const orderText = orderMatch[1];
       // Flexible regex patterns to handle both **bold:** and plain formats
-      const orderIdMatch = orderText.match(/(?:\*\*)?Order\s*ID:?(?:\*\*)?\s*(\w+)/i);
-      const totalItemsMatch = orderText.match(/(?:\*\*)?Total\s*Items:?(?:\*\*)?\s*(\d+)/i);
+      const orderIdMatch = orderText.match(
+        /(?:\*\*)?Order\s*ID:?(?:\*\*)?\s*(\w+)/i,
+      );
+      const totalItemsMatch = orderText.match(
+        /(?:\*\*)?Total\s*Items:?(?:\*\*)?\s*(\d+)/i,
+      );
       const totalAmountMatch = orderText.match(
         /(?:\*\*)?(?:Total\s*)?Amount:?(?:\*\*)?\s*₹([\d,]+)/i,
       );
@@ -1186,6 +1585,9 @@ export default function ChatBot({ customerId }) {
       const pickupOrderIdMatch = cleanedText.match(
         /Order\s*ID\s*:\s*([A-Za-z0-9_-]+)/i,
       );
+      const pickupStoreIdMatch = cleanedText.match(
+        /Store\s*ID\s*:\s*([A-Za-z0-9_-]+)/i,
+      );
       const pickupTotalItemsMatch = cleanedText.match(
         /Total\s*Items\s*:\s*(\d+)/i,
       );
@@ -1214,6 +1616,7 @@ export default function ChatBot({ customerId }) {
       sections.storePickupConfirmation = {
         title: "In-Store Pickup Confirmed!",
         order_id: pickupOrderIdMatch ? pickupOrderIdMatch[1] : "N/A",
+        store_id: pickupStoreIdMatch ? pickupStoreIdMatch[1] : "N/A",
         total_items: pickupTotalItemsMatch
           ? parseInt(pickupTotalItemsMatch[1], 10)
           : null,
@@ -1362,10 +1765,55 @@ export default function ChatBot({ customerId }) {
   };
 
   // Handle purchase method button clicks
-  const handlePurchaseMethodClick = (method) => {
+  const handlePurchaseMethodClick = async (method) => {
     if (method === "Buy Online") {
-      setInputValue("I want to buy online");
-      setTimeout(() => sendMessage(), 100);
+      const onlineText = "I want to buy online";
+      const userMsg = {
+        type: "user",
+        text: onlineText,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInputValue("");
+      setIsLoading(true);
+      try {
+        const data = await chatWithAgentViaWebSocket(customerId, onlineText);
+        if (
+          data.agent_calls &&
+          data.agent_calls.includes("payment_agent") &&
+          data.agent_calls.length === 1
+        ) {
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.type === "paymentMethods") return prev;
+            return [
+              ...prev,
+              {
+                type: "paymentMethods",
+                text: data.response,
+                timestamp: new Date(),
+              },
+            ];
+          });
+        } else if (data.response) {
+          setMessages((prev) => [
+            ...prev,
+            { type: "ai", text: data.response, timestamp: new Date() },
+          ]);
+        }
+      } catch (err) {
+        console.error("Error in Buy Online:", err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: "ai",
+            text: "Sorry, I encountered an error. Please try again.",
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
     } else if (method === "Nearest Store") {
       const userMessage = {
         type: "user",
@@ -1446,6 +1894,9 @@ export default function ChatBot({ customerId }) {
       const response = await chatWithAgentViaWebSocket(
         customerId,
         paymentMessage,
+        loyaltyApplied && loyaltyPointsUsed > 0
+          ? { loyalty_points_used: loyaltyPointsUsed }
+          : undefined,
       );
 
       console.log("Payment response:", response);
@@ -1548,6 +1999,9 @@ export default function ChatBot({ customerId }) {
       const response = await chatWithAgentViaWebSocket(
         customerId,
         paymentMessage,
+        loyaltyApplied && loyaltyPointsUsed > 0
+          ? { loyalty_points_used: loyaltyPointsUsed }
+          : undefined,
       );
 
       console.log("Payment response:", response);
@@ -1854,6 +2308,8 @@ export default function ChatBot({ customerId }) {
       c.includes("perfume") ||
       c.includes("wallet") ||
       c.includes("costume jewellery") ||
+      c.includes("Handbags & Bags") ||
+      c.includes("bags") ||
       c.includes("costume jewelry")
     );
   };
@@ -1861,7 +2317,20 @@ export default function ChatBot({ customerId }) {
   const isFootwear = (product) => {
     const category = (product && product.category) || "";
     const c = String(category).toLowerCase();
-    return c.includes("footwear") || c.includes("shoes") || c.includes("shoe");
+    return (
+      c.includes("footwear") ||
+      c.includes("shoes") ||
+      c.includes("shoe") ||
+      c.includes("Sneakers") ||
+      c.includes("sandals") ||
+      c.includes("Boots") ||
+      c.includes("boots") ||
+      c.includes("Heels") ||
+      c.includes("Formal Shoes") ||
+      c.includes("Casual Shoes") ||
+      c.includes("Sports Shoes") ||
+      c.includes("heels")
+    );
   };
 
   const getDefaultSize = (product) => {
@@ -1912,6 +2381,7 @@ export default function ChatBot({ customerId }) {
 
       // Silently refresh cart display without adding messages
       handleViewCart(true);
+      fetchCartCount();
     } catch (error) {
       console.error("Error removing from cart:", error);
 
@@ -2015,6 +2485,7 @@ export default function ChatBot({ customerId }) {
             return message;
           });
         });
+        fetchCartCount();
       } else {
         const errorMessage = {
           type: "ai",
@@ -2028,6 +2499,102 @@ export default function ChatBot({ customerId }) {
       const errorMessage = {
         type: "ai",
         text: "Sorry, there was an error updating the quantity. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleShowWishlist = async () => {
+    setIsLoading(true);
+
+    // Show user message
+    const userMessage = {
+      type: "user",
+      text: "Show my wishlist",
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    // Emit timeline entries
+    const wlKey = `${Date.now()}:wishlist_agent`;
+    ensureTimelineEntry({
+      key: wlKey,
+      tool: "wishlist_agent",
+      agentLabel: "Wishlist Agent",
+      status: "in_progress",
+    });
+    setTimeout(() => {
+      appendTimelineLog({
+        key: wlKey,
+        tool: "wishlist_agent",
+        agentLabel: "Wishlist Agent",
+        line: `[${formatLocalTime()}] Master Orchestrator → Wishlist Agent`,
+      });
+    }, 300);
+    setTimeout(() => {
+      appendTimelineLog({
+        key: wlKey,
+        tool: "wishlist_agent",
+        agentLabel: "Wishlist Agent",
+        line: `[${formatLocalTime()}] Fetching wishlist products & checking availability`,
+      });
+    }, 600);
+
+    try {
+      const res = await fetch(
+        `http://localhost:8000/api/wishlist/${customerId}/products`,
+      );
+      const data = await res.json();
+
+      setTimeout(() => {
+        appendTimelineLog({
+          key: wlKey,
+          tool: "wishlist_agent",
+          agentLabel: "Wishlist Agent",
+          line: `[${formatLocalTime()}] Wishlist Agent → Master Orchestrator`,
+        });
+      }, 900);
+      setTimeout(() => {
+        endTimelineEntry({ key: wlKey, status: "completed" });
+      }, 1200);
+
+      if (data.products && data.products.length > 0) {
+        // Fetch reviews for wishlist products
+        fetchReviewsByProductIds(data.products.map((p) => p.product_id));
+
+        const headerMessage = {
+          type: "ai",
+          text: `❤️ **Your Wishlist** — ${data.products.length} product${data.products.length > 1 ? "s" : ""} saved. Select quantity and add to cart!`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, headerMessage]);
+
+        const wishlistCardsMessage = {
+          type: "productCards",
+          productCards: data.products,
+          isWishlist: true,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, wishlistCardsMessage]);
+      } else {
+        const emptyMessage = {
+          type: "ai",
+          text: "Your wishlist is empty. Browse products and tap 🤍 to add items to your wishlist!",
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, emptyMessage]);
+      }
+    } catch (error) {
+      console.error("Error fetching wishlist products:", error);
+      setTimeout(() => {
+        endTimelineEntry({ key: wlKey, status: "error" });
+      }, 900);
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, I couldn't fetch your wishlist right now. Please try again.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -2058,12 +2625,53 @@ export default function ChatBot({ customerId }) {
 
     setIsLoading(true);
 
+    // Emit timeline entry for View Cart Agent
+    const cartKey = `${Date.now()}:view_cart_agent`;
+    if (!silent) {
+      ensureTimelineEntry({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        status: "in_progress",
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        line: `${formatLocalTime()} Master Orchestrator → View Cart Agent`,
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "view_cart_agent",
+        agentLabel: "View Cart Agent",
+        line: `${formatLocalTime()} Fetching pending cart items`,
+      });
+    }
+
     try {
-      const data = await chatWithAgentViaWebSocket(
-        customerId,
-        "please show my items in the cart",
+      // Direct REST call for fast cart loading (bypasses LLM pipeline)
+      const response = await fetch(
+        `http://localhost:8000/api/cart/pending/${customerId}`,
       );
+      const data = await response.json();
       console.log("Cart data:", data);
+      setCartCount(data.total_items || 0);
+
+      if (!silent) {
+        appendTimelineLog({
+          key: cartKey,
+          tool: "view_cart_agent",
+          agentLabel: "View Cart Agent",
+          line: `${formatLocalTime()} ✅ Found ${data.total_items || 0} item(s) in cart`,
+        });
+        appendTimelineLog({
+          key: cartKey,
+          tool: "view_cart_agent",
+          agentLabel: "View Cart Agent",
+          line: `${formatLocalTime()} View Cart Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: cartKey, status: "completed" });
+      }
       // If backend returns cart items, display as product cards
       if (
         data.cart_items &&
@@ -2101,44 +2709,138 @@ export default function ChatBot({ customerId }) {
           console.log("not silent", cartCardsMessage);
           setMessages((prev) => [...prev, cartCardsMessage]);
 
-          // Render autonomous upsell recommendations if present
-          if (
-            data.upsell &&
-            data.upsell.responses &&
-            data.upsell.responses.recommendation &&
-            data.upsell.responses.recommendation.length > 0
-          ) {
-            const upsellCategory = data.upsell.upsell_category || "accessories";
-            setLastRecommendations(data.upsell.responses.recommendation);
-            fetchReviewsByProductIds(
-              data.upsell.responses.recommendation.map((p) => p?.product_id),
-            );
-            setTimeout(() => {
-              const upsellHeaderMessage = {
-                type: "ai",
-                text: `✨ **You might also like these ${upsellCategory}!** Complete your look with these trending picks:`,
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, upsellHeaderMessage]);
+          // Trigger autonomous upsell chain via REST (non-blocking)
+          (async () => {
+            try {
+              // Timeline: Upsell Agent
+              const upsellKey = `${Date.now()}:upsell_agent`;
+              ensureTimelineEntry({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                status: "in_progress",
+              });
+              appendTimelineLog({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                line: `${formatLocalTime()} View Cart Agent → Upsell Agent`,
+              });
+              appendTimelineLog({
+                key: upsellKey,
+                tool: "upsell_agent",
+                agentLabel: "Upsell Agent",
+                line: `${formatLocalTime()} Analyzing cart for cross-sell opportunities`,
+              });
 
-              const upsellCardsMessage = {
-                type: "productCards",
-                productCards: data.upsell.responses.recommendation,
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, upsellCardsMessage]);
-            }, 400);
-          } else {
-            // Add follow-up message asking about next steps (only if no upsell)
-            setTimeout(() => {
-              const followUpMessage = {
-                type: "ai",
-                text: "Would you like to proceed with the payment or want to add more products? 🛒",
-                timestamp: new Date(),
-              };
-              setMessages((prev) => [...prev, followUpMessage]);
-            }, 300);
-          }
+              const upsellRes = await fetch(
+                `http://localhost:8000/api/cart/upsell/${customerId}`,
+              );
+              const upsellData = await upsellRes.json();
+
+              endTimelineEntry({ key: upsellKey, status: "completed" });
+
+              if (
+                upsellData.upsell &&
+                upsellData.upsell.responses &&
+                upsellData.upsell.responses.recommendation &&
+                upsellData.upsell.responses.recommendation.length > 0
+              ) {
+                // Timeline: Inventory Agent (upsell search)
+                const invKey = `${Date.now()}:inventory_agent_upsell`;
+                ensureTimelineEntry({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  status: "in_progress",
+                });
+                appendTimelineLog({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  line: `${formatLocalTime()} Upsell Agent → Inventory Agent`,
+                });
+                appendTimelineLog({
+                  key: invKey,
+                  tool: "inventory_agent",
+                  agentLabel: "Inventory Agent",
+                  line: `${formatLocalTime()} ✅ Found ${upsellData.upsell.responses.recommendation.length} upsell product(s)`,
+                });
+                endTimelineEntry({ key: invKey, status: "completed" });
+
+                // Timeline: Recommendation Agent
+                const recKey = `${Date.now()}:recommendation_agent_upsell`;
+                ensureTimelineEntry({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  status: "in_progress",
+                });
+                appendTimelineLog({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  line: `${formatLocalTime()} Inventory Agent → Recommendation Agent`,
+                });
+                appendTimelineLog({
+                  key: recKey,
+                  tool: "recommendation_agent",
+                  agentLabel: "Recommendation Agent",
+                  line: `${formatLocalTime()} ✅ Prepared upsell recommendations`,
+                });
+                endTimelineEntry({ key: recKey, status: "completed" });
+
+                const upsellCategory =
+                  upsellData.upsell.upsell_category || "accessories";
+                setLastRecommendations(
+                  upsellData.upsell.responses.recommendation,
+                );
+                fetchReviewsByProductIds(
+                  upsellData.upsell.responses.recommendation.map(
+                    (p) => p?.product_id,
+                  ),
+                );
+
+                setTimeout(() => {
+                  const upsellHeaderMessage = {
+                    type: "ai",
+                    isUpsellHeader: true,
+                    text: `🔥🎯 **Great choice!** We handpicked these **${upsellCategory}** just for you — they'd go perfectly with your picks! 👇✨`,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, upsellHeaderMessage]);
+
+                  const upsellCardsMessage = {
+                    type: "productCards",
+                    productCards: upsellData.upsell.responses.recommendation,
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, upsellCardsMessage]);
+                }, 400);
+              } else {
+                // No upsell results — show follow-up
+                setTimeout(() => {
+                  const followUpMessage = {
+                    type: "ai",
+                    text: "Would you like to proceed with the payment or want to add more products? 🛒",
+                    timestamp: new Date(),
+                  };
+                  setMessages((prev) => [...prev, followUpMessage]);
+                }, 300);
+              }
+            } catch (upsellErr) {
+              console.error("Upsell fetch error:", upsellErr);
+              // Fallback follow-up on upsell failure
+              setTimeout(() => {
+                const followUpMessage = {
+                  type: "ai",
+                  text: "Would you like to proceed with the payment or want to add more products? 🛒",
+                  timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, followUpMessage]);
+              }, 300);
+            }
+          })();
         }
       } else {
         const aiMessage = {
@@ -2250,48 +2952,147 @@ export default function ChatBot({ customerId }) {
 
     // Don't add if quantity is 0 or undefined
     if (!quantity || quantity === 0) {
-      return;
+      return false;
     }
 
-    // Only show user message if it's not a bulk add
-    if (!isBulkAdd) {
-      const userMessage = {
-        type: "user",
-        text: `Add ${quantity} x ${product.product_name} to cart`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
-      setInputValue("");
-      setIsLoading(true);
+    const selectedSize = isAccessories(product)
+      ? null
+      : productSizes[product.product_id] || getDefaultSize(product);
+
+    // ─── Bulk Add: direct REST call for reliable, deterministic cart insertion ───
+    if (isBulkAdd) {
+      // Emit timeline entry for this product
+      const cartKey = `${Date.now()}:add_to_cart_agent:${product.product_id}`;
+      ensureTimelineEntry({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        status: "in_progress",
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        line: `${formatLocalTime()} Master Orchestrator → Add to Cart Agent`,
+      });
+      appendTimelineLog({
+        key: cartKey,
+        tool: "add_to_cart_agent",
+        agentLabel: "Add to Cart Agent",
+        line: `${formatLocalTime()} Adding ${quantity}x ${product.product_name} (${product.product_id})`,
+      });
+
+      try {
+        const response = await fetch("http://localhost:8000/api/cart/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            product_id: product.product_id,
+            quantity,
+            customer_id: customerId,
+            size: selectedSize || null,
+          }),
+        });
+
+        if (!response.ok) {
+          console.error("Bulk add-to-cart failed: HTTP", response.status);
+          appendTimelineLog({
+            key: cartKey,
+            tool: "add_to_cart_agent",
+            agentLabel: "Add to Cart Agent",
+            line: `${formatLocalTime()} ❌ Failed to add ${product.product_name}`,
+          });
+          endTimelineEntry({ key: cartKey, status: "error" });
+          return false;
+        }
+
+        const data = await response.json();
+        if (!data.success) {
+          console.error("Bulk add-to-cart failed:", data.error);
+          appendTimelineLog({
+            key: cartKey,
+            tool: "add_to_cart_agent",
+            agentLabel: "Add to Cart Agent",
+            line: `${formatLocalTime()} ❌ ${data.error || "Failed to add item"}`,
+          });
+          endTimelineEntry({ key: cartKey, status: "error" });
+          return false;
+        }
+
+        // Log success and close timeline entry
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} ✅ Added ${quantity}x ${product.product_name} to cart`,
+        });
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} Add to Cart Agent → Master Orchestrator`,
+        });
+        endTimelineEntry({ key: cartKey, status: "completed" });
+
+        // Reset quantity for this product
+        setProductQuantities((prev) => {
+          const updated = { ...prev };
+          delete updated[product.product_id];
+          return updated;
+        });
+
+        // Reset size for this product
+        setProductSizes((prev) => {
+          const updated = { ...prev };
+          delete updated[product.product_id];
+          return updated;
+        });
+
+        fetchCartCount();
+        return true;
+      } catch (error) {
+        console.error("Bulk add-to-cart error:", error);
+        appendTimelineLog({
+          key: cartKey,
+          tool: "add_to_cart_agent",
+          agentLabel: "Add to Cart Agent",
+          line: `${formatLocalTime()} ❌ Network error adding ${product.product_name}`,
+        });
+        endTimelineEntry({ key: cartKey, status: "error" });
+        return false;
+      }
     }
+
+    // ─── Individual Add: WebSocket / LLM agent pipeline (preserves timeline) ───
+    const userMessage = {
+      type: "user",
+      text: `Add ${quantity} x ${product.product_name} to cart`,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setIsLoading(true);
 
     try {
-      const selectedSize = isAccessories(product)
-        ? undefined
-        : productSizes[product.product_id] || getDefaultSize(product);
-
       const data = await chatWithAgentViaWebSocket(
         customerId,
         `Add ${quantity} units of product ${product.product_id} to cart`,
         selectedSize ? { size: selectedSize } : undefined,
       );
 
-      // Only show success message if it's not a bulk add
-      if (!isBulkAdd) {
-        const aiMessage = {
-          type: "ai",
-          text: data.response || "Item added to cart successfully!",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, aiMessage]);
+      const aiMessage = {
+        type: "ai",
+        text: data.response || "Item added to cart successfully!",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
 
-        // Add View Cart button after successful add to cart
-        const viewCartMessage = {
-          type: "viewCartPrompt",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, viewCartMessage]);
-      }
+      // Add View Cart button after successful add to cart
+      const viewCartMessage = {
+        type: "viewCartPrompt",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, viewCartMessage]);
 
       // Reset quantity for this product
       setProductQuantities((prev) => {
@@ -2307,26 +3108,20 @@ export default function ChatBot({ customerId }) {
         return updated;
       });
 
+      fetchCartCount();
       return true; // Success
     } catch (error) {
       console.error("Error adding to cart:", error);
 
-      // Only show error message if it's not a bulk add
-      if (!isBulkAdd) {
-        const errorMessage = {
-          type: "ai",
-          text: "Sorry, there was an error adding the item to cart. Please try again.",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-        setIsLoading(false);
-      }
+      const errorMessage = {
+        type: "ai",
+        text: "Sorry, there was an error adding the item to cart. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+      setIsLoading(false);
 
       return false; // Failure
-    }
-
-    if (!isBulkAdd) {
-      setIsLoading(false);
     }
   };
 
@@ -2351,6 +3146,34 @@ export default function ChatBot({ customerId }) {
 
   return (
     <>
+      {/* Image Zoom Overlay */}
+      {zoomedImage && (
+        <div
+          className="image-zoom-overlay"
+          onClick={() => setZoomedImage(null)}
+        >
+          <div className="image-zoom-container">
+            <img
+              src={zoomedImage.src}
+              alt={zoomedImage.alt}
+              className="image-zoom-img"
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomedImage(null);
+              }}
+            />
+            <div className="image-zoom-caption">{zoomedImage.alt}</div>
+            <button
+              className="image-zoom-close"
+              onClick={() => setZoomedImage(null)}
+              aria-label="Close zoom"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Chatbot Icon */}
       <div className="chatbot-icon" onClick={toggleChatbot}>
         <div className="bot-avatar">
@@ -2370,14 +3193,20 @@ export default function ChatBot({ customerId }) {
                 aria-modal="true"
                 aria-label="Payment failed"
                 onClick={(e) => {
-                  if (e.target === e.currentTarget) setPaymentFailModal({ open: false });
+                  if (e.target === e.currentTarget)
+                    setPaymentFailModal({ open: false });
                 }}
               >
                 <div className="payment-fail-modal">
                   <div className="payment-fail-modal-icon">❌</div>
-                  <div className="payment-fail-modal-title">Payment Failed!</div>
+                  <div className="payment-fail-modal-title">
+                    Payment Failed!
+                  </div>
                   <div className="payment-fail-modal-body">
-                    Your Credit Card transaction could not be processed. The payment was declined by your bank. Please try again with a different payment method or contact your bank for assistance.
+                    Your Credit Card transaction could not be processed. The
+                    payment was declined by your bank. Please try again with a
+                    different payment method or contact your bank for
+                    assistance.
                   </div>
                   <div className="payment-fail-modal-actions">
                     <button
@@ -2581,6 +3410,23 @@ export default function ChatBot({ customerId }) {
                   </div>
                 </div>
                 <div className="header-actions">
+                  <button
+                    className="header-cart-icon-btn"
+                    onClick={() => handleViewCart(false)}
+                    disabled={isLoading}
+                    title="View Cart"
+                  >
+                    <img
+                      className="header-cart-img"
+                      src="/images/shopping-cart.png"
+                      alt="Cart"
+                    />
+                    <span
+                      className={`header-cart-badge${cartBlink ? " blink" : ""}`}
+                    >
+                      {cartCount}
+                    </span>
+                  </button>
                   <div className="action-tools">
                     <button
                       className="action-tool-btn quick-actions-toggle"
@@ -2610,15 +3456,81 @@ export default function ChatBot({ customerId }) {
                         <span
                           className="quick-actions-separator"
                           aria-hidden="true"
-                        >
-                          →
-                        </span>
+                        ></span>
                         <button
                           className="action-tool-btn quick-action-payment"
-                          onClick={() => {
+                          onClick={async () => {
                             setIsQuickActionsOpen(false);
-                            setInputValue("proceed");
-                            setTimeout(() => sendMessage(), 0);
+                            const proceedText = "proceed";
+                            const userMsg = {
+                              type: "user",
+                              text: proceedText,
+                              timestamp: new Date(),
+                            };
+                            setMessages((prev) => [...prev, userMsg]);
+                            setInputValue("");
+                            setIsLoading(true);
+                            try {
+                              const data = await chatWithAgentViaWebSocket(
+                                customerId,
+                                proceedText,
+                              );
+                              if (
+                                data.agent_calls &&
+                                data.agent_calls.includes(
+                                  "choose_channel_agent",
+                                )
+                              ) {
+                                const purchaseMethodsMessage = {
+                                  type: "purchaseMethods",
+                                  text: data.response,
+                                  timestamp: new Date(),
+                                };
+                                setMessages((prev) => [
+                                  ...prev,
+                                  purchaseMethodsMessage,
+                                ]);
+                              } else if (
+                                data.agent_calls &&
+                                data.agent_calls.includes("payment_agent") &&
+                                data.agent_calls.length === 1
+                              ) {
+                                setMessages((prev) => {
+                                  const lastMessage = prev[prev.length - 1];
+                                  if (lastMessage?.type === "paymentMethods")
+                                    return prev;
+                                  return [
+                                    ...prev,
+                                    {
+                                      type: "paymentMethods",
+                                      text: data.response,
+                                      timestamp: new Date(),
+                                    },
+                                  ];
+                                });
+                              } else if (data.response) {
+                                setMessages((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "ai",
+                                    text: data.response,
+                                    timestamp: new Date(),
+                                  },
+                                ]);
+                              }
+                            } catch (err) {
+                              console.error("Error in Go For Payment:", err);
+                              setMessages((prev) => [
+                                ...prev,
+                                {
+                                  type: "ai",
+                                  text: "Sorry, I encountered an error. Please try again.",
+                                  timestamp: new Date(),
+                                },
+                              ]);
+                            } finally {
+                              setIsLoading(false);
+                            }
                           }}
                           disabled={isLoading}
                           title="Go For Payment"
@@ -2629,13 +3541,59 @@ export default function ChatBot({ customerId }) {
                         <span
                           className="quick-actions-separator"
                           aria-hidden="true"
-                        >
-                          →
-                        </span>
+                        ></span>
                         <button
                           className="action-tool-btn quick-action-support"
                           onClick={() => {
                             setIsQuickActionsOpen(false);
+
+                            // Emit live timeline entries for Post Purchase Agent
+                            const ppKey = `${Date.now()}:post_purchase_agent`;
+                            ensureTimelineEntry({
+                              key: ppKey,
+                              tool: "post_purchase_agent",
+                              agentLabel: "Post-Purchase Agent",
+                              status: "in_progress",
+                            });
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Master Orchestrator → Post-Purchase Agent`,
+                              });
+                            }, 300);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Preparing post-purchase support`,
+                              });
+                            }, 700);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Loading return, support & feedback services`,
+                              });
+                            }, 1100);
+                            setTimeout(() => {
+                              appendTimelineLog({
+                                key: ppKey,
+                                tool: "post_purchase_agent",
+                                agentLabel: "Post-Purchase Agent",
+                                line: `[${formatLocalTime()}] Post-Purchase Agent → Master Orchestrator`,
+                              });
+                            }, 1500);
+                            setTimeout(() => {
+                              endTimelineEntry({
+                                key: ppKey,
+                                status: "completed",
+                              });
+                            }, 1800);
+
                             setMessages((prev) => [
                               ...prev,
                               {
@@ -2649,6 +3607,16 @@ export default function ChatBot({ customerId }) {
                           role="menuitem"
                         >
                           🎧 Post Purchase Support
+                        </button>
+                        <div className="quick-actions-separator"></div>
+                        <button
+                          className="action-tool-btn quick-action-wishlist"
+                          onClick={handleShowWishlist}
+                          disabled={isLoading}
+                          title="Show Wishlist"
+                          role="menuitem"
+                        >
+                          ❤️ Show Wishlist
                         </button>
                       </div>
                     )}
@@ -2672,12 +3640,15 @@ export default function ChatBot({ customerId }) {
                   return null;
                 })()}
                 {messages.map((message, index) => {
-                  const isLatestPaymentMethods = message.type === "paymentMethods" && (() => {
-                    for (let i = messages.length - 1; i >= 0; i--) {
-                      if (messages[i].type === "paymentMethods") return i === index;
-                    }
-                    return false;
-                  })();
+                  const isLatestPaymentMethods =
+                    message.type === "paymentMethods" &&
+                    (() => {
+                      for (let i = messages.length - 1; i >= 0; i--) {
+                        if (messages[i].type === "paymentMethods")
+                          return i === index;
+                      }
+                      return false;
+                    })();
                   const { text: displayText, purchaseOptions } =
                     message.type === "ai"
                       ? parseMessageContent(message.text)
@@ -2703,7 +3674,7 @@ export default function ChatBot({ customerId }) {
                   return (
                     <div
                       key={index}
-                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""} ${message.type === "postPurchaseActions" || message.type === "refundOrders" ? "wide-message" : ""}`}
+                      className={`message ${message.type === "user" ? "user-message" : "ai-message"} ${isWelcomeMessage ? "welcome-message-special" : ""} ${message.type === "postPurchaseActions" || message.type === "refundOrders" || message.type === "storeLocator" || message.type === "contactSupport" ? "wide-message" : ""}`}
                     >
                       {isWelcomeMessage ? (
                         <div className="welcome-gradient-card">
@@ -2785,7 +3756,9 @@ export default function ChatBot({ customerId }) {
                                   <ul className="refund-guidelines-list">
                                     <li>
                                       Refunds are eligible for purchases made
-                                      within the last 7 days.
+                                      between 24 hours and 7 days ago. Items
+                                      purchased within the last 24 hours are not
+                                      eligible for return.
                                     </li>
                                     <li>
                                       Items should be unused, in original
@@ -2855,20 +3828,202 @@ export default function ChatBot({ customerId }) {
                                       <button
                                         className="refund-init-btn"
                                         type="button"
+                                        disabled={
+                                          order?.return_status &&
+                                          order.return_status.toLowerCase() !==
+                                            ""
+                                        }
                                         onClick={() => {
                                           openRefundModal(order);
                                         }}
                                       >
-                                        Refund
+                                        {order?.return_status
+                                          ? ` ${order.return_status}`
+                                          : "Return"}
                                       </button>
                                     </div>
                                   ))}
                                 </div>
                               ) : (
                                 <div className="refund-orders-empty">
-                                  No orders found in the last 7 days.
+                                  No eligible orders found. Only purchases made
+                                  between 24 hours and 7 days ago are eligible
+                                  for return.
                                 </div>
                               )}
+                            </div>
+                          )}
+
+                          {message.type === "storeLocator" && (
+                            <div className="store-locator-section">
+                              <div className="store-locator-container">
+                                <div className="store-locator-header">
+                                  <span className="store-locator-icon">📍</span>
+                                  <div className="store-locator-header-text">
+                                    <h4>Store Locator</h4>
+                                    <p>Find our stores nearest to you</p>
+                                  </div>
+                                </div>
+
+                                {Array.isArray(message.stores) &&
+                                message.stores.length > 0 ? (
+                                  <div className="store-locator-table-wrap">
+                                    <table className="store-locator-table">
+                                      <thead>
+                                        <tr>
+                                          <th>#</th>
+                                          <th>Store Name</th>
+                                          <th>Distance</th>
+                                          <th>Locate on Map</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {message.stores.map((store, idx) => (
+                                          <tr key={idx}>
+                                            <td className="store-rank">
+                                              {idx + 1}
+                                            </td>
+                                            <td className="store-name-cell">
+                                              <span className="store-name-icon">
+                                                🏬
+                                              </span>
+                                              {store.store_name}
+                                            </td>
+                                            <td className="store-distance-cell">
+                                              <span className="distance-badge">
+                                                {store.distance} km
+                                              </span>
+                                            </td>
+                                            <td className="store-map-cell">
+                                              {store.map_url ? (
+                                                <a
+                                                  href={store.map_url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="map-link-btn"
+                                                >
+                                                  🗺️ Open Map
+                                                </a>
+                                              ) : (
+                                                <span className="map-unavailable">
+                                                  —
+                                                </span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="store-locator-empty">
+                                    No store locations found for your area.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {message.type === "contactSupport" && (
+                            <div className="contact-support-section">
+                              <div className="contact-support-card">
+                                {/* Address */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Address</h4>
+                                    <span className="cs-block-icon">📍</span>
+                                  </div>
+                                  <p className="cs-block-text">
+                                    Aditya Birla Fashion and Retail Ltd, Piramal
+                                    Agastya Corporate Park, Building
+                                    &lsquo;A&rsquo;, 4th and 5th Floor, Unit No.
+                                    401, 403, 501, 502, L.B.S. Road, Kurla,
+                                    Mumbai &ndash; 400 070.
+                                  </p>
+                                </div>
+                                <div className="cs-divider" />
+                                {/* Phone */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Phone</h4>
+                                    <span className="cs-block-icon">📞</span>
+                                  </div>
+                                  <div className="cs-phone-row">
+                                    <span className="cs-phone-label">
+                                      Online related queries
+                                    </span>
+                                    <a
+                                      href="tel:8105060501"
+                                      className="cs-phone-number"
+                                    >
+                                      8105060501
+                                    </a>
+                                  </div>
+                                  <div className="cs-phone-row">
+                                    <span className="cs-phone-label">
+                                      Store related queries
+                                    </span>
+                                    <a
+                                      href="tel:18004253050"
+                                      className="cs-phone-number"
+                                    >
+                                      1800 425 3050
+                                    </a>
+                                  </div>
+                                </div>
+                                <div className="cs-divider" />
+                                {/* Email */}
+                                <div className="cs-block">
+                                  <div className="cs-block-header">
+                                    <h4 className="cs-block-title">Email</h4>
+                                    <span className="cs-block-icon">✉️</span>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For store related queries
+                                    </p>
+                                    <a
+                                      href="mailto:customerservice@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      customerservice@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For online enquiries
+                                    </p>
+                                    <a
+                                      href="mailto:happytohelp@abfrl.in"
+                                      className="cs-email-link"
+                                    >
+                                      happytohelp@abfrl.in
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For corporate orders
+                                    </p>
+                                    <a
+                                      href="mailto:corporate.sales@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      corporate.sales@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                  <div className="cs-email-group">
+                                    <p className="cs-email-label">
+                                      For franchisee
+                                    </p>
+                                    <a
+                                      href="mailto:franchiseenquiry@abfrl.adityabirla.com"
+                                      className="cs-email-link"
+                                    >
+                                      franchiseenquiry@abfrl.adityabirla.com
+                                    </a>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           )}
 
@@ -2883,50 +4038,37 @@ export default function ChatBot({ customerId }) {
                                   </div>
                                 </div>
 
-                                <div className="quick-actions-grid">
+                                <div className="pp-actions-grid">
                                   <button
-                                    className="quick-action-btn return-btn refund-btn"
+                                    className="pp-action-card pp-return-card"
                                     onClick={() => {
                                       handleRefundQuickAction();
                                     }}
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      💸
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Refund
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">💸</span>
+                                    </div>
+                                    <div className="pp-action-name">Return</div>
                                   </button>
                                   <button
-                                    className="quick-action-btn support-btn"
+                                    className="pp-action-card pp-support-card"
                                     onClick={() => {
-                                      setInputValue("customer support");
-                                      setTimeout(() => sendMessage(), 0);
+                                      handleCustomerSupport();
                                     }}
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      💬
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Customer support
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">💬</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Customer Support
+                                    </div>
                                   </button>
                                   <button
-                                    className="quick-action-btn rate-btn feedback-btn"
+                                    className="pp-action-card pp-feedback-card"
                                     onClick={() => {
                                       setInputValue("feedback");
                                       setTimeout(() => sendMessage(), 0);
@@ -2934,17 +4076,27 @@ export default function ChatBot({ customerId }) {
                                     disabled={isLoading || isRefundLoading}
                                     type="button"
                                   >
-                                    <span
-                                      className="action-icon"
-                                      aria-hidden="true"
-                                    >
-                                      ⭐
-                                    </span>
-                                    <span className="action-text">
-                                      <span className="action-title">
-                                        Feedback
-                                      </span>
-                                    </span>
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">⭐</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Feedback
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="pp-action-card pp-locate-card"
+                                    onClick={() => {
+                                      handleLocateUs();
+                                    }}
+                                    disabled={isLoading || isRefundLoading}
+                                    type="button"
+                                  >
+                                    <div className="pp-icon-wrapper">
+                                      <span className="pp-emoji">📍</span>
+                                    </div>
+                                    <div className="pp-action-name">
+                                      Locate Us on Map
+                                    </div>
                                   </button>
                                 </div>
                               </div>
@@ -3091,6 +4243,17 @@ export default function ChatBot({ customerId }) {
                                       {
                                         structuredData.storePickupConfirmation
                                           .order_id
+                                      }
+                                    </span>
+                                  </div>
+                                  <div className="pickup-detail-item">
+                                    <span className="detail-label">
+                                      Store ID
+                                    </span>
+                                    <span className="detail-value">
+                                      {
+                                        structuredData.storePickupConfirmation
+                                          .store_id
                                       }
                                     </span>
                                   </div>
@@ -3348,7 +4511,11 @@ export default function ChatBot({ customerId }) {
                             !structuredData.storePickupConfirmation &&
                             !structuredData.loyaltyRewards &&
                             !structuredData.postPurchaseSupport && (
-                              <div className="message-text">{displayText}</div>
+                              <div
+                                className={`message-text${message.isUpsellHeader ? " upsell-header-text" : ""}`}
+                              >
+                                {displayText}
+                              </div>
                             )}
 
                           {/* Render Purchase Methods */}
@@ -3406,74 +4573,80 @@ export default function ChatBot({ customerId }) {
                           )}
 
                           {/* Render Payment Methods */}
-                          {message.type === "paymentMethods" && !isLatestPaymentMethods && (
-                            <div className="payment-methods-container payment-methods-expired">
-                              <div className="payment-methods-header">
-                                <span className="payment-icon">💳</span>
-                                <h4>Payment method selection expired</h4>
+                          {message.type === "paymentMethods" &&
+                            !isLatestPaymentMethods && (
+                              <div className="payment-methods-container payment-methods-expired">
+                                <div className="payment-methods-header">
+                                  <span className="payment-icon">💳</span>
+                                  <h4>Payment method selection expired</h4>
+                                </div>
                               </div>
-                            </div>
-                          )}
-                          {message.type === "paymentMethods" && isLatestPaymentMethods && (
-                            <div className="payment-methods-container">
-                              <div className="payment-methods-header">
-                                <span className="payment-icon">💳</span>
-                                <h4>Choose Payment Method</h4>
+                            )}
+                          {message.type === "paymentMethods" &&
+                            isLatestPaymentMethods && (
+                              <div className="payment-methods-container">
+                                <div className="payment-methods-header">
+                                  <span className="payment-icon">💳</span>
+                                  <h4>Choose Payment Method</h4>
+                                </div>
+                                <div className="payment-methods-grid">
+                                  <button
+                                    className="payment-method-card upi-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("upi")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">+</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      UPI
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card credit-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("credit card")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💳</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Credit Card
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card debit-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick("debit card")
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💳</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Debit Card
+                                    </div>
+                                  </button>
+                                  <button
+                                    className="payment-method-card cod-card"
+                                    onClick={() =>
+                                      handlePaymentMethodClick(
+                                        "cash on delivery",
+                                      )
+                                    }
+                                  >
+                                    <div className="payment-icon-wrapper">
+                                      <span className="payment-emoji">💵</span>
+                                    </div>
+                                    <div className="payment-method-name">
+                                      Cash on Delivery
+                                    </div>
+                                  </button>
+                                </div>
                               </div>
-                              <div className="payment-methods-grid">
-                                <button
-                                  className="payment-method-card upi-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("upi")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">+</span>
-                                  </div>
-                                  <div className="payment-method-name">UPI</div>
-                                </button>
-                                <button
-                                  className="payment-method-card credit-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("credit card")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💳</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Credit Card
-                                  </div>
-                                </button>
-                                <button
-                                  className="payment-method-card debit-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("debit card")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💳</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Debit Card
-                                  </div>
-                                </button>
-                                <button
-                                  className="payment-method-card cod-card"
-                                  onClick={() =>
-                                    handlePaymentMethodClick("cash on delivery")
-                                  }
-                                >
-                                  <div className="payment-icon-wrapper">
-                                    <span className="payment-emoji">💵</span>
-                                  </div>
-                                  <div className="payment-method-name">
-                                    Cash on Delivery
-                                  </div>
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                            )}
 
                           {/* Payment Detail Forms */}
                           {message.type === "paymentMethods" &&
@@ -4126,41 +5299,44 @@ export default function ChatBot({ customerId }) {
                               <div className="products-section">
                                 <div className="products-header">
                                   <h4 className="products-title">
-                                    🛍️ Recommended Products
+                                    {message.isWishlist
+                                      ? "❤️ Your Wishlist"
+                                      : "🛍️ Recommended Products"}
                                   </h4>
                                   {(() => {
-                                    const selectedCount = message.productCards
-                                      .slice(0, 4)
-                                      .filter(
-                                        (p) =>
-                                          productQuantities[p.product_id] &&
-                                          productQuantities[p.product_id] > 0,
-                                      ).length;
-                                    const totalQuantity = message.productCards
-                                      .slice(0, 4)
-                                      .reduce(
-                                        (sum, p) =>
-                                          sum +
-                                          (productQuantities[p.product_id] ||
-                                            0),
-                                        0,
-                                      );
+                                    const selectedCount = (
+                                      message.isWishlist
+                                        ? message.productCards
+                                        : message.productCards.slice(0, 4)
+                                    ).filter(
+                                      (p) =>
+                                        productQuantities[p.product_id] &&
+                                        productQuantities[p.product_id] > 0,
+                                    ).length;
+                                    const totalQuantity = (
+                                      message.isWishlist
+                                        ? message.productCards
+                                        : message.productCards.slice(0, 4)
+                                    ).reduce(
+                                      (sum, p) =>
+                                        sum +
+                                        (productQuantities[p.product_id] || 0),
+                                      0,
+                                    );
                                     return selectedCount > 0 ? (
                                       <button
                                         className="bulk-add-to-cart-btn"
                                         onClick={async () => {
-                                          const productsToAdd =
-                                            message.productCards
-                                              .slice(0, 4)
-                                              .filter(
-                                                (p) =>
-                                                  productQuantities[
-                                                    p.product_id
-                                                  ] &&
-                                                  productQuantities[
-                                                    p.product_id
-                                                  ] > 0,
-                                              );
+                                          const productsToAdd = (
+                                            message.isWishlist
+                                              ? message.productCards
+                                              : message.productCards.slice(0, 4)
+                                          ).filter(
+                                            (p) =>
+                                              productQuantities[p.product_id] &&
+                                              productQuantities[p.product_id] >
+                                                0,
+                                          );
 
                                           if (productsToAdd.length === 0)
                                             return;
@@ -4186,26 +5362,34 @@ export default function ChatBot({ customerId }) {
                                             userMessage,
                                           ]);
 
-                                          // Add products sequentially to avoid race conditions
+                                          // Add products sequentially via direct REST API
                                           let successCount = 0;
+                                          const failedProducts = [];
                                           for (const product of productsToAdd) {
                                             const success =
                                               await handleAddToCart(
                                                 product,
                                                 true,
                                               );
-                                            if (success) successCount++;
-                                            // Small delay between additions
-                                            await new Promise((resolve) =>
-                                              setTimeout(resolve, 500),
-                                            );
+                                            if (success) {
+                                              successCount++;
+                                            } else {
+                                              failedProducts.push(
+                                                product.product_name,
+                                              );
+                                            }
                                           }
 
                                           // Show single summary message
                                           if (successCount > 0) {
+                                            let summaryText =
+                                              successCount ===
+                                              productsToAdd.length
+                                                ? `All ${successCount} product(s) have been added to cart successfully. You can now proceed to pay.`
+                                                : `${successCount} of ${productsToAdd.length} product(s) added to cart. Failed: ${failedProducts.join(", ")}. You can try adding the failed items again.`;
                                             const aiMessage = {
                                               type: "ai",
-                                              text: `Products have been added to cart successfully. You can now proceed to pay.`,
+                                              text: summaryText,
                                               timestamp: new Date(),
                                             };
                                             setMessages((prev) => [
@@ -4246,158 +5430,263 @@ export default function ChatBot({ customerId }) {
                                   })()}
                                 </div>
                                 <div className="product-cards-container">
-                                  {message.productCards
-                                    .slice(0, 4)
-                                    .map((product) => {
-                                      const quantity =
-                                        productQuantities[product.product_id] ||
-                                        0;
-                                      const isSelected = quantity > 0;
-                                      return (
-                                        <div
-                                          key={product.product_id}
-                                          className={`product-card ${
-                                            isSelected ? "selected" : ""
-                                          }`}
-                                        >
-                                          <div className="product-image-wrapper">
-                                            <img
-                                              src={
-                                                product.image_reference ||
-                                                "/images/placeholder.png"
-                                              }
-                                              alt={product.product_name}
-                                              className="product-image"
-                                              onError={(e) => {
-                                                e.target.src =
-                                                  "/images/placeholder.png";
-                                              }}
-                                            />
-                                            {product.quantity > 0 &&
-                                              product.quantity < 10 && (
-                                                <span className="product-badge trending">
-                                                  Low Stock
-                                                </span>
-                                              )}
-                                            {isSelected && (
-                                              <div className="selected-overlay">
-                                                <span className="selected-badge">
-                                                  ✓ Selected
-                                                </span>
-                                              </div>
-                                            )}
-                                          </div>
-                                          <div className="product-info">
-                                            <h4 className="product-name product-name-row">
-                                              <span className="product-name-text">
-                                                {product.product_name}
+                                  {(message.isWishlist
+                                    ? message.productCards
+                                    : message.productCards.slice(0, 4)
+                                  ).map((product) => {
+                                    const quantity =
+                                      productQuantities[product.product_id] ||
+                                      0;
+                                    const isSelected = quantity > 0;
+                                    return (
+                                      <div
+                                        key={product.product_id}
+                                        className={`product-card ${
+                                          isSelected ? "selected" : ""
+                                        }`}
+                                      >
+                                        <div className="product-image-wrapper">
+                                          <img
+                                            src={
+                                              product.image_reference ||
+                                              "/images/placeholder.png"
+                                            }
+                                            alt={product.product_name}
+                                            className="product-image zoomable-image"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setZoomedImage({
+                                                src:
+                                                  product.image_reference ||
+                                                  "/images/placeholder.png",
+                                                alt: product.product_name,
+                                              });
+                                            }}
+                                            onError={(e) => {
+                                              e.target.src =
+                                                "/images/placeholder.png";
+                                            }}
+                                          />
+                                          {product.quantity > 0 &&
+                                            product.quantity < 10 && (
+                                              <span className="product-badge trending">
+                                                Low Stock
                                               </span>
-                                              {typeof productReviews?.[
-                                                product.product_id
-                                              ] === "number" && (
-                                                <span className="product-rating">
-                                                  ⭐{" "}
-                                                  {Number(
-                                                    productReviews[
-                                                      product.product_id
-                                                    ],
-                                                  ).toFixed(2)}
-                                                </span>
-                                              )}
-                                            </h4>
-                                            <div className="product-pricing">
-                                              {product.discount &&
-                                              product.discount > 0 ? (
-                                                <>
-                                                  <span className="original-price">
-                                                    ₹
-                                                    {product.price.toLocaleString()}
-                                                  </span>
-                                                  <span className="discount-price">
-                                                    ₹
-                                                    {product.discount_price.toLocaleString()}
-                                                  </span>
-                                                  <span className="discount-badge">
-                                                    {product.discount}% off
-                                                  </span>
-                                                </>
-                                              ) : (
-                                                <p className="product-price">
+                                            )}
+                                          {isSelected && (
+                                            <div className="selected-overlay">
+                                              <span className="selected-badge">
+                                                ✓ Selected
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="product-info">
+                                          <h4 className="product-name product-name-row">
+                                            <span className="product-name-text">
+                                              {product.product_name}
+                                            </span>
+                                            {typeof productReviews?.[
+                                              product.product_id
+                                            ] === "number" && (
+                                              <span className="product-rating">
+                                                ⭐{" "}
+                                                {Number(
+                                                  productReviews[
+                                                    product.product_id
+                                                  ],
+                                                ).toFixed(2)}
+                                              </span>
+                                            )}
+                                          </h4>
+                                          <div className="product-pricing">
+                                            {product.discount &&
+                                            product.discount > 0 ? (
+                                              <>
+                                                <span className="original-price">
                                                   ₹
                                                   {product.price.toLocaleString()}
-                                                </p>
-                                              )}
-                                            </div>
-                                            <div className="qty-size-row">
-                                              <div className="quantity-controls">
-                                                <button
-                                                  className="qty-btn"
-                                                  onClick={() =>
-                                                    handleQuantityChange(
-                                                      product.product_id,
-                                                      -1,
-                                                    )
-                                                  }
-                                                  disabled={quantity === 0}
-                                                >
-                                                  −
-                                                </button>
-                                                <span className="qty-value">
-                                                  {quantity}
                                                 </span>
-                                                <button
-                                                  className="qty-btn"
-                                                  onClick={() =>
-                                                    handleQuantityChange(
-                                                      product.product_id,
-                                                      1,
-                                                    )
-                                                  }
-                                                >
-                                                  +
-                                                </button>
-                                              </div>
+                                                <span className="discount-price">
+                                                  ₹
+                                                  {product.discount_price.toLocaleString()}
+                                                </span>
+                                                <span className="discount-badge">
+                                                  {product.discount}% off
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <p className="product-price">
+                                                ₹
+                                                {product.price.toLocaleString()}
+                                              </p>
+                                            )}
+                                            <button
+                                              className={`wishlist-heart-btn${
+                                                wishlistedIds.has(
+                                                  product.product_id,
+                                                )
+                                                  ? " wishlisted"
+                                                  : ""
+                                              }`}
+                                              title={
+                                                wishlistedIds.has(
+                                                  product.product_id,
+                                                )
+                                                  ? "Remove from wishlist"
+                                                  : "Add to wishlist"
+                                              }
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleWishlistToggle(
+                                                  product.product_id,
+                                                );
+                                              }}
+                                            >
+                                              {wishlistedIds.has(
+                                                product.product_id,
+                                              )
+                                                ? "❤️"
+                                                : "🤍"}
+                                            </button>
+                                          </div>
+                                          <div className="qty-size-row">
+                                            <div className="quantity-controls">
+                                              <button
+                                                className="qty-btn"
+                                                onClick={() =>
+                                                  handleQuantityChange(
+                                                    product.product_id,
+                                                    -1,
+                                                  )
+                                                }
+                                                disabled={quantity === 0}
+                                              >
+                                                −
+                                              </button>
+                                              <span className="qty-value">
+                                                {quantity}
+                                              </span>
+                                              <button
+                                                className="qty-btn"
+                                                onClick={() =>
+                                                  handleQuantityChange(
+                                                    product.product_id,
+                                                    1,
+                                                  )
+                                                }
+                                              >
+                                                +
+                                              </button>
+                                            </div>
 
-                                              {!isAccessories(product) && (
-                                                <div className="size-control">
-                                                  <select
-                                                    className="size-select"
-                                                    value={
-                                                      productSizes[
-                                                        product.product_id
-                                                      ] ||
-                                                      getDefaultSize(product)
-                                                    }
-                                                    onChange={(e) =>
-                                                      setProductSizes(
-                                                        (prev) => ({
-                                                          ...prev,
-                                                          [product.product_id]:
-                                                            e.target.value,
-                                                        }),
-                                                      )
-                                                    }
-                                                    aria-label="Select size"
-                                                  >
-                                                    {getSizeOptions(
-                                                      product,
-                                                    ).map((opt) => (
+                                            {!isAccessories(product) && (
+                                              <div className="size-control">
+                                                <select
+                                                  className="size-select"
+                                                  value={
+                                                    productSizes[
+                                                      product.product_id
+                                                    ] || getDefaultSize(product)
+                                                  }
+                                                  onChange={(e) =>
+                                                    setProductSizes((prev) => ({
+                                                      ...prev,
+                                                      [product.product_id]:
+                                                        e.target.value,
+                                                    }))
+                                                  }
+                                                  aria-label="Select size"
+                                                >
+                                                  {getSizeOptions(product).map(
+                                                    (opt) => (
                                                       <option
                                                         key={opt}
                                                         value={opt}
                                                       >
                                                         {opt}
                                                       </option>
-                                                    ))}
-                                                  </select>
-                                                </div>
-                                              )}
-                                            </div>
+                                                    ),
+                                                  )}
+                                                </select>
+                                              </div>
+                                            )}
                                           </div>
                                         </div>
-                                      );
-                                    })}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
+                              </div>
+                            )}
+
+                          {/* Pending cart reminder on chatbot open */}
+                          {message.type === "pendingCartReminder" &&
+                            message.cartItems &&
+                            message.cartItems.length > 0 && (
+                              <div className="pending-cart-reminder">
+                                <div className="pending-cart-reminder-header">
+                                  <span className="pending-cart-reminder-icon">
+                                    🛍️
+                                  </span>
+                                  <div className="pending-cart-reminder-text">
+                                    <h4>
+                                      Your handpicked favorites are waiting!
+                                    </h4>
+                                    <p>
+                                      You've got{" "}
+                                      <strong>
+                                        {message.total_items} amazing{" "}
+                                        {message.total_items === 1
+                                          ? "item"
+                                          : "items"}
+                                      </strong>{" "}
+                                      in your cart worth{" "}
+                                      <strong>
+                                        ₹
+                                        {Math.round(
+                                          message.total_amount,
+                                        ).toLocaleString()}
+                                      </strong>{" "}
+                                      — don't let them slip away!
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="pending-cart-reminder-items">
+                                  {message.cartItems.slice(0, 4).map((item) => (
+                                    <div
+                                      key={item.order_id || item.product_id}
+                                      className="pending-cart-mini-item"
+                                    >
+                                      <img
+                                        src={
+                                          item.image_reference ||
+                                          "/images/placeholder.png"
+                                        }
+                                        alt={item.product_name}
+                                        className="pending-cart-mini-img"
+                                        onError={(e) => {
+                                          e.target.src =
+                                            "/images/placeholder.png";
+                                        }}
+                                      />
+                                      <span className="pending-cart-mini-name">
+                                        {item.product_name}
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {message.cartItems.length > 4 && (
+                                    <div className="pending-cart-mini-more">
+                                      +{message.cartItems.length - 4} more
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  className="pending-cart-checkout-btn"
+                                  onClick={() => handleViewCart()}
+                                >
+                                  🛒 View Cart &amp; Checkout
+                                </button>
                               </div>
                             )}
 
@@ -4685,6 +5974,98 @@ export default function ChatBot({ customerId }) {
                                   <p className="proceed-prompt">
                                     Would you like to proceed to payment? 🛍️
                                   </p>
+                                  <div className="cart-go-payment-wrapper">
+                                    <button
+                                      className="cart-go-payment-btn"
+                                      disabled={isLoading}
+                                      onClick={async () => {
+                                        const proceedText = "proceed";
+                                        const userMsg = {
+                                          type: "user",
+                                          text: proceedText,
+                                          timestamp: new Date(),
+                                        };
+                                        setMessages((prev) => [
+                                          ...prev,
+                                          userMsg,
+                                        ]);
+                                        setInputValue("");
+                                        setIsLoading(true);
+                                        try {
+                                          const data =
+                                            await chatWithAgentViaWebSocket(
+                                              customerId,
+                                              proceedText,
+                                            );
+                                          if (
+                                            data.agent_calls &&
+                                            data.agent_calls.includes(
+                                              "choose_channel_agent",
+                                            )
+                                          ) {
+                                            setMessages((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "purchaseMethods",
+                                                text: data.response,
+                                                timestamp: new Date(),
+                                              },
+                                            ]);
+                                          } else if (
+                                            data.agent_calls &&
+                                            data.agent_calls.includes(
+                                              "payment_agent",
+                                            ) &&
+                                            data.agent_calls.length === 1
+                                          ) {
+                                            setMessages((prev) => {
+                                              const lastMessage =
+                                                prev[prev.length - 1];
+                                              if (
+                                                lastMessage?.type ===
+                                                "paymentMethods"
+                                              )
+                                                return prev;
+                                              return [
+                                                ...prev,
+                                                {
+                                                  type: "paymentMethods",
+                                                  text: data.response,
+                                                  timestamp: new Date(),
+                                                },
+                                              ];
+                                            });
+                                          } else if (data.response) {
+                                            setMessages((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "ai",
+                                                text: data.response,
+                                                timestamp: new Date(),
+                                              },
+                                            ]);
+                                          }
+                                        } catch (err) {
+                                          console.error(
+                                            "Error in Go For Payment:",
+                                            err,
+                                          );
+                                          setMessages((prev) => [
+                                            ...prev,
+                                            {
+                                              type: "ai",
+                                              text: "Sorry, I encountered an error. Please try again.",
+                                              timestamp: new Date(),
+                                            },
+                                          ]);
+                                        } finally {
+                                          setIsLoading(false);
+                                        }
+                                      }}
+                                    >
+                                      💳 Go For Payment
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -4816,7 +6197,14 @@ export default function ChatBot({ customerId }) {
                                     <img
                                       src={product.image_reference || "/images/placeholder.png"}
                                       alt={product.product_name}
-                                      className="product-image"
+                                      className="product-image zoomable-image"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setZoomedImage({
+                                          src: product.image_reference || "/images/placeholder.png",
+                                          alt: product.product_name,
+                                        });
+                                      }}
                                       onError={(e) => {
                                         e.target.src = "/images/placeholder.png";
                                       }}
