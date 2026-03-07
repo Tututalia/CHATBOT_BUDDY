@@ -1711,13 +1711,13 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         result += "[SYSTEM: CONVERSATION_COMPLETE - Offline store pickup. Transfer to in-store kiosk. END conversation.]"
         response_payload["response"] = result
 
-        # --- Send WhatsApp confirmation only for CUST038 ---
+        # --- Send WhatsApp confirmation only for CUST082 ---
         if customer_id == "CUST038":
             try:
                 from intelligent_whatsapp_graph import send_whatsapp_text
                 wa_phone = "+919339712883"
                 print(
-                    f"[Fulfillment] 📱 Sending WhatsApp pickup confirmation to {wa_phone} for CUST038...")
+                    f"[Fulfillment] 📱 Sending WhatsApp pickup confirmation to {wa_phone} for CUST082...")
                 customer = get_customer_by_id(customer_id)
                 customer_name = getattr(
                     customer, 'customer_name', 'Valued Customer') if customer else 'Valued Customer'
@@ -1759,7 +1759,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
 
                 send_whatsapp_text(wa_phone, wa_msg)
                 print(
-                    f"[Fulfillment] ✅ WhatsApp pickup confirmation sent to {wa_phone} for order {order_id} (CUST038)")
+                    f"[Fulfillment] ✅ WhatsApp pickup confirmation sent to {wa_phone} for order {order_id} (CUST082)")
             except Exception as wa_err:
                 print(
                     f"[Fulfillment] ❌ Failed to send WhatsApp pickup confirmation: {wa_err}")
@@ -1767,7 +1767,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
                 traceback.print_exc()
         else:
             print(
-                f"[Fulfillment] Skipping WhatsApp notification — customer_id is '{customer_id}', not CUST038")
+                f"[Fulfillment] Skipping WhatsApp notification — customer_id is '{customer_id}', not CUST082")
 
     return response_payload
 
