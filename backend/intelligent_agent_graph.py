@@ -1712,7 +1712,7 @@ def fulfillment_agent(purchase_type: str = "online", store_name: str = "", custo
         response_payload["response"] = result
 
         # --- Send WhatsApp confirmation only for CUST082 ---
-        if customer_id == "CUST038":
+        if customer_id == "CUST082":
             try:
                 from intelligent_whatsapp_graph import send_whatsapp_text
                 wa_phone = "+919339712883"
